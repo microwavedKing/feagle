@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Image OCR: with `[index].ocr_images = true`, `feagle` indexes `png`, `jpg`,
+  `jpeg`, `webp` and `tiff` files by running `tesseract` on them directly. Only
+  `tesseract` is needed (no renderer); scanned PDF pages still also need
+  `pdftoppm`. Recognized text is searchable like any other document, and image
+  chunks carry no line/page position.
+
 ## [0.1.1] - 2026-10-15
 
 Bug-fix release.
@@ -145,6 +155,16 @@ on Wayland.
 [0.1.0]: https://github.com/microwavedKing/feagle/releases/tag/v0.1.0
 
 ---
+
+## Unreleased (по-русски)
+
+### Добавлено
+
+- OCR картинок: при `[index].ocr_images = true` `feagle` индексирует `png`,
+  `jpg`, `jpeg`, `webp` и `tiff`, распознавая их напрямую через `tesseract`.
+  Достаточно одного `tesseract` (без рендера); страницам сканированных PDF
+  по-прежнему нужен ещё `pdftoppm`. Распознанный текст ищется как обычный
+  документ; у чанков картинок нет номера строки/страницы.
 
 ## 0.1.1 (по-русски)
 

@@ -124,7 +124,8 @@ def chunk_extracted(
     for start, end in _spans(
         text, target=target, overlap=overlap, min_chars=min_chars, max_chars=max_chars
     ):
-        line = text.count("\n", 0, start) + 1
+        # An OCR'd image has no meaningful source line; only text files do.
+        line = text.count("\n", 0, start) + 1 if extracted.kind == "text" else None
         chunks.append(Chunk(seq=seq, page=None, line=line, body=text[start:end]))
         seq += 1
     return chunks

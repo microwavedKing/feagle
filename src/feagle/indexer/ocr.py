@@ -1,9 +1,12 @@
-"""OCR fallback for scanned PDF pages.
+"""OCR support for scanned PDF pages and images.
 
 Scanned PDFs have no text layer, so ``pdftotext`` returns almost nothing. For
 such pages we render the page to a PNG with ``pdftoppm`` (poppler, already a
-dependency for PDF support) and run ``tesseract`` on it. Both are optional
-system dependencies: without them the pages simply stay empty.
+dependency for PDF support) and run ``tesseract`` on it. Image files
+(``png/jpg/jpeg/webp/tiff``) are fed to ``tesseract`` directly — no rendering is
+needed, so only ``tesseract`` is required for them.
+
+Both are optional system dependencies: without them the files simply stay empty.
 
 The Russian language is available through the ``tesseract-data-rus`` package;
 OCR languages default to ``rus+eng``.
@@ -26,9 +29,12 @@ OCR_TIMEOUT = 120.0
 DEFAULT_LANGS = "rus+eng"
 DEFAULT_DPI = 300
 
+#: Image extensions recognized directly (no rendering, tesseract only).
+IMAGE_SUFFIXES: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif")
+
 
 class OcrError(Exception):
-    """A page could not be rendered or recognized."""
+    """A page or image could not be rendered or recognized."""
 
 
 def tesseract_available() -> bool:
@@ -39,8 +45,28 @@ def pdftoppm_available() -> bool:
     return shutil.which("pdftoppm") is not None
 
 
+def image_ocr_available() -> bool:
+    """Whether images can be OCR'd: only ``tesseract`` is needed (no renderer)."""
+    return tesseract_available()
+
+
 def ocr_available() -> bool:
+    """Whether *PDF page* OCR can run: it needs both a renderer and ``tesseract``."""
     return tesseract_available() and pdftoppm_available()
+
+
+def _tesseract_command(binary: str, image: Path, langs: str) -> list[str]:
+    """The ``tesseract`` argv used for both PDF pages and image files.
+
+    ``--oem 1`` forces the LSTM engine and ``preserve_interword_spaces`` keeps
+    the spacing of the recognized text, which reads better in snippets.
+    """
+    return [
+        binary, str(image), "stdout",
+        "-l", langs,
+        "--oem", "1",
+        "-c", "preserve_interword_spaces=1",
+    ]
 
 
 def tesseract_languages(*, timeout: float = 10.0) -> set[str]:
@@ -99,7 +125,7 @@ def ocr_pdf_page(
 
         try:
             proc = subprocess.run(
-                [ocr_bin, str(image), "stdout", "-l", langs],
+                _tesseract_command(ocr_bin, image, langs),
                 capture_output=True,
                 timeout=timeout,
                 check=False,
@@ -109,6 +135,34 @@ def ocr_pdf_page(
         if proc.returncode != 0:
             detail = proc.stderr.decode("utf-8", errors="replace").strip()
             raise OcrError(f"tesseract exited {proc.returncode}: {detail[:200]}")
+
+    return proc.stdout.decode("utf-8", errors="replace")
+
+
+def ocr_image(
+    image: Path,
+    *,
+    langs: str = DEFAULT_LANGS,
+    timeout: float = OCR_TIMEOUT,
+    tesseract: str | None = None,
+) -> str:
+    """Recognize the text of an image file directly. Raises :class:`OcrError`."""
+    ocr_bin = tesseract or shutil.which("tesseract")
+    if ocr_bin is None:
+        raise OcrError("OCR requires tesseract")
+
+    try:
+        proc = subprocess.run(
+            _tesseract_command(ocr_bin, image, langs),
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise OcrError(f"tesseract failed for {image}: {exc}") from exc
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise OcrError(f"tesseract exited {proc.returncode}: {detail[:200]}")
 
     return proc.stdout.decode("utf-8", errors="replace")
 

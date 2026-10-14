@@ -63,6 +63,7 @@ def test_custom_opener_extensions_do_not_warn(tmp_path, caplog):
         ("[embeddings]\nmrl_dim = 300\n", "embeddings.mrl_dim"),
         ("[launcher]\nprogram = 'dmenu'\n", "launcher.program"),
         ("[index]\nmax_file_size_mb = -1\n", "index.max_file_size_mb"),
+        ("[index]\nocr_images = 'yes'\n", "ocr_images"),
     ],
 )
 def test_invalid_values_raise(tmp_path, snippet, expected_key):

@@ -130,3 +130,53 @@ def test_doctor_cli_human(env, capsys):
     out = capsys.readouterr().out
     assert "python:" in out
     assert rc in (0, 1)
+
+
+def _patch_ocr(monkeypatch, *, tesseract=True, pdftoppm=True, langs=("rus", "eng")):
+    from feagle.indexer import ocr
+
+    monkeypatch.setattr(ocr, "tesseract_available", lambda: tesseract)
+    monkeypatch.setattr(ocr, "pdftoppm_available", lambda: pdftoppm)
+    monkeypatch.setattr(ocr, "tesseract_languages", lambda: set(langs))
+
+
+def test_check_ocr_disabled_by_default(monkeypatch):
+    _patch_ocr(monkeypatch)
+    check = doctor.check_ocr(config.default_config())
+    assert check.status == "ok"
+    assert "disabled in config" in check.message
+
+
+def test_check_ocr_images_work_without_pdftoppm(monkeypatch):
+    _patch_ocr(monkeypatch, pdftoppm=False)
+    cfg = config.default_config()
+    cfg["index"]["ocr_images"] = True
+    check = doctor.check_ocr(cfg)
+    assert check.status == "ok"  # images need only tesseract
+
+
+def test_check_ocr_pdf_enabled_without_pdftoppm_warns(monkeypatch):
+    _patch_ocr(monkeypatch, pdftoppm=False)
+    cfg = config.default_config()
+    cfg["index"]["ocr"] = True
+    check = doctor.check_ocr(cfg)
+    assert check.status == "warn"
+    assert "pdftoppm" in check.message
+
+
+def test_check_ocr_missing_tesseract_warns_when_enabled(monkeypatch):
+    _patch_ocr(monkeypatch, tesseract=False)
+    cfg = config.default_config()
+    cfg["index"]["ocr_images"] = True
+    check = doctor.check_ocr(cfg)
+    assert check.status == "warn"
+    assert "tesseract" in check.message
+
+
+def test_check_ocr_missing_languages(monkeypatch):
+    _patch_ocr(monkeypatch, langs=("eng",))
+    cfg = config.default_config()
+    cfg["index"]["ocr_images"] = True
+    check = doctor.check_ocr(cfg)
+    assert check.status == "warn"
+    assert "missing languages" in check.message

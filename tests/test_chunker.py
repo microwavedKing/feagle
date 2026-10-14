@@ -72,3 +72,10 @@ def test_overlap_never_crosses_pdf_page():
 def test_whitespace_only_text():
     chunks = chunk_extracted(Extracted(pages=("   \n\n  ",), kind="text"))
     assert len(chunks) == 1
+
+
+def test_image_chunks_have_no_line_or_page():
+    text = "recognized text " * 200
+    chunks = chunk_extracted(Extracted(pages=(text,), kind="image"))
+    assert chunks
+    assert all(c.line is None and c.page is None for c in chunks)

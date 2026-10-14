@@ -271,17 +271,17 @@ def check_pdftotext() -> Check:
 def check_ocr(cfg: dict[str, Any]) -> Check:
     from .indexer import ocr
 
-    enabled = bool(cfg["index"]["ocr"])
-    if not ocr.ocr_available():
-        missing = [
-            name for name, present in (
-                ("tesseract", ocr.tesseract_available()),
-                ("pdftoppm", ocr.pdftoppm_available()),
-            ) if not present
-        ]
+    pdf_enabled = bool(cfg["index"]["ocr"])
+    images_enabled = bool(cfg["index"]["ocr_images"])
+    enabled = pdf_enabled or images_enabled
+    tesseract = ocr.tesseract_available()
+    pdftoppm = ocr.pdftoppm_available()
+
+    if not tesseract:
+        missing = "tesseract" + ("" if pdftoppm else ", pdftoppm")
         status = "warn" if enabled else "info"
         return Check(
-            "ocr", status, "not available (missing: " + ", ".join(missing) + ")",
+            "ocr", status, f"not available (missing: {missing})",
             "sudo pacman -S tesseract tesseract-data-rus tesseract-data-eng",
         )
 
@@ -293,6 +293,12 @@ def check_ocr(cfg: dict[str, Any]) -> Check:
         return Check(
             "ocr", "warn", f"{detail}; missing languages: {', '.join(missing_langs)}",
             "install tesseract-data-" + "/tesseract-data-".join(missing_langs),
+        )
+    if pdf_enabled and not pdftoppm:
+        # Images work with tesseract alone; scanned PDF pages also need poppler.
+        return Check(
+            "ocr", "warn", f"{detail}; pdftoppm missing (PDF pages are skipped)",
+            "sudo pacman -S poppler",
         )
     return Check("ocr", "ok", f"{detail}; languages: {', '.join(wanted)}")
 
