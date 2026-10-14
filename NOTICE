@@ -1,0 +1,25 @@
+feagle
+======
+
+Copyright (c) 2026 microwavedKing and contributors.
+
+This product includes software developed as part of the feagle project,
+licensed under the MIT License (see LICENSE).
+
+Embedding model weights
+-----------------------
+
+feagle can use the EmbeddingGemma 2 GGUF embedding model, developed by Google
+DeepMind and distributed under the Apache License 2.0. Those model weights are
+NOT part of this repository and are NOT covered by the MIT License of the
+feagle source code. They are downloaded separately, only on explicit user
+request (for example, during `feagle setup`).
+
+Third-party components
+----------------------
+
+- SQLite (public domain), including the FTS5 extension (blessing).
+- sqlite-vec (MIT OR Apache-2.0), loaded as a SQLite extension.
+- llama.cpp / llama-server (MIT), used as a separate process when available.
+- poppler-utils / pdftotext (GPL-2.0-or-later), invoked as a separate process
+  when PDF support is enabled.
