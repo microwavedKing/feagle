@@ -18,6 +18,7 @@ from .log import get_logger
 log = get_logger("config")
 
 SEARCH_MODES = ("auto", "hybrid", "fts")
+STEMMING_MODES = ("auto", "none")
 LAUNCHERS = ("auto", "fuzzel", "wofi", "rofi", "tofi", "walker", "stdout")
 MRL_DIMS = (128, 256, 512, 768)
 
@@ -56,6 +57,7 @@ DEFAULTS: dict[str, Any] = {
         "mode": "auto",
         "candidates": 50,
         "rrf_k": 60,
+        "stemming": "auto",
     },
     "launcher": {
         "program": "auto",
@@ -172,6 +174,9 @@ def validate(cfg: dict[str, Any], source: Path | None = None) -> None:
     _check(search["candidates"] > 0, "search.candidates", "must be > 0", source)
     _check_type(search, "rrf_k", (int,), source)
     _check(search["rrf_k"] > 0, "search.rrf_k", "must be > 0", source)
+    _check_type(search, "stemming", (str,), source)
+    _check(search["stemming"] in STEMMING_MODES, "search.stemming",
+           f"must be one of {STEMMING_MODES}", source)
 
     launcher = cfg["launcher"]
     _check_type(launcher, "program", (str,), source)
@@ -258,6 +263,8 @@ limit = 20
 mode = "auto"
 candidates = 50
 rrf_k = 60
+# Russian stemming for the full-text index: auto | none
+stemming = "auto"
 
 [launcher]
 # auto | fuzzel | wofi | rofi | tofi | walker | stdout

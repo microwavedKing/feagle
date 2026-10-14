@@ -101,7 +101,7 @@ def test_status_json(env, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["files"]["total"] == 1
     assert payload["chunks"] == 1
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["vectors"] == 0
 
 

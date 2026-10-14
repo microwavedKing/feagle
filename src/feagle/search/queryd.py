@@ -21,7 +21,7 @@ from typing import Any
 
 from .. import __version__, db, paths
 from ..log import get_logger
-from ..search import fts, hybrid
+from ..search import hybrid
 from ..search.vec import vec_count
 
 log = get_logger("search.queryd")
@@ -57,6 +57,7 @@ class QueryEngine:
         search_cfg = self.cfg["search"]
         limit = limit or search_cfg["limit"]
         mode = mode or search_cfg["mode"]
+        stem = search_cfg["stemming"] != "none"
         started = time.perf_counter()
 
         conn = self._connect()
@@ -75,10 +76,14 @@ class QueryEngine:
                     limit=limit,
                     candidates=search_cfg["candidates"],
                     rrf_k=search_cfg["rrf_k"],
+                    stem=stem,
                 )
                 used = "hybrid"
             else:
-                hits = fts.search_fts(conn, query, limit=limit)
+                hits = hybrid.search_text(
+                    conn, query, limit=limit,
+                    candidates=search_cfg["candidates"], rrf_k=search_cfg["rrf_k"], stem=stem,
+                )
                 used = "fts"
         finally:
             conn.close()

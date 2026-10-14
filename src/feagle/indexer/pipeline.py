@@ -124,6 +124,8 @@ def _upsert_file(
 
 
 def _write_chunks(conn: sqlite3.Connection, file_id: int, chunks: list[Any]) -> list[int]:
+    from ..stemming import stem_text
+
     ids: list[int] = []
     for chunk in chunks:
         cur = conn.execute(
@@ -132,7 +134,8 @@ def _write_chunks(conn: sqlite3.Connection, file_id: int, chunks: list[Any]) -> 
         )
         chunk_id = int(cur.lastrowid or 0)
         conn.execute(
-            "INSERT INTO chunks_fts(body, chunk_id) VALUES(?, ?)", (chunk.body, chunk_id)
+            "INSERT INTO chunks_fts(body, stem, chunk_id) VALUES(?,?,?)",
+            (chunk.body, stem_text(chunk.body), chunk_id),
         )
         ids.append(chunk_id)
     return ids

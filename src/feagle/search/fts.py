@@ -1,9 +1,14 @@
 """Full-text search over the FTS5 index (BM25).
 
-User queries are sanitized: every term is wrapped in double quotes so that FTS5
+The index has two text columns: ``body`` (the exact chunk text) and ``stem``
+(Russian stems; see :mod:`feagle.stemming`). ``search_fts`` matches the exact
+column; ``search_fts_stemmed`` matches the stemmed one so that different word
+forms find each other. Callers combine both rankings with RRF (see
+:mod:`feagle.search.hybrid`).
+
+User queries are sanitized: every term is wrapped in double quotes so FTS5
 operators the user may type (``OR``, ``NEAR``, ``-``, ``*``, ``"``) cannot break
-the query or change its meaning. A first pass ANDs the terms; if that yields
-nothing, a second pass ORs them.
+the query or change its meaning.
 """
 
 from __future__ import annotations
@@ -44,8 +49,8 @@ def fts_terms(query: str) -> list[str]:
     return [term for token in query.split() if (term := token.replace('"', "").strip())]
 
 
-def _match_expression(terms: list[str], operator: str) -> str:
-    quoted = [f'"{term}"' for term in terms]
+def _match_expression(terms: list[str], operator: str, column: str) -> str:
+    quoted = [f'{column}:"{term}"' for term in terms]
     return f" {operator} ".join(quoted)
 
 
@@ -68,10 +73,19 @@ def _snippet(body: str, limit: int = SNIPPET_CHARS) -> str:
     return flat[:limit]
 
 
+def _query(
+    conn: sqlite3.Connection, terms: list[str], *, column: str, limit: int, fallback_or: bool
+) -> list[sqlite3.Row]:
+    rows = conn.execute(_SELECT, (_match_expression(terms, "AND", column), limit)).fetchall()
+    if not rows and fallback_or and len(terms) > 1:
+        rows = conn.execute(_SELECT, (_match_expression(terms, "OR", column), limit)).fetchall()
+    return rows
+
+
 def search_fts(
     conn: sqlite3.Connection, query: str, *, limit: int = 20, fallback_or: bool = True
 ) -> list[SearchHit]:
-    """Return BM25-ranked hits for ``query``.
+    """Exact full-text search over the ``body`` column.
 
     With ``fallback_or`` the search retries an OR of the terms when the AND finds
     nothing (good for a pure full-text index). Hybrid search passes
@@ -81,8 +95,18 @@ def search_fts(
     terms = fts_terms(query)
     if not terms or limit <= 0:
         return []
+    return _rows_to_hits(_query(conn, terms, column="body", limit=limit, fallback_or=fallback_or))
 
-    rows = conn.execute(_SELECT, (_match_expression(terms, "AND"), limit)).fetchall()
-    if not rows and fallback_or and len(terms) > 1:
-        rows = conn.execute(_SELECT, (_match_expression(terms, "OR"), limit)).fetchall()
-    return _rows_to_hits(rows)
+
+def search_fts_stemmed(
+    conn: sqlite3.Connection, query: str, *, limit: int = 20, fallback_or: bool = True
+) -> list[SearchHit]:
+    """Stemmed search over the ``stem`` column (Russian morphology)."""
+    from ..stemming import available, stem_query_terms
+
+    if not available():
+        return []
+    terms = stem_query_terms(fts_terms(query))
+    if not terms or limit <= 0:
+        return []
+    return _rows_to_hits(_query(conn, terms, column="stem", limit=limit, fallback_or=fallback_or))

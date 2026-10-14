@@ -77,7 +77,7 @@ def test_insert_and_knn(conn):
 
 
 def test_schema_version_unchanged_by_vec(conn):
-    assert db.get_schema_version(conn) == db.SCHEMA_VERSION == 1
+    assert db.get_schema_version(conn) == db.SCHEMA_VERSION
 
 
 def test_missing_meta_table_returns_zero(tmp_path):

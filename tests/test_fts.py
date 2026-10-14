@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from feagle import db
-from feagle.search.fts import fts_terms, search_fts
+from feagle import db, stemming
+from feagle.search.fts import fts_terms, search_fts, search_fts_stemmed
 
 
 @pytest.fixture
@@ -28,7 +28,10 @@ def add_doc(conn, path, body, *, page=None, line=None, seq=0):
         (file_id, seq, page, line, body),
     )
     chunk_id = cur.lastrowid
-    conn.execute("INSERT INTO chunks_fts(body, chunk_id) VALUES(?, ?)", (body, chunk_id))
+    conn.execute(
+        "INSERT INTO chunks_fts(body, stem, chunk_id) VALUES(?,?,?)",
+        (body, stemming.stem_text(body), chunk_id),
+    )
     conn.commit()
 
 
@@ -94,3 +97,28 @@ def test_or_fallback_can_be_disabled(conn):
     add_doc(conn, "/tmp/a.txt", "alpha beta", seq=0)
     assert search_fts(conn, "alpha zzz")  # OR fallback finds "alpha"
     assert search_fts(conn, "alpha zzz", fallback_or=False) == []
+
+
+def test_stemmed_search_matches_other_word_forms(conn):
+    add_doc(conn, "/tmp/book.txt", "В книге описана новая история", line=1)
+
+    # exact search for a different form finds nothing ...
+    assert search_fts(conn, "книги") == []
+    # ... but the stemmed search does
+    hits = search_fts_stemmed(conn, "книги")
+    assert [h.path for h in hits] == ["/tmp/book.txt"]
+    assert hits[0].line == 1
+
+
+def test_stemmed_search_ignores_latin_queries(conn):
+    add_doc(conn, "/tmp/a.txt", "hello world", seq=0)
+    assert search_fts_stemmed(conn, "hello") == []
+    assert search_fts(conn, "hello")
+
+
+def test_body_and_stem_columns_do_not_crosstalk(conn):
+    add_doc(conn, "/tmp/russian.txt", "красивая книга", seq=0)
+    add_doc(conn, "/tmp/english.txt", "an english book", seq=0)
+    # the Russian word matches only the Russian document via the stem column
+    hits = search_fts_stemmed(conn, "книга")
+    assert [h.path for h in hits] == ["/tmp/russian.txt"]

@@ -21,9 +21,9 @@ log = get_logger("db")
 #: Current on-disk schema version. Bump together with a migration step.
 #: The ``chunks_vec`` table is managed separately (see ``ensure_vec_table``)
 #: because its dimension is fixed at CREATE time and depends on the model.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
-_SCHEMA_SQL = """
+_BASE_SQL = """
 CREATE TABLE IF NOT EXISTS meta(
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -51,12 +51,18 @@ CREATE TABLE IF NOT EXISTS chunks(
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS chunks_file_seq ON chunks(file_id, seq);
+"""
 
+#: Full-text index. ``body`` is the exact text; ``stem`` holds Russian stems so
+#: different word forms match (see ``feagle.stemming``). Schema v2 added ``stem``.
+_FTS_SQL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-  body, chunk_id UNINDEXED,
+  body, stem, chunk_id UNINDEXED,
   tokenize = 'unicode61 remove_diacritics 2'
 );
 """
+
+_SCHEMA_SQL = _BASE_SQL + _FTS_SQL
 
 
 class DimMismatchError(RuntimeError):
@@ -144,6 +150,22 @@ def init_schema(conn: sqlite3.Connection) -> None:
         set_meta(conn, "created_at", str(int(time.time())))
 
 
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    """Recreate the FTS index with the ``stem`` column and backfill it."""
+    from .stemming import stem_text
+
+    conn.execute("DROP TABLE IF EXISTS chunks_fts")
+    conn.execute(_FTS_SQL)
+    rows = conn.execute("SELECT id, body FROM chunks").fetchall()
+    for row in rows:
+        conn.execute(
+            "INSERT INTO chunks_fts(body, stem, chunk_id) VALUES(?,?,?)",
+            (row["body"], stem_text(row["body"]), row["id"]),
+        )
+    set_meta(conn, "schema_version", "2")
+    log.info("migrated schema v1 -> v2 (%d chunks restemmed)", len(rows))
+
+
 def migrate(conn: sqlite3.Connection) -> int:
     """Bring the database up to :data:`SCHEMA_VERSION` and return the version.
 
@@ -155,10 +177,13 @@ def migrate(conn: sqlite3.Connection) -> int:
             f"database schema v{version} is newer than supported v{SCHEMA_VERSION}; "
             "please upgrade feagle"
         )
-    if version < SCHEMA_VERSION:
-        # v0 -> v1: initial schema. Future steps are added here, one per version.
+    if version == 0:
         init_schema(conn)
         version = SCHEMA_VERSION
+    if version < 2:
+        # v1 -> v2: add the stemmed full-text column.
+        _migrate_v1_to_v2(conn)
+        version = 2
     conn.commit()
     return version
 
