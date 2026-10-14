@@ -43,6 +43,18 @@ def test_unknown_key_warns(tmp_path, caplog):
     assert any("unknown config key" in rec.message for rec in caplog.records)
 
 
+def test_custom_opener_extensions_do_not_warn(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[openers]\ndefault = 'xdg-open {path}'\ntxt = 'nvim +{line} {path}'\n",
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING, logger="feagle.config"):
+        cfg = config.load_config(path)
+    assert cfg["openers"]["txt"] == "nvim +{line} {path}"
+    assert not any("unknown config key" in rec.message for rec in caplog.records)
+
+
 @pytest.mark.parametrize(
     ("snippet", "expected_key"),
     [
