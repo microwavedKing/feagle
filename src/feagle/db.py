@@ -19,6 +19,8 @@ from .log import get_logger
 log = get_logger("db")
 
 #: Current on-disk schema version. Bump together with a migration step.
+#: The ``chunks_vec`` table is managed separately (see ``ensure_vec_table``)
+#: because its dimension is fixed at CREATE time and depends on the model.
 SCHEMA_VERSION = 1
 
 _SCHEMA_SQL = """
@@ -57,6 +59,29 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 """
 
 
+class DimMismatchError(RuntimeError):
+    """The stored vector dimension differs from the requested one."""
+
+
+def load_sqlite_vec(conn: sqlite3.Connection) -> bool:
+    """Load the sqlite-vec extension into ``conn``. Returns success."""
+    try:
+        import sqlite_vec
+    except ImportError:
+        log.warning("sqlite-vec is not installed; semantic search disabled")
+        return False
+    try:
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+    except (sqlite3.Error, AttributeError) as exc:
+        log.warning("cannot load sqlite-vec: %s", exc)
+        return False
+    finally:
+        with contextlib.suppress(sqlite3.Error):
+            conn.enable_load_extension(False)
+    return True
+
+
 def connect(path: Path | str | None = None, *, read_only: bool = False) -> sqlite3.Connection:
     """Open the database, applying sane pragmas.
 
@@ -85,6 +110,7 @@ def connect(path: Path | str | None = None, *, read_only: bool = False) -> sqlit
     else:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
+    load_sqlite_vec(conn)
     return conn
 
 
@@ -145,3 +171,58 @@ def open_database(
     if not read_only:
         migrate(conn)
     return conn
+
+
+# -- vector table (sqlite-vec / vec0) --------------------------------------
+
+
+def get_embedding_dim(conn: sqlite3.Connection) -> int:
+    """Return the stored vector dimension, or 0 when not configured yet."""
+    try:
+        value = get_meta(conn, "embedding_dim")
+    except sqlite3.OperationalError:
+        return 0
+    return int(value) if value else 0
+
+
+def has_vec_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
+    ).fetchone()
+    return row is not None
+
+
+def ensure_vec_table(
+    conn: sqlite3.Connection, dim: int, *, model_id: str | None = None
+) -> None:
+    """Create ``chunks_vec`` for ``dim`` dimensions, or check compatibility.
+
+    Raises :class:`DimMismatchError` when the database already holds vectors of
+    a different dimension. Requirement (sqlite-vec, RESEARCH §4.2): query and
+    document vectors must share the exact same dimension.
+    """
+    if dim <= 0:
+        raise ValueError(f"embedding dimension must be positive, got {dim}")
+
+    stored = get_embedding_dim(conn)
+    if stored and stored != dim:
+        raise DimMismatchError(
+            f"index holds {stored}-dimensional vectors but the model produces {dim}; "
+            "run 'feagle index --rebuild' to re-embed everything"
+        )
+
+    conn.execute(
+        f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0("
+        f"chunk_id INTEGER PRIMARY KEY, embedding float[{dim}])"
+    )
+    set_meta(conn, "embedding_dim", str(dim))
+    if model_id is not None:
+        set_meta(conn, "model_id", model_id)
+    conn.commit()
+
+
+def drop_vec_table(conn: sqlite3.Connection) -> None:
+    """Remove the vector table and forget the stored dimension."""
+    conn.execute("DROP TABLE IF EXISTS chunks_vec")
+    set_meta(conn, "embedding_dim", "0")
+    conn.commit()
