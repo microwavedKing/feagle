@@ -18,6 +18,7 @@ import hashlib
 import os
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -48,15 +49,19 @@ class IndexStats:
     pruned: int = 0
     chunks: int = 0
     vectors: int = 0
+    paused: str | None = None
     error_samples: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        return (
+        base = (
             f"scanned={self.scanned} reindexed={self.reindexed} "
             f"touched={self.touched} unchanged={self.unchanged} "
             f"unsupported={self.unsupported} errors={self.errors} "
             f"pruned={self.pruned} chunks={self.chunks} vectors={self.vectors}"
         )
+        if self.paused:
+            base += f" paused={self.paused!r}"
+        return base
 
 
 def hash_file(path: Path, *, chunk_size: int = _HASH_CHUNK) -> str:
@@ -328,8 +333,13 @@ def index_roots(
     full: bool = False,
     rebuild: bool = False,
     embedder: Embedder | None = None,
+    pause_check: Callable[[], str | None] | None = None,
 ) -> IndexStats:
-    """Run one indexing pass over the configured (or given) roots."""
+    """Run one indexing pass over the configured (or given) roots.
+
+    ``pause_check`` is consulted before every file; when it returns a reason the
+    run stops early and the reason is recorded in the stats.
+    """
     if rebuild:
         wipe(conn)
     if embedder is not None:
@@ -346,6 +356,12 @@ def index_roots(
     seen: set[str] = set()
 
     for candidate in scanner.iter_files(active):
+        if pause_check is not None:
+            reason = pause_check()
+            if reason:
+                stats.paused = reason
+                log.info("indexing paused: %s", reason)
+                break
         stats.scanned += 1
         seen.add(_canonical(candidate.path))
         outcome, written, inserted = index_file(
