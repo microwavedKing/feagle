@@ -30,3 +30,6 @@ bench/results/
 # Private working documents (kept locally, not published)
 /AGENTS.md
 /RESEARCH.md
+
+# Local test corpus (public-domain books downloaded for manual testing)
+/testdata/
