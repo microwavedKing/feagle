@@ -57,12 +57,14 @@ def test_check_model_size_mismatch_fails(env):
     from feagle import paths
     from feagle.embeddings import presets
 
+    cfg = config.default_config()
+    cfg["embeddings"]["model"] = "embeddinggemma-2-q8"  # pin it, independent of the default
     spec = presets.get_preset("embeddinggemma-2-q8")
     target = paths.models_dir() / spec.filename
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"tiny")
 
-    check = doctor.check_model(config.default_config())
+    check = doctor.check_model(cfg)
     assert check.status == "fail"
     assert "size" in check.message
 

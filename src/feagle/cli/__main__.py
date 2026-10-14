@@ -10,6 +10,7 @@ from .. import __version__, config
 from ..embeddings import presets
 from ..log import setup_logging
 from . import (
+    cmd_bench,
     cmd_doctor,
     cmd_index,
     cmd_indexerd,
@@ -117,6 +118,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--poll", action="store_true", help="force polling instead of inotify"
     )
     indexerd.set_defaults(func=cmd_indexerd.run)
+
+    bench_cmd = subparsers.add_parser(
+        "bench", help="run synthetic indexing and query benchmarks"
+    )
+    bench_cmd.add_argument("--files", type=int, default=60, help="documents to generate")
+    bench_cmd.add_argument("--seed", type=int, default=1, help="random seed")
+    bench_cmd.add_argument("--corpus", default=None, metavar="DIR", help="corpus directory")
+    bench_cmd.add_argument("--queries", type=int, default=0, help="max queries to time (0 = all)")
+    bench_cmd.add_argument("--repeats", type=int, default=3, help="timing repetitions")
+    bench_cmd.add_argument("--limit", type=int, default=10, help="results per query")
+    bench_cmd.add_argument("--no-embed", action="store_true", help="full-text only")
+    bench_cmd.add_argument("--keep-db", action="store_true", help="keep the throwaway database")
+    bench_cmd.add_argument("--json", action="store_true", help="print the raw result as JSON")
+    bench_cmd.add_argument("--out", default=None, metavar="FILE", help="write the result as JSON")
+    bench_cmd.set_defaults(func=cmd_bench.run)
 
     return parser
 

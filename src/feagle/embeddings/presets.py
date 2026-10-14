@@ -54,6 +54,25 @@ PRESETS: dict[str, ModelSpec] = {
         pooling=None,
         note="BF16 weights; safe on CPU (llama.cpp computes in f32).",
     ),
+    "embeddinggemma-2-q4": ModelSpec(
+        name="embeddinggemma-2-q4",
+        filename="embeddinggemma-2-UD-Q4_K_XL.gguf",
+        url=(
+            "https://huggingface.co/unsloth/embeddinggemma-2-GGUF/resolve/main/"
+            "embeddinggemma-2-UD-Q4_K_XL.gguf"
+        ),
+        sha256="ea905fd08e8061db77a0031cbb5096d459d7cfd2bdd0ad2ba66e483f16719493",
+        size=175_673_856,
+        dim=768,
+        context=8192,
+        repo="unsloth/embeddinggemma-2-GGUF",
+        pooling=None,
+        note=(
+            "4-bit dynamic quant from the unsloth mirror: about half the size and "
+            "measurably faster to index, with the same retrieval quality as q8 on "
+            "the benchmark corpus (see bench/results)."
+        ),
+    ),
 }
 
 #: Multimodal projector presets (only used in the optional media phase).

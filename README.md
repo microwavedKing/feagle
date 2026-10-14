@@ -23,7 +23,7 @@ telemetry.
   - `llama-server` (llama.cpp) built from a revision **newer than 2026-10-06**
     (EmbeddingGemma 2 support). `extra/llama-cpp` may be too old; the AUR
     `llama.cpp-git` package tracks master.
-  - the `embeddinggemma-2-q8` GGUF model (see below)
+  - the `embeddinggemma-2-q4` GGUF model, or `embeddinggemma-2-q8` (see below)
 - `poppler-utils` (`pdftotext`) for PDF indexing
 - Optional, for OCR of scanned PDFs: `tesseract` plus the language data you need
   (`tesseract-data-eng`, `tesseract-data-rus`, ...)
@@ -51,7 +51,7 @@ runs the first index:
 A non-interactive equivalent:
 
 ```sh
-.venv/bin/feagle setup --yes --root ~/Documents --model embeddinggemma-2-q8
+.venv/bin/feagle setup --yes --root ~/Documents --model embeddinggemma-2-q4
 ```
 
 ## Usage
@@ -97,11 +97,13 @@ Getting the model:
 2. Download the GGUF and place it in `$XDG_DATA_HOME/feagle/models/`:
 
    ```
-   embeddinggemma-2-Q8_0.gguf
-   sha256 2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135
+   embeddinggemma-2-UD-Q4_K_XL.gguf
+   sha256 ea905fd08e8061db77a0031cbb5096d459d7cfd2bdd0ad2ba66e483f16719493
    ```
 
-   or point `[embeddings].model` at an existing GGUF path.
+   or point `[embeddings].model` at an existing GGUF path. The default preset is
+   the light `embeddinggemma-2-q4`; `embeddinggemma-2-q8` (official ggml-org
+   repository, ~310 MB) is available too — see the benchmarks below.
 
 `feagle` starts the server on demand, reuses one that is already running (via
 `llama.port` in the runtime directory) and, when it owns it, stops it after
@@ -286,19 +288,69 @@ being filtered out, lower it for stricter results.
 
 ## Measured performance
 
-Measured on the target laptop (Intel i7-8565U, 4 cores / 8 threads, NVMe, no
-discrete GPU, CPU-only inference), 2026-10-14, with a tiny 20-document corpus:
+Target laptop: Intel i7-8565U (4 cores / 8 threads), 8 GB RAM, NVMe, no discrete
+GPU, CPU-only inference. Measured 2026-10-15 with `feagle bench` (60 synthetic
+documents, seed 1, 65 chunks) and `bench/quality_eval.py`; raw results are in
+`bench/results/`. Reproduce with:
+
+```sh
+feagle bench --files 60 --seed 1 --out bench/results/bench.json
+python bench/quality_eval.py --files 60 --seed 1
+```
+
+### Model: q4 is the default
+
+| | `embeddinggemma-2-q4` (default) | `embeddinggemma-2-q8` |
+|---|---|---|
+| File size | 169 MB | 310 MB |
+| Indexing | **2.30 chunks/s** | 1.81 chunks/s |
+| `llama-server` RSS | **458 MiB** | 523 MiB |
+| Cold start | 1.55 s | 1.59 s |
+| MRR@10 (hybrid) | 0.750 | 0.750 |
+| MRR@10 (English / Russian) | 0.667 / 0.833 | 0.667 / 0.833 |
+| Recall@20 (hybrid) | 0.750 | 0.750 |
+| p50 hybrid query | **52 ms** | 62 ms |
+
+The lighter quant is ~27 % faster to index and ~65 MiB smaller with **identical
+measured retrieval quality**, so it is the default; `q8` (official ggml-org
+repository) stays available via `[embeddings].model`. The same ranking held on a
+real-text check (4 books, 230 chunks, MRR 0.8 for both, q4 indexing 30 % faster).
+Full-text metrics are model-independent: MRR@10 0.375, Recall@20 0.500 — exact
+matching alone is weak on paraphrased queries, which is what the semantic side is
+for.
+
+### Latency, memory, size
 
 | Metric | Result |
 |---|---|
-| `feagle index` (cold start + 20 embeddings + stop) | 3.65 s |
-| Warm hybrid search, p50 (through `queryd`) | 56 ms (server 50–63 ms) |
-| Model cold start (process → healthy) | ~1.5 s |
-| Embedding dimension / model | 768 / `embeddinggemma-2-q8` (~310 MB) |
-| Database size | 3.2 MB for 20 chunks (fixed overhead dominates at this size) |
+| Hybrid query, p50 / p95 | 52 ms / 63 ms (embedding 50 ms, search 2 ms) |
+| Full-text query, p50 / p95 | 1.4 ms / 3.8 ms |
+| Indexing throughput | 2.3 chunks/s (~1.7 files/s) — compute-bound on CPU prompt processing |
+| `llama-server` RSS (loaded) | ~458 MiB, unloaded after 10 min idle |
+| `feagle` process during indexing | +6 MiB peak |
+| Cold start (spawn → healthy) | 1.6 s |
+| Database | ~5.6 KB/chunk once the vector page group is full; small indexes are dominated by a 3.1 MiB vec0 preallocation (see below) |
 
-These are smoke numbers, not benchmarks. A synthetic corpus and proper
-p50/p95/RAM measurements arrive in a later phase.
+Query latency is dominated by the query embedding (~50 ms); the search itself
+(KNN + FTS + RRF) is ~2 ms. The model is unloaded after `idle_timeout_min` so an
+idle machine uses no GPU/CPU and no model memory.
+
+### Database size caveat
+
+`sqlite-vec` allocates vectors in fixed "page groups" of 1024 rows (this version
+does not expose `chunk_size`), so a fresh `chunks_vec` reserves ~3.1 MiB
+(1024 × 768 × 4 bytes) regardless of how many rows exist. That is why a
+65-chunk benchmark reports ~50 KB/chunk; the steady-state figure is ~5.6 KB per
+chunk (3 KB vector + text and FTS).
+
+### Profiling and one measured optimization
+
+`cProfile` over indexing and search (with a stub embedder, so only our own code
+is measured) showed **stemming** dominating indexing: 5840 `snowballstemmer`
+calls for 130 chunks, 0.45 s of 0.56 s. Stemming results are now cached
+(`functools.lru_cache`), which cut our indexing CPU to 0.14 s for the same
+corpus (**3.9× faster**, `stem_text` 7.8×, only 285 real stemmer calls). Search
+(~1.8 ms) is dominated by SQLite itself, so nothing was changed there.
 
 ## Known limitations
 
