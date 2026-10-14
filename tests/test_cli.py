@@ -9,6 +9,7 @@ import pytest
 from feagle import config, db
 from feagle.cli import cmd_search
 from feagle.cli.__main__ import main
+from feagle.embeddings.client import ServerUnavailable
 from feagle.indexer import pipeline
 
 
@@ -368,3 +369,129 @@ def test_search_pick_with_apps_puts_applications_first(env, capsys, monkeypatch)
     monkeypatch.setattr("feagle.picker.apps.launch", lambda app, **kw: launched.append(app.id))
     assert main(["search", "semantic", "--pick", "--with-apps"]) == 0
     assert launched == ["fake.desktop"]
+
+
+def test_search_pick_opens_the_selected_chunk(env, capsys, monkeypatch):
+    """Several chunks of one file stay separately selectable."""
+    docs = make_docs(env)
+    write_config(env, '[launcher]\nprogram = "stdout"\n')
+    main(["index", "--root", str(docs), "--no-embed"])
+    capsys.readouterr()
+
+    import io
+    import sys
+
+    target = docs / "notes.txt"
+    fake = {
+        "ok": True,
+        "mode": "hybrid",
+        "took_ms": 1.0,
+        "results": [
+            {"rank": 1, "score": 1.0, "path": str(target), "page": None,
+             "line": 3, "snippet": "first", "chunk_id": 11},
+            {"rank": 2, "score": 0.9, "path": str(target), "page": None,
+             "line": 9, "snippet": "second", "chunk_id": 12},
+        ],
+    }
+    monkeypatch.setattr(cmd_search, "_request_from_daemon", lambda q, limit, mode: fake)
+    monkeypatch.setattr("feagle.picker.apps.discover_apps", lambda: [])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("2\n"))
+    opened = {}
+    monkeypatch.setattr(
+        "feagle.picker.open_result", lambda openers, path, **kw: opened.update(path=path, **kw)
+    )
+    assert main(["search", "semantic", "--pick"]) == 0
+    assert opened["path"] == target
+    assert opened["line"] == 9  # not the first chunk (line 3)
+
+
+def test_pick_query_uses_the_daemon(env, capsys, monkeypatch):
+    docs = make_docs(env)
+    write_config(env, '[launcher]\nprogram = "stdout"\n')
+    main(["index", "--root", str(docs), "--no-embed"])
+    capsys.readouterr()
+
+    import io
+    import sys
+
+    calls = []
+
+    def fake_daemon(query, limit, mode):
+        calls.append(query)
+        return {
+            "ok": True,
+            "mode": "hybrid",
+            "took_ms": 1.0,
+            "results": [
+                {"rank": 1, "score": 1.0, "path": str(docs / "notes.txt"), "page": None,
+                 "line": 3, "snippet": "semantic", "chunk_id": 1},
+            ],
+        }
+
+    monkeypatch.setattr(cmd_search, "_request_from_daemon", fake_daemon)
+    monkeypatch.setattr(
+        cmd_search, "search_in_process",
+        lambda *a, **k: pytest.fail("pick --query must use the daemon when it is up"),
+    )
+    monkeypatch.setattr("feagle.picker.apps.discover_apps", lambda: [])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("1\n"))
+    opened = {}
+    monkeypatch.setattr(
+        "feagle.picker.open_result", lambda openers, path, **kw: opened.update(path=path, **kw)
+    )
+    assert main(["pick", "--query", "semantic"]) == 0
+    assert calls == ["semantic"]
+    assert opened["path"].name == "notes.txt"
+
+
+def test_indexerd_wires_reconnect_reset_and_idle_hook(env, tmp_path, monkeypatch):
+    import argparse
+
+    from feagle.cli import cmd_indexerd
+
+    captured = {}
+
+    class FakeSupervisor:
+        def stop_if_idle(self):
+            captured["idle"] = True
+
+    class FakeService:
+        def __init__(self, cfg):
+            self.cfg = cfg
+            self.supervisor = FakeSupervisor()
+
+        def start(self):
+            raise ServerUnavailable("server down")
+
+        def ensure(self):
+            return "embedder"
+
+        def reset(self):
+            captured["reset"] = True
+
+        def close(self, **kwargs):
+            captured["closed"] = True
+
+    class FakeDaemon:
+        def __init__(self, cfg, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def run_once(self):
+            return pipeline.IndexStats()
+
+        def run(self):
+            captured["ran"] = True
+
+    monkeypatch.setattr(cmd_indexerd, "EmbeddingService", FakeService)
+    monkeypatch.setattr(cmd_indexerd, "IndexerDaemon", FakeDaemon)
+
+    args = argparse.Namespace(root=[str(tmp_path / "missing")], poll=False, once=True)
+    assert cmd_indexerd.run(args, config.default_config()) == 0
+
+    kwargs = captured["kwargs"]
+    assert kwargs["embedder_provider"]() == "embedder"
+    assert kwargs["on_embedder_failure"] is not None
+    assert kwargs["idle_hook"] is not None
+    kwargs["idle_hook"]()
+    assert captured["idle"] is True
+    assert captured["reset"] is True  # startup failure drops the broken embedder

@@ -48,10 +48,39 @@ def test_run_pick_opens_selected_file_at_position(cfg, tmp_path, monkeypatch):
     )
 
     hits = {str(target): {"path": str(target), "line": 12, "page": None}}
-    rc = picker.run_pick(cfg, [(str(target), "note.txt")], {}, hits_by_path=hits)
+    rc = picker.run_pick(cfg, [(str(target), "note.txt")], {}, hits_by_key=hits)
     assert rc == 0
     assert opened["path"] == target
     assert opened["line"] == 12
+
+
+def test_run_pick_distinguishes_chunks_of_the_same_file(cfg, tmp_path, monkeypatch):
+    """Two hits of one file must not collapse onto the same key/position."""
+    target = tmp_path / "book.pdf"
+    target.write_bytes(b"%PDF")
+    opened = {}
+    monkeypatch.setattr(picker.launchers, "pick", lambda items, program: "hit:1")
+    monkeypatch.setattr(
+        picker, "open_result", lambda openers, path, **kw: opened.update(path=path, **kw)
+    )
+
+    items = [("hit:0", "book.pdf (page 5)"), ("hit:1", "book.pdf (page 42)")]
+    hits = {
+        "hit:0": {"path": str(target), "line": None, "page": 5},
+        "hit:1": {"path": str(target), "line": None, "page": 42},
+    }
+    assert picker.run_pick(cfg, items, {}, hits_by_key=hits) == 0
+    assert opened["path"] == target
+    assert opened["page"] == 42
+
+
+def test_hit_key_is_unique_per_chunk(tmp_path):
+    first = {"path": str(tmp_path / "a.txt"), "chunk_id": 7}
+    second = {"path": str(tmp_path / "a.txt"), "chunk_id": 8}
+    assert picker.hit_key(first, 0) != picker.hit_key(second, 1)
+    assert str(tmp_path / "a.txt") in picker.hit_key(first, 0)
+    # fall back to the index when a chunk id is missing
+    assert picker.hit_key({"path": "x"}, 3) == "hit:3"
 
 
 def test_run_pick_cancelled_returns_zero(cfg, monkeypatch):

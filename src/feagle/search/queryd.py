@@ -170,7 +170,9 @@ class QueryEngine:
             ],
         }
 
-    def embed(self, texts: list[str], kind: str = "doc") -> dict[str, Any]:
+    def embed(
+        self, texts: list[str], kind: str = "doc", titles: list[str] | None = None
+    ) -> dict[str, Any]:
         embedder = self._ensure_embedder()
         if embedder is None:
             return {"ok": False, "error": "embeddings unavailable", "hint": _EMBEDDINGS_HINT}
@@ -178,7 +180,12 @@ class QueryEngine:
             if kind == "query":
                 vectors = embedder.embed_queries(texts)
             else:
-                vectors = embedder.embed_documents([(text, None) for text in texts])
+                title_list = list(titles) if titles else []
+                items = [
+                    (text, title_list[index] if index < len(title_list) else None)
+                    for index, text in enumerate(texts)
+                ]
+                vectors = embedder.embed_documents(items)
         except (ServerUnavailable, EmbeddingError) as exc:
             self._drop_embedder()
             return {"ok": False, "error": str(exc), "hint": _EMBEDDINGS_HINT}
@@ -221,7 +228,11 @@ class QueryEngine:
                 )
             if op == "embed":
                 texts = request.get("texts") or []
-                return self.embed(list(texts), str(request.get("kind", "doc")))
+                return self.embed(
+                    list(texts),
+                    str(request.get("kind", "doc")),
+                    titles=request.get("titles"),
+                )
             if op == "status":
                 return self.status()
         except Exception as exc:  # noqa: BLE001 - the protocol must never crash

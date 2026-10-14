@@ -14,8 +14,8 @@ import sys
 from typing import Any
 
 from .. import db, paths
-from ..picker import app_items, run_pick
-from .cmd_search import search_in_process
+from ..picker import app_items, hit_key, run_pick
+from .cmd_search import search_best_effort
 
 SNIPPET_CHARS = 120
 
@@ -29,7 +29,7 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     if not args.no_apps:
         items, app_map = app_items()
 
-    hits_by_path: dict[str, dict[str, Any]] = {}
+    hits_by_key: dict[str, dict[str, Any]] = {}
 
     if args.query:
         if not paths.db_path().exists():
@@ -40,13 +40,16 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
             )
         else:
             limit = args.limit if args.limit is not None else cfg["search"]["limit"]
-            result = search_in_process(cfg, args.query, limit, cfg["search"]["mode"])
-            for item in result["results"]:
-                hits_by_path.setdefault(item["path"], item)
+            result = search_best_effort(cfg, args.query, limit, cfg["search"]["mode"])
+            for index, item in enumerate(result["results"]):
+                key = hit_key(item, index)
+                hits_by_key[key] = item
                 location = item["path"]
                 if item.get("line"):
                     location += f":{item['line']}"
-                items.append((item["path"], f"{location}  {item['snippet']}"))
+                if item.get("page"):
+                    location += f" (page {item['page']})"
+                items.append((key, f"{location}  {item['snippet']}"))
     elif not args.no_files:
         if not paths.db_path().exists():
             print(
@@ -63,4 +66,4 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
             for path, body in rows:
                 items.append((path, f"{path}  {_snippet(body)}"))
 
-    return run_pick(cfg, items, app_map, hits_by_path=hits_by_path)
+    return run_pick(cfg, items, app_map, hits_by_key=hits_by_key)

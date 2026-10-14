@@ -32,18 +32,24 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         return 1
 
     service = EmbeddingService(cfg)
-    embedder = None
     try:
-        embedder = service.start()
+        service.start()
     except _DEGRADE_ERRORS as exc:
-        print(f"feagle: indexerd starting without embeddings ({exc})", file=sys.stderr)
+        print(
+            f"feagle: indexerd starting without embeddings ({exc}); "
+            "semantic indexing will be retried on demand",
+            file=sys.stderr,
+        )
+        service.reset()
 
     stop_event = threading.Event()
     watch_roots = [root for root in roots if Path(root).expanduser().is_dir()]
     watcher = Watcher(watch_roots, poll=args.poll) if watch_roots else None
     daemon = IndexerDaemon(
         cfg,
-        embedder_provider=lambda: embedder,
+        embedder_provider=service.ensure,
+        on_embedder_failure=service.reset,
+        idle_hook=service.supervisor.stop_if_idle,
         watcher=watcher,
         stop_event=stop_event,
         watch=bool(watch_roots),

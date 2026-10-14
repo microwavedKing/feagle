@@ -84,6 +84,29 @@ def test_check_inotify_reads_file(tmp_path):
     assert doctor.check_inotify(path).status == "ok"
 
 
+def test_check_power_detects_battery_by_type(tmp_path):
+    supply = tmp_path / "power_supply"
+    battery = supply / "CMB0"  # not a "BAT*" name, like some laptops
+    battery.mkdir(parents=True)
+    (battery / "type").write_text("Battery\n", encoding="utf-8")
+    (battery / "status").write_text("Discharging\n", encoding="utf-8")
+    ac = supply / "AC"
+    ac.mkdir()
+    (ac / "type").write_text("Mains\n", encoding="utf-8")
+
+    check = doctor.check_power(supply)
+    assert check.status == "info"
+    assert "present" in check.message
+    assert "on battery" in check.message
+
+
+def test_check_power_without_a_battery(tmp_path):
+    supply = tmp_path / "power_supply"
+    (supply / "AC").mkdir(parents=True)
+    (supply / "AC" / "type").write_text("Mains\n", encoding="utf-8")
+    assert "none" in doctor.check_power(supply).message
+
+
 def test_run_checks_returns_all_sections(env):
     checks = doctor.run_checks(config.default_config(), verify_model_hash=False)
     names = [c.name for c in checks]

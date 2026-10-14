@@ -8,6 +8,7 @@ battery/load pause condition holds.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import queue
 import threading
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import db
+from ..embeddings.client import ServerUnavailable
 from ..log import get_logger
 from ..power import pause_reason
 from . import pipeline
@@ -28,6 +30,48 @@ QUEUE_TIMEOUT_S = 5.0
 PAUSED_RETRY_S = 300.0
 
 
+class _ResilientEmbedder:
+    """Re-creates the embedder when the server drops in the middle of a pass.
+
+    ``llama-server`` may be unloaded for being idle (or crash) between two
+    batches. Without this, the indexer would keep a dead client forever and
+    write every following file with ``embedded=0``. On :class:`ServerUnavailable`
+    we ask the owner to drop the broken embedder and fetch a fresh one, then
+    retry the call once.
+    """
+
+    def __init__(
+        self,
+        embedder: Any,
+        provider: Callable[[], Any],
+        on_failure: Callable[[], Any],
+    ) -> None:
+        self._embedder = embedder
+        self._provider = provider
+        self._on_failure = on_failure
+
+    @property
+    def dim(self) -> int:
+        return self._embedder.dim
+
+    def _call(self, method: str, *args: Any) -> Any:
+        try:
+            return getattr(self._embedder, method)(*args)
+        except ServerUnavailable as exc:
+            log.warning("embeddings server unavailable (%s); restarting it", exc)
+            with contextlib.suppress(Exception):
+                self._on_failure()
+            self._embedder = self._provider()
+            return getattr(self._embedder, method)(*args)
+
+    def embed_documents(self, items: list[tuple[str, str | None]]) -> list[list[float]]:
+        return self._call("embed_documents", items)
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        return self._call("embed_queries", texts)
+
+
+
 class IndexerDaemon:
     def __init__(
         self,
@@ -35,6 +79,8 @@ class IndexerDaemon:
         *,
         conn: Any | None = None,
         embedder_provider: Callable[[], Any] | None = None,
+        on_embedder_failure: Callable[[], Any] | None = None,
+        idle_hook: Callable[[], Any] | None = None,
         watcher: Watcher | None = None,
         stop_event: threading.Event | None = None,
         pause_check: Callable[[], str | None] | None = None,
@@ -49,6 +95,8 @@ class IndexerDaemon:
         self.watch = watch
         self.stop_event = stop_event or threading.Event()
         self._embedder_provider = embedder_provider or (lambda: None)
+        self._on_embedder_failure = on_embedder_failure
+        self.idle_hook = idle_hook
         self.pause_check = pause_check or (lambda: pause_reason(self.cfg))
         self.clock = clock
         self.sleep = sleep
@@ -85,12 +133,33 @@ class IndexerDaemon:
 
     # -- indexing ----------------------------------------------------------
 
+    def _get_embedder(self) -> Any | None:
+        """Fetch an embedder, tolerating a provider that is still unavailable.
+
+        The provider (``EmbeddingService.ensure``) is retried on every pass, so a
+        server that was down at startup or unloaded by ``queryd`` comes back
+        instead of leaving the indexer permanently ``embedded=0``.
+        """
+        try:
+            embedder = self._embedder_provider()
+        except Exception as exc:  # noqa: BLE001 - any failure means "text only"
+            log.warning("embeddings unavailable: %s", exc)
+            return None
+        if embedder is None or self._on_embedder_failure is None:
+            return embedder
+        return _ResilientEmbedder(embedder, self._embedder_provider, self._on_embedder_failure)
+
     def index_once(self, roots: list[str] | None = None) -> pipeline.IndexStats:
         conn = self._ensure_conn()
-        embedder = self._embedder_provider()
-        return pipeline.index_roots(
+        embedder = self._get_embedder()
+        stats = pipeline.index_roots(
             conn, self.cfg, roots=roots, embedder=embedder, pause_check=self.pause_check
         )
+        if embedder is not None and not stats.paused:
+            stats.backfilled = pipeline.backfill(conn, self.cfg, embedder)
+            if stats.backfilled:
+                log.info("backfilled %d file(s) with vectors", stats.backfilled)
+        return stats
 
     def run_once(self) -> pipeline.IndexStats:
         """One pass over all roots, honouring the pause condition upfront."""
@@ -124,6 +193,9 @@ class IndexerDaemon:
             ).start()
 
         while not self.stop_event.is_set():
+            # Give an owned llama-server a chance to unload while we wait, so it
+            # does not sit in RAM (~460 MiB) forever when the indexer is the owner.
+            self._run_idle_hook()
             now = self.clock()
             if self.rescan_interval_s and now >= next_rescan:
                 log.info("periodic rescan")
@@ -150,6 +222,12 @@ class IndexerDaemon:
                 continue
             log.info("change in %d path(s); rescanning %s", len(changed), roots)
             self.index_once(roots=roots)
+
+    def _run_idle_hook(self) -> None:
+        if self.idle_hook is None:
+            return
+        with contextlib.suppress(Exception):
+            self.idle_hook()
 
     def _next_rescan(self, stats: pipeline.IndexStats) -> float:
         now = self.clock()

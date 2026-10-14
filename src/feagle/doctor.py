@@ -311,14 +311,27 @@ def check_launcher(cfg: dict[str, Any]) -> Check:
                  "install fuzzel/wofi/rofi/tofi/walker")
 
 
-def check_power() -> Check:
+def _is_battery(entry: Path) -> bool:
+    """Whether a ``/sys/class/power_supply`` entry is a battery.
+
+    The directory name is not reliable (``BAT0``, but also ``CMB0``, ``BATT`` or
+    ``macsmc-battery``), so the ``type`` file is the source of truth.
+    """
+    try:
+        return (entry / "type").read_text(encoding="utf-8").strip() == "Battery"
+    except OSError:
+        return False
+
+
+def check_power(power_supply_dir: Path | None = None) -> Check:
     from .power import POWER_SUPPLY_DIR, on_battery
 
-    has_battery = POWER_SUPPLY_DIR.is_dir() and any(
-        entry.name.startswith("BAT") for entry in POWER_SUPPLY_DIR.iterdir()
+    directory = power_supply_dir or POWER_SUPPLY_DIR
+    has_battery = directory.is_dir() and any(
+        _is_battery(entry) for entry in directory.iterdir()
     )
     if has_battery:
-        state = "on battery" if on_battery() else "on AC"
+        state = "on battery" if on_battery(directory) else "on AC"
         return Check("battery", "info", f"present ({state})")
     return Check("battery", "info", "none (desktop; pause never triggers)")
 

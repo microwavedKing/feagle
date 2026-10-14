@@ -11,7 +11,7 @@ from typing import Any
 from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.service import EmbeddingService, ModelMissingError
-from ..picker import app_items, run_pick
+from ..picker import app_items, hit_key, run_pick
 from ..search import hybrid
 from ..search.queryd import QuerydClient
 
@@ -103,6 +103,21 @@ def search_in_process(cfg: dict[str, Any], query: str, limit: int, mode: str) ->
     }
 
 
+def search_best_effort(
+    cfg: dict[str, Any], query: str, limit: int, mode: str
+) -> dict[str, Any]:
+    """Search through the running ``queryd`` when possible, else in-process.
+
+    Both ``feagle search`` and ``feagle pick --query`` go through this so they
+    share a warm daemon (and its hybrid embeddings) instead of each starting an
+    embedder of their own.
+    """
+    result = _request_from_daemon(query, limit, mode)
+    if result is None:
+        result = search_in_process(cfg, query, limit, mode)
+    return result
+
+
 def _location(result: dict[str, Any]) -> str:
     location = result["path"]
     if result.get("line") is not None:
@@ -114,11 +129,12 @@ def _location(result: dict[str, Any]) -> str:
 
 def _pick_and_open(cfg: dict[str, Any], result: dict[str, Any], *, with_apps: bool) -> int:
     items, app_map = app_items() if with_apps else ([], {})
-    hits_by_path: dict[str, dict[str, Any]] = {}
-    for item in result.get("results") or []:
-        hits_by_path.setdefault(item["path"], item)
-        items.append((item["path"], f"{_location(item)}  {item['snippet']}"))
-    return run_pick(cfg, items, app_map, hits_by_path=hits_by_path)
+    hits_by_key: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(result.get("results") or []):
+        key = hit_key(item, index)
+        hits_by_key[key] = item
+        items.append((key, f"{_location(item)}  {item['snippet']}"))
+    return run_pick(cfg, items, app_map, hits_by_key=hits_by_key)
 
 
 def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
@@ -129,9 +145,7 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     mode = args.mode or cfg["search"]["mode"]
     limit = args.limit if args.limit is not None else cfg["search"]["limit"]
 
-    result = _request_from_daemon(args.query, limit, mode)
-    if result is None:
-        result = search_in_process(cfg, args.query, limit, mode)
+    result = search_best_effort(cfg, args.query, limit, mode)
 
     if args.pick:
         return _pick_and_open(cfg, result, with_apps=args.with_apps)

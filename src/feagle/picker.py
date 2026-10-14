@@ -30,12 +30,26 @@ def app_items() -> tuple[list[tuple[str, str]], dict[str, apps.App]]:
     return items, by_id
 
 
+def hit_key(hit: dict[str, Any], index: int) -> str:
+    """A unique launcher key for one search hit.
+
+    Several chunks of the same file can be in the results (``max_per_file``), so
+    the path alone would make every hit of a file share one key and always open
+    the first chunk. A per-chunk key keeps each result separately selectable
+    while still carrying the path in the visible first column.
+    """
+    chunk_id = hit.get("chunk_id")
+    if chunk_id is None:
+        return f"hit:{index}"
+    return f"{hit['path']}#{chunk_id}"
+
+
 def run_pick(
     cfg: dict[str, Any],
     items: list[tuple[str, str]],
     app_map: dict[str, apps.App],
     *,
-    hits_by_path: dict[str, dict[str, Any]] | None = None,
+    hits_by_key: dict[str, dict[str, Any]] | None = None,
 ) -> int:
     """Show ``items`` in the launcher and act on the selection."""
     if not items:
@@ -53,13 +67,14 @@ def run_pick(
             return 1
         return 0
 
-    if not Path(choice).exists():
+    hit = (hits_by_key or {}).get(choice)
+    path = Path(hit["path"]) if hit is not None else Path(choice)
+    if not path.exists():
         return 0
-    hit = (hits_by_path or {}).get(choice)
     try:
         open_result(
             cfg["openers"],
-            Path(choice),
+            path,
             line=None if hit is None else hit.get("line"),
             page=None if hit is None else hit.get("page"),
         )

@@ -87,11 +87,37 @@ def test_setup_non_interactive_writes_config(env, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "wrote config" in out
+    assert "feagle pick" in out
+    assert "later phase" not in out
 
     cfg = config.load_config()
     assert cfg["index"]["roots"] == [str(docs)]
     assert cfg["embeddings"]["mrl_dim"] == 256
     assert cfg["launcher"]["program"] == "stdout"
+
+
+def test_gather_plan_defaults_to_the_configured_model(monkeypatch):
+    import argparse
+
+    from feagle.cli import cmd_setup
+
+    cfg = config.default_config()
+    cfg["index"]["roots"] = ["/docs"]
+    cfg["launcher"]["program"] = "stdout"
+    cfg["embeddings"]["model"] = "embeddinggemma-2-q8"
+
+    monkeypatch.setattr(cmd_setup, "_prompt", lambda text, default="": default)
+    monkeypatch.setattr(cmd_setup, "_prompt_yes_no", lambda text, default=True: default)
+
+    args = argparse.Namespace(
+        root=None, model=None, mrl_dim=None, launcher=None,
+        no_download=False, no_units=False, no_enable=False,
+        no_index=False, no_backup=False, yes=False,
+    )
+    plan = cmd_setup._gather_plan(args, cfg)
+    # the interactive default must be the configured model, not the
+    # alphabetically-first preset (embeddinggemma-2-bf16)
+    assert plan.model == "embeddinggemma-2-q8"
 
 
 def test_setup_without_roots_fails(env, capsys, monkeypatch):

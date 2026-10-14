@@ -83,7 +83,7 @@ def _gather_plan(args: argparse.Namespace, cfg: dict[str, Any]) -> setup.SetupPl
 
     if not plan.model:
         names = sorted(presets.PRESETS)
-        plan.model = _prompt(f"Model preset {names}", names[0]).strip()
+        plan.model = _prompt(f"Model preset {names}", cfg["embeddings"]["model"]).strip()
 
     if plan.mrl_dim is None:
         plan.mrl_dim = int(_prompt(f"Vector size {presets.MRL_DIMS}", "768"))
@@ -214,6 +214,7 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
 
     print(
         "\nDone. Next: 'feagle search \"your query\"'.\n"
-        "Launcher adapters and hotkey bindings ('feagle search --pick') arrive in a later phase."
+        "Open a combined launcher with 'feagle pick', or pick a result with "
+        "'feagle search \"your query\" --pick'."
     )
     return 0

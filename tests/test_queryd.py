@@ -95,6 +95,22 @@ def test_embed_op(engine):
     assert result == {"ok": True, "dim": 3, "embeddings": [[1.0, 0.0, 0.0]]}
 
 
+def test_embed_op_passes_document_titles(db_path):
+    seen: list[tuple[str, str | None]] = []
+
+    class Recording(FakeEmbedder):
+        def embed_documents(self, items):
+            seen.extend(items)
+            return super().embed_documents(items)
+
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=Recording())
+    result = engine.dispatch(
+        {"op": "embed", "texts": ["body a", "body b"], "titles": ["Title A"], "kind": "doc"}
+    )
+    assert result["ok"] is True
+    assert seen == [("body a", "Title A"), ("body b", None)]
+
+
 def test_embed_op_without_embedder(db_path):
     engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
     result = engine.dispatch({"op": "embed", "texts": ["x"]})

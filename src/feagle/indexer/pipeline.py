@@ -49,6 +49,7 @@ class IndexStats:
     pruned: int = 0
     chunks: int = 0
     vectors: int = 0
+    backfilled: int = 0
     paused: str | None = None
     error_samples: list[str] = field(default_factory=list)
 
@@ -57,7 +58,8 @@ class IndexStats:
             f"scanned={self.scanned} reindexed={self.reindexed} "
             f"touched={self.touched} unchanged={self.unchanged} "
             f"unsupported={self.unsupported} errors={self.errors} "
-            f"pruned={self.pruned} chunks={self.chunks} vectors={self.vectors}"
+            f"pruned={self.pruned} chunks={self.chunks} vectors={self.vectors} "
+            f"backfilled={self.backfilled}"
         )
         if self.paused:
             base += f" paused={self.paused!r}"
