@@ -1,7 +1,7 @@
 """Text extraction.
 
 Plain text, markdown and source code are read directly (any allowlisted
-extension). PDF is extracted with ``pdftotext`` (poppler-utils) run as a
+extension). PDF is extracted with ``pdftotext`` (poppler) run as a
 subprocess: one string per page, split on the form feed (``\\f``) that poppler
 emits between pages.
 """
@@ -24,7 +24,7 @@ BINARY_SNIFF = 8192
 #: Wall-clock limit for a single ``pdftotext`` invocation.
 PDF_TIMEOUT = 30.0
 
-PDF_MISSING_HINT = "install poppler-utils (pdftotext) to index PDF files"
+PDF_MISSING_HINT = "install poppler (pdftotext) to index PDF files"
 
 #: Encodings tried (in order) when a text file is not valid UTF-8. cp1251 (the
 #: common legacy Russian encoding) is only accepted when the result actually

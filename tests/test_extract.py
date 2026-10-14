@@ -103,7 +103,7 @@ def test_pdf_without_poppler_is_unsupported(tmp_path, monkeypatch):
     path = tmp_path / "doc.pdf"
     path.write_bytes(b"%PDF-1.7")
     monkeypatch.setattr("feagle.indexer.extract.shutil.which", lambda name: None)
-    with pytest.raises(UnsupportedFile, match="poppler-utils"):
+    with pytest.raises(UnsupportedFile, match="poppler"):
         extract_pdf(path)
 
 

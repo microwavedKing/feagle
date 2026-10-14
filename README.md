@@ -24,14 +24,34 @@ telemetry.
     (EmbeddingGemma 2 support). `extra/llama-cpp` may be too old; the AUR
     `llama.cpp-git` package tracks master.
   - the `embeddinggemma-2-q4` GGUF model, or `embeddinggemma-2-q8` (see below)
-- `poppler-utils` (`pdftotext`) for PDF indexing
+- `poppler` (`pdftotext`) for PDF indexing
 - Optional, for OCR of scanned PDFs: `tesseract` plus the language data you need
   (`tesseract-data-eng`, `tesseract-data-rus`, ...)
-- Optional: a dmenu-compatible launcher (`fuzzel`, `wofi`, `rofi-wayland`, `tofi`, `walker`)
+- Optional: a dmenu-compatible launcher (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
 
 ## Install
 
 `feagle` follows XDG conventions and does not require root at runtime.
+
+### From the AUR (Arch Linux)
+
+```sh
+yay -S feagle        # or another AUR helper
+feagle setup
+```
+
+Note that `python-sqlite-vec` is an AUR package too, so the helper has to build
+it as well.
+
+### With uv or pipx
+
+```sh
+uv tool install git+https://github.com/microwavedKing/feagle
+# or:  pipx install git+https://github.com/microwavedKing/feagle
+feagle setup
+```
+
+### From a checkout (development)
 
 ```sh
 git clone https://github.com/microwavedKing/feagle.git

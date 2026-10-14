@@ -21,6 +21,10 @@ log = get_logger("units")
 
 UNIT_NAMES = ("feagle-indexerd.service", "feagle-queryd.service")
 
+#: Where a distribution package installs the units (used to avoid copying them
+#: into the user's config when the package already provides them).
+PACKAGED_DIR = Path("/usr/lib/systemd/user")
+
 _TEMPLATES: dict[str, str] = {
     "feagle-indexerd.service": """\
 [Unit]
@@ -134,3 +138,12 @@ def install(feagle_exec: str | None = None) -> list[Path]:
 
 def are_installed() -> bool:
     return all(path.is_file() for path in installed_paths())
+
+
+def packaged_paths(directory: Path | None = None) -> list[Path]:
+    return [(directory or PACKAGED_DIR) / name for name in UNIT_NAMES]
+
+
+def using_packaged(directory: Path | None = None) -> bool:
+    """Whether the units are already installed system-wide by a package."""
+    return all(path.is_file() for path in packaged_paths(directory))
