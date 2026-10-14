@@ -257,6 +257,26 @@ against the compositors' documentation on 2026-10-14; mango moved to TOML in
 0.18 and Hyprland's configuration format is changing, so check your version's
 docs.
 
+## Search quality
+
+Two settings keep results useful instead of dumping everything the vector
+index can find:
+
+```toml
+[search]
+# Ignore vector neighbours farther than this (L2 distance on normalized
+# vectors). Unrelated queries then return few or no results. 0 disables.
+max_distance = 0.8
+# At most this many chunks of the same file, so one big document cannot fill
+# the whole list. 0 disables.
+max_per_file = 3
+```
+
+Semantic search alone almost always returns *something* — the nearest chunks are
+returned even for a query that appears nowhere. `max_distance` is the knob that
+separates "related" from "nearest of a bad lot"; raise it if good matches are
+being filtered out, lower it for stricter results.
+
 ## Measured performance
 
 Measured on the target laptop (Intel i7-8565U, 4 cores / 8 threads, NVMe, no
