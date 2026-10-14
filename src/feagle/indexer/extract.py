@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..log import get_logger
+from .ocr import DEFAULT_DPI, DEFAULT_LANGS, ocr_pages
 
 log = get_logger("indexer.extract")
 
@@ -51,10 +52,26 @@ def pdftotext_available() -> bool:
     return shutil.which("pdftotext") is not None
 
 
-def extract(path: Path, *, max_bytes: int | None = None) -> Extracted:
+def extract(
+    path: Path,
+    *,
+    max_bytes: int | None = None,
+    ocr: bool = False,
+    ocr_langs: str = DEFAULT_LANGS,
+    ocr_dpi: int = DEFAULT_DPI,
+    ocr_min_chars: int = 20,
+    ocr_max_pages: int = 200,
+) -> Extracted:
     """Extract indexable text from ``path`` based on its extension."""
     if path.suffix.lower() == ".pdf":
-        return extract_pdf(path)
+        return extract_pdf(
+            path,
+            ocr=ocr,
+            ocr_langs=ocr_langs,
+            ocr_dpi=ocr_dpi,
+            ocr_min_chars=ocr_min_chars,
+            ocr_max_pages=ocr_max_pages,
+        )
     return extract_text(path, max_bytes=max_bytes)
 
 
@@ -66,8 +83,17 @@ def extract_text(path: Path, *, max_bytes: int | None = None) -> Extracted:
     return Extracted(pages=(text,), kind="text")
 
 
-def extract_pdf(path: Path, *, timeout: float = PDF_TIMEOUT) -> Extracted:
-    """Extract a PDF page by page using ``pdftotext``."""
+def extract_pdf(
+    path: Path,
+    *,
+    timeout: float = PDF_TIMEOUT,
+    ocr: bool = False,
+    ocr_langs: str = DEFAULT_LANGS,
+    ocr_dpi: int = DEFAULT_DPI,
+    ocr_min_chars: int = 20,
+    ocr_max_pages: int = 200,
+) -> Extracted:
+    """Extract a PDF page by page using ``pdftotext`` (with optional OCR)."""
     binary = shutil.which("pdftotext")
     if binary is None:
         raise UnsupportedFile(f"{PDF_MISSING_HINT}: {path}")
@@ -96,6 +122,19 @@ def extract_pdf(path: Path, *, timeout: float = PDF_TIMEOUT) -> Extracted:
         pages.pop()  # poppler terminates the last page with a form feed too
     if not pages:
         pages = [""]
+
+    if ocr:
+        pages, ocrned = ocr_pages(
+            path,
+            pages,
+            langs=ocr_langs,
+            dpi=ocr_dpi,
+            min_chars=ocr_min_chars,
+            max_pages=ocr_max_pages,
+        )
+        if ocrned:
+            log.info("OCR recovered text on %d page(s) of %s", ocrned, path)
+
     return Extracted(pages=tuple(pages), kind="pdf")
 
 

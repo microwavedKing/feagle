@@ -86,7 +86,7 @@ def test_run_checks_returns_all_sections(env):
     checks = doctor.run_checks(config.default_config(), verify_model_hash=False)
     names = [c.name for c in checks]
     for expected in ("python", "config", "xdg", "fts5", "sqlite-vec", "database",
-                     "units", "queryd", "llama-server", "model", "pdftotext",
+                     "units", "queryd", "llama-server", "model", "pdftotext", "ocr",
                      "launcher", "battery", "inotify", "cgroup", "disk"):
         assert expected in names
     assert all(c.status in ("ok", "warn", "fail", "info") for c in checks)
