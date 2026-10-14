@@ -75,6 +75,18 @@ class QueryEngine:
             with contextlib.suppress(Exception):
                 self._on_failure()
 
+    def _revive_embedder(self) -> Any | None:
+        """Restart the embedder right away (used when the server just died).
+
+        The retry cooldown exists to avoid hammering a broken setup, but a server
+        that was unloaded for being idle should come back on the same request.
+        """
+        if self._provider is None:
+            return None
+        self.embedder = None
+        self._retry_after = 0.0
+        return self._ensure_embedder()
+
     def _connect(self):
         return db.connect(self.db_path, read_only=True)
 
@@ -104,11 +116,18 @@ class QueryEngine:
                 try:
                     vector = embedder.embed_queries([query])[0]
                 except (ServerUnavailable, EmbeddingError) as exc:
-                    log.warning(
-                        "query embedding failed (%s); falling back to text search", exc
-                    )
+                    log.warning("query embedding failed (%s); restarting the server", exc)
                     self._drop_embedder()
-                    use_hybrid = False
+                    embedder = self._revive_embedder()
+                    if embedder is not None:
+                        try:
+                            vector = embedder.embed_queries([query])[0]
+                        except (ServerUnavailable, EmbeddingError) as retry_exc:
+                            log.warning("still unavailable (%s); text search only", retry_exc)
+                            self._drop_embedder()
+                            embedder = None
+                    if embedder is None:
+                        use_hybrid = False
             if use_hybrid:
                 hits = hybrid.search_hybrid(
                     conn,

@@ -91,6 +91,16 @@ def _default_health(url: str, timeout: float = 1.0) -> bool:
     return response.status_code == 200
 
 
+def _process_alive(pid: int) -> bool:
+    """Whether ``pid`` is a live process (a zombie counts as dead)."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as handle:
+            state = handle.read().rsplit(")", 1)[1].split()[0]
+    except (OSError, IndexError):
+        return False
+    return state != "Z"
+
+
 class LlamaSupervisor:
     """Owns (or reuses) one ``llama-server`` process."""
 
@@ -198,11 +208,24 @@ class LlamaSupervisor:
                 with contextlib.suppress(OSError):
                     fcntl.flock(handle, fcntl.LOCK_UN)
 
+    def _stale_owner(self) -> bool:
+        """Whether the server recorded in the pid file is definitely gone.
+
+        When it is, there is no point waiting out ``startup_grace`` for a process
+        that no longer exists (that would delay the first query after a crash or
+        an idle unload by the whole grace period). Zombies count as gone.
+        """
+        try:
+            pid = int(self.pid_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return False  # unknown -> use the grace period
+        return not _process_alive(pid)
+
     def _ensure_running_locked(self) -> str:
         port = self._read_port()
         if port is not None:
             url = f"http://127.0.0.1:{port}"
-            if self._health(url) or self._await_healthy(url):
+            if self._health(url) or (not self._stale_owner() and self._await_healthy(url)):
                 log.debug("reusing llama-server at %s", url)
                 self._url = url
                 self._owned = False
