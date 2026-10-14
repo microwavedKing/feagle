@@ -27,12 +27,39 @@ def test_extracts_utf8_text(tmp_path):
     assert result.pages == ("Привет, world!\nвторая строка",)
 
 
-def test_invalid_utf8_is_replaced(tmp_path):
+def test_invalid_utf8_falls_back_without_replacement(tmp_path):
     path = tmp_path / "a.txt"
     path.write_bytes(b"ok \xff\xfe bytes")
     result = extract(path)
     assert "ok" in result.pages[0]
-    assert "\ufffd" in result.pages[0]
+    assert "\ufffd" not in result.pages[0]  # cp1252 decodes every byte
+    assert result.encoding == "cp1252"
+
+
+def test_cp1251_russian_is_decoded(tmp_path):
+    path = tmp_path / "ru.txt"
+    path.write_bytes("Привет, мир! Это старая заметка.".encode("cp1251"))
+    result = extract(path)
+    assert result.encoding == "cp1251"
+    assert "Привет, мир!" in result.pages[0]
+    assert "заметка" in result.pages[0]
+    assert "\ufffd" not in result.pages[0]
+
+
+def test_cp1252_western_is_decoded(tmp_path):
+    path = tmp_path / "fr.txt"
+    path.write_bytes("Café crème, déjà vu".encode("cp1252"))
+    result = extract(path)
+    assert result.encoding == "cp1252"
+    assert result.pages[0] == "Café crème, déjà vu"
+
+
+def test_utf8_cyrillic_stays_utf8(tmp_path):
+    path = tmp_path / "u.txt"
+    path.write_text("Привет, мир!", encoding="utf-8")
+    result = extract(path)
+    assert result.encoding == "utf-8"
+    assert result.pages[0] == "Привет, мир!"
 
 
 def test_crlf_is_preserved(tmp_path):

@@ -26,6 +26,18 @@ PDF_TIMEOUT = 30.0
 
 PDF_MISSING_HINT = "install poppler-utils (pdftotext) to index PDF files"
 
+#: Encodings tried (in order) when a text file is not valid UTF-8. cp1251 (the
+#: common legacy Russian encoding) is only accepted when the result actually
+#: looks Cyrillic, so Western European files fall through to cp1252/latin-1.
+#: koi8-r is deliberately not listed: it cannot be told apart from cp1251
+#: reliably, and guessing wrong would garble the file.
+CYRILLIC_ENCODINGS = ("cp1251",)
+WESTERN_ENCODINGS = ("cp1252", "latin-1")
+
+#: A legacy decode is considered "Cyrillic" when at least this share of its
+#: letters are Cyrillic.
+CYRILLIC_RATIO = 0.5
+
 
 class ExtractionError(Exception):
     """A file could not be read or decoded."""
@@ -41,10 +53,12 @@ class Extracted:
 
     ``pages`` holds one string per logical page: a single entry for plain text,
     one entry per PDF page (in order). ``kind`` is ``"text"`` or ``"pdf"``.
+    ``encoding`` records how a text file was decoded (``"utf-8"`` by default).
     """
 
     pages: tuple[str, ...]
     kind: str
+    encoding: str = "utf-8"
 
 
 def pdftotext_available() -> bool:
@@ -75,12 +89,52 @@ def extract(
     return extract_text(path, max_bytes=max_bytes)
 
 
+def is_cyrillic_heavy(text: str, ratio: float = CYRILLIC_RATIO) -> bool:
+    """Whether most alphabetic characters in ``text`` are Cyrillic."""
+    letters = 0
+    cyrillic = 0
+    for char in text:
+        if not char.isalpha():
+            continue
+        letters += 1
+        if "\u0400" <= char <= "\u04ff":
+            cyrillic += 1
+    return letters > 0 and cyrillic / letters >= ratio
+
+
+def decode_text(data: bytes) -> tuple[str, str]:
+    """Decode file bytes, falling back to legacy encodings.
+
+    Strict UTF-8 wins. Otherwise a Cyrillic legacy encoding is used when it
+    decodes cleanly and the result is actually Cyrillic (cp1251 files are common
+    in Russian text corpora); Western files fall through to cp1252/latin-1.
+    """
+    try:
+        return data.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        pass
+
+    for encoding in CYRILLIC_ENCODINGS:
+        candidate = data.decode(encoding, errors="replace")
+        if "\ufffd" not in candidate and is_cyrillic_heavy(candidate):
+            return candidate, encoding
+
+    for encoding in WESTERN_ENCODINGS:
+        candidate = data.decode(encoding, errors="replace")
+        if "\ufffd" not in candidate:
+            return candidate, encoding
+
+    return data.decode("utf-8", errors="replace"), "utf-8"
+
+
 def extract_text(path: Path, *, max_bytes: int | None = None) -> Extracted:
     data = _read_bytes(path, max_bytes)
     if b"\x00" in data[:BINARY_SNIFF]:
         raise UnsupportedFile(f"binary content: {path}")
-    text = data.decode("utf-8", errors="replace")
-    return Extracted(pages=(text,), kind="text")
+    text, encoding = decode_text(data)
+    if encoding != "utf-8":
+        log.info("decoded %s as %s", path, encoding)
+    return Extracted(pages=(text,), kind="text", encoding=encoding)
 
 
 def extract_pdf(
