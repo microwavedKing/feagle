@@ -143,13 +143,37 @@ def _write_chunks(conn: sqlite3.Connection, file_id: int, chunks: list[Any]) -> 
 
 def _embed(
     embedder: Embedder, items: list[tuple[str, str | None]]
-) -> list[list[float]] | None:
-    """Embed documents, degrading to ``None`` instead of failing the file."""
+) -> list[list[float] | None] | None:
+    """Embed documents, degrading gracefully instead of failing the file.
+
+    Returns a list aligned with ``items`` (``None`` marks a chunk that could not
+    be embedded), or ``None`` when the server is unavailable and nothing could
+    be embedded at all. A batch that the server rejects (for example an input
+    larger than the slot context) is retried chunk by chunk so that one bad
+    chunk does not cost the whole file its vectors.
+    """
     try:
         return embedder.embed_documents(items)
-    except (ServerUnavailable, EmbeddingError) as exc:
-        log.warning("embedding failed, keeping text index only: %s", exc)
+    except ServerUnavailable as exc:
+        log.warning("embeddings server unavailable: %s", exc)
         return None
+    except EmbeddingError as exc:
+        log.warning("batch embedding failed, retrying chunk by chunk: %s", exc)
+
+    vectors: list[list[float] | None] = []
+    for item in items:
+        try:
+            vectors.append(embedder.embed_documents([item])[0])
+        except ServerUnavailable as exc:
+            log.warning("embeddings server unavailable: %s", exc)
+            return None
+        except EmbeddingError as exc:
+            log.warning("chunk cannot be embedded, skipping it: %s", exc)
+            vectors.append(None)
+
+    if all(vector is None for vector in vectors):
+        return None
+    return vectors
 
 
 def index_file(
@@ -237,9 +261,16 @@ def index_file(
         file_id = _upsert_file(conn, path, candidate, digest, state="ok", error=None)
         chunk_ids = _write_chunks(conn, file_id, chunks)
         inserted = 0
+        embedded = 0
         if vectors is not None:
-            inserted = vec_insert(conn, list(zip(chunk_ids, vectors, strict=True)))
-        conn.execute("UPDATE files SET embedded=? WHERE id=?", (1 if vectors else 0, file_id))
+            pairs = [
+                (chunk_id, vector)
+                for chunk_id, vector in zip(chunk_ids, vectors, strict=True)
+                if vector is not None
+            ]
+            inserted = vec_insert(conn, pairs)
+            embedded = 1 if len(pairs) == len(chunk_ids) else 0
+        conn.execute("UPDATE files SET embedded=? WHERE id=?", (embedded, file_id))
 
     return "reindexed", len(chunks), inserted
 
@@ -283,11 +314,23 @@ def backfill(
 
         db.ensure_vec_table(conn, embedder.dim, model_id=cfg["embeddings"]["model"])
         chunk_ids = [chunk["id"] for chunk in chunks]
+        pairs = [
+            (chunk_id, vector)
+            for chunk_id, vector in zip(chunk_ids, vectors, strict=True)
+            if vector is not None
+        ]
+        complete = len(pairs) == len(chunk_ids)
         with conn:
             vec_delete(conn, chunk_ids)
-            vec_insert(conn, list(zip(chunk_ids, vectors, strict=True)))
-            conn.execute("UPDATE files SET embedded = 1 WHERE id = ?", (row["id"],))
-        done += 1
+            vec_insert(conn, pairs)
+            conn.execute(
+                "UPDATE files SET embedded = ? WHERE id = ?",
+                (1 if complete else 0, row["id"]),
+            )
+        if complete:
+            done += 1
+        else:
+            log.warning("some chunks of %s could not be embedded", row["path"])
         if limit is not None and done >= limit:
             break
     return done
