@@ -23,6 +23,7 @@ class ModelSpec:
     size: int
     dim: int
     context: int
+    repo: str = "ggml-org/embeddinggemma-2-GGUF"
     pooling: str | None = None
     mmproj_filename: str | None = None
     mmproj_url: str | None = None
