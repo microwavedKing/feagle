@@ -228,3 +228,41 @@ def test_open_positional_plus_is_a_line_for_text(env, capsys):
 def test_open_missing_file_fails(env, capsys):
     assert main(["open", str(env / "nope.txt")]) == 1
     assert "no such file" in capsys.readouterr().err
+
+
+# -- search --pick ---------------------------------------------------------
+
+
+def test_search_pick_opens_the_selected_result(env, capsys, monkeypatch):
+    docs = make_docs(env)
+    write_config(env, '[launcher]\nprogram = "stdout"\n')
+    main(["index", "--root", str(docs), "--no-embed"])
+    capsys.readouterr()
+
+    import io
+    import sys
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO("1\n"))
+    opened = {}
+
+    def fake_open(openers, path, **kwargs):
+        opened["path"] = path
+        opened["kwargs"] = kwargs
+        return []
+
+    monkeypatch.setattr(cmd_search, "open_result", fake_open)
+    assert main(["search", "semantic", "--pick"]) == 0
+    assert opened["path"].name == "notes.txt"
+
+
+def test_search_pick_without_results_does_nothing(env, capsys, monkeypatch):
+    docs = make_docs(env)
+    write_config(env, '[launcher]\nprogram = "stdout"\n')
+    main(["index", "--root", str(docs), "--no-embed"])
+    capsys.readouterr()
+
+    def fail(*args, **kwargs):
+        raise AssertionError("must not open anything")
+
+    monkeypatch.setattr(cmd_search, "open_result", fail)
+    assert main(["search", "zzzznotfound", "--pick"]) == 0
