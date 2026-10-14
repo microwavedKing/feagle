@@ -7,6 +7,7 @@ place.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,11 +15,15 @@ from typing import Any, Protocol
 
 from .. import paths
 from ..log import get_logger
-from .client import EmbeddingClient
+from .client import EmbeddingClient, EmbeddingError, ServerUnavailable
 from .presets import ModelSpec, spec_for
 from .supervisor import LlamaSupervisor, SupervisorConfig
 
 log = get_logger("embeddings.service")
+
+#: ``start()`` retries the first probe a few times before degrading.
+_START_ATTEMPTS = 3
+_START_RETRY_S = 1.0
 
 
 class ModelMissingError(Exception):
@@ -94,7 +99,11 @@ class EmbeddingService:
         self._adapter: EmbedderAdapter | None = None
 
     def start(self) -> EmbedderAdapter:
-        """Ensure a server is running and return a ready embedder."""
+        """Ensure a server is running and return a ready embedder.
+
+        The first probe can fail if the server we reused is being restarted by
+        another process, so it is retried a couple of times before giving up.
+        """
         embeddings = self.cfg["embeddings"]
         model_path, _spec = resolve_model(self.cfg)
         if not embeddings["server_url"] and not model_path.exists():
@@ -105,16 +114,44 @@ class EmbeddingService:
             )
 
         base_url = self.supervisor.ensure_running()
-        self._client = EmbeddingClient(
-            base_url,
-            mrl_dim=embeddings["mrl_dim"],
-            batch_size=self.cfg["index"]["embed_batch_size"],
-            transport=self._transport,
-        )
-        dim = self._client.discover_dim()
+        self._client = self._make_client(base_url)
+        for attempt in range(1, _START_ATTEMPTS + 1):
+            try:
+                dim = self._client.discover_dim()
+                break
+            except (ServerUnavailable, EmbeddingError) as exc:
+                if attempt == _START_ATTEMPTS:
+                    raise
+                log.warning("embeddings probe failed (%s); retrying", exc)
+                time.sleep(_START_RETRY_S)
+                self._client.close()
+                base_url = self.supervisor.ensure_running()
+                self._client = self._make_client(base_url)
+
         self._adapter = EmbedderAdapter(client=self._client, dim=dim)
         log.info("embeddings ready: dim=%d at %s", dim, base_url)
         return self._adapter
+
+    def _make_client(self, base_url: str) -> EmbeddingClient:
+        return EmbeddingClient(
+            base_url,
+            mrl_dim=self.cfg["embeddings"]["mrl_dim"],
+            batch_size=self.cfg["index"]["embed_batch_size"],
+            transport=self._transport,
+        )
+
+    def ensure(self) -> EmbedderAdapter:
+        """Return the embedder, starting it on first use (retried after a reset)."""
+        if self._adapter is not None:
+            return self._adapter
+        return self.start()
+
+    def reset(self) -> None:
+        """Forget the current embedder so the next :meth:`ensure` restarts it."""
+        if self._client is not None:
+            self._client.close()
+        self._client = None
+        self._adapter = None
 
     @property
     def dim(self) -> int | None:

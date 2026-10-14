@@ -8,6 +8,7 @@ import time
 import pytest
 
 from feagle import config, db
+from feagle.embeddings.client import ServerUnavailable
 from feagle.search import vec
 from feagle.search.queryd import QuerydClient, QuerydServer, QueryEngine
 
@@ -99,6 +100,61 @@ def test_embed_op_without_embedder(db_path):
     result = engine.dispatch({"op": "embed", "texts": ["x"]})
     assert result["ok"] is False
     assert "hint" in result
+
+
+def test_embedder_is_started_on_demand(db_path):
+    calls = []
+
+    def provider():
+        calls.append(1)
+        return FakeEmbedder()
+
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None, embedder_provider=provider)
+    result = engine.dispatch({"op": "search", "query": "alpha"})
+    assert result["mode"] == "hybrid"
+    assert calls == [1]
+
+    # the adapter is cached: no further provider calls
+    engine.dispatch({"op": "search", "query": "beta"})
+    assert calls == [1]
+
+
+def test_failed_provider_is_not_retried_immediately(db_path):
+    clock = [100.0]
+    calls = []
+
+    def provider():
+        calls.append(1)
+        raise RuntimeError("no server")
+
+    engine = QueryEngine(
+        make_cfg(), db_path=db_path, embedder=None, embedder_provider=provider,
+        clock=lambda: clock[0], retry_cooldown=30.0,
+    )
+    assert engine.dispatch({"op": "search", "query": "alpha"})["mode"] == "fts"
+    assert engine.dispatch({"op": "search", "query": "alpha"})["mode"] == "fts"
+    assert calls == [1]  # cooldown suppressed the second attempt
+
+    clock[0] += 31
+    engine.dispatch({"op": "search", "query": "alpha"})
+    assert calls == [1, 1]  # retried after the cooldown
+
+
+def test_embedding_failure_falls_back_and_resets(db_path):
+    reset = []
+
+    class Broken(FakeEmbedder):
+        def embed_queries(self, texts):
+            raise ServerUnavailable("gone")
+
+    engine = QueryEngine(
+        make_cfg(), db_path=db_path, embedder=Broken(),
+        on_embedder_failure=lambda: reset.append(1),
+    )
+    result = engine.dispatch({"op": "search", "query": "alpha"})
+    assert result["mode"] == "fts"  # degraded for this request
+    assert reset == [1]
+    assert engine.embedder is None  # next request may restart it
 
 
 def test_status_op(engine):

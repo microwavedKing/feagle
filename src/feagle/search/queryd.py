@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import __version__, db, paths
+from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..log import get_logger
 from ..search import hybrid
 from ..search.vec import vec_count
@@ -38,10 +39,41 @@ class QueryEngine:
         *,
         db_path: Path | None = None,
         embedder: Any | None = None,
+        embedder_provider: Callable[[], Any] | None = None,
+        on_embedder_failure: Callable[[], Any] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        retry_cooldown: float = 30.0,
     ) -> None:
         self.cfg = cfg
         self.db_path = db_path or paths.db_path()
         self.embedder = embedder
+        self._provider = embedder_provider
+        self._on_failure = on_embedder_failure
+        self._clock = clock
+        self._retry_cooldown = retry_cooldown
+        self._retry_after = 0.0
+
+    def _ensure_embedder(self) -> Any | None:
+        """Return an embedder, (re)starting it on demand with a cooldown."""
+        if self.embedder is not None:
+            return self.embedder
+        if self._provider is None or self._clock() < self._retry_after:
+            return None
+        try:
+            self.embedder = self._provider()
+        except Exception as exc:  # noqa: BLE001 - any failure means "text only"
+            log.warning("embeddings unavailable: %s", exc)
+            self._retry_after = self._clock() + self._retry_cooldown
+            return None
+        return self.embedder
+
+    def _drop_embedder(self) -> None:
+        """Forget a broken embedder so the next request can restart it."""
+        self.embedder = None
+        self._retry_after = self._clock() + self._retry_cooldown
+        if self._on_failure is not None:
+            with contextlib.suppress(Exception):
+                self._on_failure()
 
     def _connect(self):
         return db.connect(self.db_path, read_only=True)
@@ -62,13 +94,22 @@ class QueryEngine:
 
         conn = self._connect()
         try:
+            embedder = self._ensure_embedder()
             use_hybrid = (
                 mode in ("auto", "hybrid")
-                and self.embedder is not None
+                and embedder is not None
                 and db.has_vec_table(conn)
             )
             if use_hybrid:
-                vector = self.embedder.embed_queries([query])[0]
+                try:
+                    vector = embedder.embed_queries([query])[0]
+                except (ServerUnavailable, EmbeddingError) as exc:
+                    log.warning(
+                        "query embedding failed (%s); falling back to text search", exc
+                    )
+                    self._drop_embedder()
+                    use_hybrid = False
+            if use_hybrid:
                 hits = hybrid.search_hybrid(
                     conn,
                     query,
@@ -111,13 +152,18 @@ class QueryEngine:
         }
 
     def embed(self, texts: list[str], kind: str = "doc") -> dict[str, Any]:
-        if self.embedder is None:
+        embedder = self._ensure_embedder()
+        if embedder is None:
             return {"ok": False, "error": "embeddings unavailable", "hint": _EMBEDDINGS_HINT}
-        if kind == "query":
-            vectors = self.embedder.embed_queries(texts)
-        else:
-            vectors = self.embedder.embed_documents([(text, None) for text in texts])
-        return {"ok": True, "dim": self.embedder.dim, "embeddings": vectors}
+        try:
+            if kind == "query":
+                vectors = embedder.embed_queries(texts)
+            else:
+                vectors = embedder.embed_documents([(text, None) for text in texts])
+        except (ServerUnavailable, EmbeddingError) as exc:
+            self._drop_embedder()
+            return {"ok": False, "error": str(exc), "hint": _EMBEDDINGS_HINT}
+        return {"ok": True, "dim": embedder.dim, "embeddings": vectors}
 
     def status(self) -> dict[str, Any]:
         conn = self._connect()
