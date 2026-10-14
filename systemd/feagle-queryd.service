@@ -1,0 +1,15 @@
+[Unit]
+Description=feagle query daemon (full-text and semantic search on a unix socket)
+Documentation=https://github.com/microwavedKing/feagle
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/feagle queryd
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+RuntimeDirectory=feagle
+
+[Install]
+WantedBy=default.target
