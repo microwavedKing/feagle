@@ -36,6 +36,10 @@ optdepends=(
 )
 install="$pkgname.install"
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# NOTE: this sum refers to the tag archive above. A copy of this PKGBUILD inside
+# that archive necessarily carries the previous revision's sum, so build from a
+# checkout of the repository (or from the AUR) and use `makepkg --skipchecksums`
+# only if you knowingly build from the archived copy.
 sha256sums=('b5cd1cfd2fd690b5a0cdc6c14e54f9dfec9d7a38f65017f59a0ac07ba21b23e0')
 
 build() {
