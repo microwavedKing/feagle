@@ -10,6 +10,7 @@ import pytest
 
 from feagle import config, paths
 from feagle.embeddings import service
+from feagle.embeddings.client import ServerUnavailable
 
 
 @pytest.fixture
@@ -64,6 +65,39 @@ def test_start_with_external_server(env):
     assert len(embedder.embed_queries(["hello world"])[0]) == 5
     svc.close()
     assert svc.supervisor.owned is False
+
+
+def test_start_retries_a_transient_probe_failure(env, monkeypatch):
+    attempts = {"n": 0}
+
+    def flaky(self):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise ServerUnavailable("server went away")
+        return 5
+
+    monkeypatch.setattr(service.EmbeddingClient, "discover_dim", flaky)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
+
+    svc = service.EmbeddingService(
+        cfg_with(model="embeddinggemma-2-q8", server_url="http://127.0.0.1:9"),
+        transport=echo_transport(dim=5),
+    )
+    embedder = svc.start()
+    assert embedder.dim == 5
+    assert attempts["n"] == 2
+    svc.close()
+
+
+def test_reset_drops_the_cached_embedder(env):
+    svc = service.EmbeddingService(
+        cfg_with(model="embeddinggemma-2-q8", server_url="http://127.0.0.1:9"),
+        transport=echo_transport(dim=5),
+    )
+    first = svc.ensure()
+    assert svc.ensure() is first  # cached
+    svc.reset()
+    assert svc.dim is None
 
 
 def test_close_does_not_stop_external(env):

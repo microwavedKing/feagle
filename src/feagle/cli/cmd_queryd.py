@@ -25,11 +25,17 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         embedder = service.start()
     except _DEGRADE_ERRORS as exc:
         print(
-            f"feagle: queryd starting without embeddings ({exc})",
+            f"feagle: queryd starting without embeddings ({exc}); "
+            "semantic search will be retried on demand",
             file=sys.stderr,
         )
 
-    engine = QueryEngine(cfg, embedder=embedder)
+    engine = QueryEngine(
+        cfg,
+        embedder=embedder,
+        embedder_provider=service.ensure,
+        on_embedder_failure=service.reset,
+    )
     server = QuerydServer(
         engine,
         request_hook=service.touch,
