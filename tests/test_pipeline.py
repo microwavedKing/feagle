@@ -200,3 +200,23 @@ def test_pruning_only_affects_scanned_roots(root, conn):
 def test_missing_root_is_skipped(root, conn):
     stats = pipeline.index_roots(conn, make_cfg(root / "nope"))
     assert stats.scanned == 0
+
+
+def test_pause_check_stops_the_run(root, conn):
+    for i in range(5):
+        (root / f"f{i}.txt").write_text(f"content {i}", encoding="utf-8")
+
+    checked = {"n": 0}
+
+    def pause_check():
+        checked["n"] += 1
+        return "on battery" if checked["n"] > 2 else None
+
+    stats = pipeline.index_roots(conn, make_cfg(root), pause_check=pause_check)
+    assert stats.paused == "on battery"
+    assert stats.scanned == 2
+    assert "paused=" in stats.summary()
+
+    # a later run without the pause finishes the remaining files
+    rest = pipeline.index_roots(conn, make_cfg(root))
+    assert rest.reindexed == 3

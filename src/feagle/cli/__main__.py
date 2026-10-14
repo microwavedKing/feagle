@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from .. import __version__, config
-from . import cmd_index, cmd_open, cmd_queryd, cmd_search, cmd_status
+from . import cmd_index, cmd_indexerd, cmd_open, cmd_queryd, cmd_search, cmd_status
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -60,6 +60,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     queryd = subparsers.add_parser("queryd", help="run the query daemon (foreground)")
     queryd.set_defaults(func=cmd_queryd.run)
+
+    indexerd = subparsers.add_parser(
+        "indexerd", help="run the indexing daemon (foreground)"
+    )
+    indexerd.add_argument(
+        "--root", action="append", default=None, metavar="PATH",
+        help="watch this directory instead of the configured roots (repeatable)",
+    )
+    indexerd.add_argument("--once", action="store_true", help="do a single pass and exit")
+    indexerd.add_argument(
+        "--poll", action="store_true", help="force polling instead of inotify"
+    )
+    indexerd.set_defaults(func=cmd_indexerd.run)
 
     return parser
 
