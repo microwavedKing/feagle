@@ -63,6 +63,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `[search].max_per_file` keeps one document from filling the result list.
 - Legacy text encodings: non-UTF-8 files are decoded with a cp1251 (Cyrillic) /
   cp1252 / latin-1 fallback instead of becoming mojibake.
+- Benchmarks: `feagle bench` (indexing throughput, query latency, memory,
+  database size, MRR@10/Recall@20) and the `bench/` scripts
+  (`gen_corpus.py`, `quality_eval.py`) on a deterministic synthetic corpus.
+- `embeddinggemma-2-q4` model preset (from the unsloth mirror, SHA256-pinned
+  and verified) — the new light default.
+
+### Changed
+
+- The default embedding model is now `embeddinggemma-2-q4`: measured 27 % faster
+  indexing and ~65 MiB less memory than `q8` with identical retrieval quality.
+  `bench` measurements are recorded in the README.
+
+### Performance
+
+- Stemming results are cached, cutting the indexer's own CPU by ~3.9× on
+  Cyrillic-heavy text (profiled before/after; the model still dominates
+  wall-clock).
 - Hotkey examples for Hyprland (hyprlang and the new Lua config), Sway, niri,
   River and mango (TOML since 0.18) in the README.
 

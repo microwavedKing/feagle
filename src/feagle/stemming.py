@@ -13,9 +13,14 @@ on English-only corpora.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 _WORD = re.compile(r"\w+", re.UNICODE)
 _CYRILLIC = re.compile(r"[\u0400-\u04FF]")
+
+#: Words repeat heavily in natural text, so stemming the same token again is
+#: wasted pure-Python work (it dominated indexing in the profiler).
+_STEM_CACHE_SIZE = 65536
 
 _stemmer: object | None = None
 _loaded = False
@@ -43,12 +48,18 @@ def is_cyrillic(token: str) -> bool:
     return bool(_CYRILLIC.search(token))
 
 
+@lru_cache(maxsize=_STEM_CACHE_SIZE)
 def stem_token(token: str) -> str:
-    """Stem a single Cyrillic token; return others unchanged."""
+    """Stem a single Cyrillic token; return others unchanged (cached)."""
     stemmer = _get_stemmer()
     if stemmer is None or not is_cyrillic(token):
         return token
     return stemmer.stemWord(token.lower())  # type: ignore[attr-defined]
+
+
+def stem_token_cache_info() -> object:
+    """Cache statistics, so the benchmark can report how well it works."""
+    return stem_token.cache_info()
 
 
 def stem_text(text: str) -> str:
