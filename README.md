@@ -232,10 +232,30 @@ binds {
 riverctl map normal Super V spawn 'feagle search --pick'
 ```
 
+**mango** (mangowm, a dwl/wlroots-based compositor). Since 0.18 the config is
+TOML at `~/.config/mango/config.toml`:
+
+```toml
+[bind.default]
+"SUPER+s" = "spawn_shell,feagle search --pick"
+```
+
+`spawn_shell` runs the command through a shell; `spawn` is also available if you
+prefer to hand over the arguments separately. Older mango (< 0.18) used
+`~/.config/mango/config.conf`:
+
+```ini
+bind=SUPER,s,spawn,feagle search --pick
+```
+
+mango is wlroots-based, so layer-shell launchers such as `wofi` and `fuzzel`
+work with `feagle search --pick` without any extra setup.
+
 If `feagle` is not on the session's `PATH` (a venv or pipx install, for
 example), use its absolute path in the bind. The syntax above was checked
-against the compositors' documentation on 2026-10-14; Hyprland's configuration
-format is changing, so check your version's docs.
+against the compositors' documentation on 2026-10-14; mango moved to TOML in
+0.18 and Hyprland's configuration format is changing, so check your version's
+docs.
 
 ## Measured performance
 

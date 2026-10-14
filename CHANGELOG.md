@@ -58,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Launcher adapters (`launchers.py`) for fuzzel, wofi, rofi, tofi and walker with
   auto-detection, a `stdout` fallback, and `feagle search --pick` which opens the
   chosen result.
+- Hotkey examples for Hyprland (hyprlang and the new Lua config), Sway, niri,
+  River and mango (TOML since 0.18) in the README.
 
 ### Changed
 
