@@ -58,10 +58,12 @@ def make_supervisor(tmp_path, *, health, spawn=None, cfg_kwargs=None, clock=None
         port_file=tmp_path / "llama.port",
         pid_file=tmp_path / "llama.pid",
         lock_file=tmp_path / "llama.lock",
+        touch_file=tmp_path / "llama.touch",
         log_file=tmp_path / "llama.log",
         spawn=spawn or (lambda cmd: FakeProc()),
         health=health,
         clock=clock,
+        wall_clock=lambda: clock.t,
         sleep=clock.sleep,
     ), clock
 
@@ -224,6 +226,21 @@ def test_touch_resets_idle(tmp_path):
     sup.touch()
     clock.t += 50
     assert sup.stop_if_idle() is False  # only 50s since touch
+
+
+def test_shared_touch_keeps_the_server_alive(tmp_path):
+    """A second process using the shared server postpones the idle unload."""
+    sup, clock = make_supervisor(
+        tmp_path, health=lambda url: True, cfg_kwargs={"idle_timeout_min": 1}
+    )
+    sup.ensure_running()
+    clock.t += 61
+    # another process refreshes the shared stamp (as an indexer would)
+    (tmp_path / "llama.touch").write_text(str(clock.t), encoding="utf-8")
+    assert sup.stop_if_idle() is False
+
+    clock.t += 61  # now nobody has touched it for 61s
+    assert sup.stop_if_idle() is True
 
 
 def test_never_stops_reused_server(tmp_path):

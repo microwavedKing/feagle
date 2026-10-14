@@ -101,20 +101,27 @@ class LlamaSupervisor:
         port_file: Path | None = None,
         pid_file: Path | None = None,
         lock_file: Path | None = None,
+        touch_file: Path | None = None,
         log_file: Path | None = None,
         spawn: Callable[[list[str]], Any] | None = None,
         health: Callable[[str], bool] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.cfg = cfg
         self.port_file = port_file or (paths.runtime_subdir() / "llama.port")
         self.pid_file = pid_file or (paths.runtime_subdir() / "llama.pid")
         self.lock_file = lock_file or (paths.runtime_subdir() / "llama.lock")
+        #: Shared last-activity stamp: the server is shared between daemons, so
+        #: *every* user updates this file and the owner only unloads the server
+        #: once nobody has touched it for the idle timeout.
+        self.touch_file = touch_file or (paths.runtime_subdir() / "llama.touch")
         self.log_file = log_file or (paths.state_dir() / "llama.log")
         self._spawn = spawn or self._default_spawn
         self._health = health or _default_health
         self._clock = clock
+        self._wall_clock = wall_clock
         self._sleep = sleep
         self._proc: Any | None = None
         self._owned = False
@@ -245,13 +252,34 @@ class LlamaSupervisor:
         return False
 
     def touch(self) -> None:
+        """Record activity, in memory and in the shared stamp file."""
         self._last_activity = self._clock()
+        with contextlib.suppress(OSError):
+            self.touch_file.parent.mkdir(parents=True, exist_ok=True)
+            self.touch_file.write_text(str(self._wall_clock()), encoding="utf-8")
+
+    def _shared_idle_seconds(self) -> float | None:
+        """Seconds since the shared activity stamp, or ``None`` without one."""
+        try:
+            stamp = float(self.touch_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return None
+        return max(0.0, self._wall_clock() - stamp)
 
     def stop_if_idle(self) -> bool:
-        """Stop an owned server idle for longer than the configured timeout."""
+        """Stop an owned server idle for longer than the configured timeout.
+
+        Any process using the shared server refreshes the stamp file, so a
+        running indexer keeps the server alive even though the owner's own
+        request counter is quiet.
+        """
         if not self._owned or self._proc is None or self.cfg.idle_timeout_min <= 0:
             return False
-        if self._clock() - self._last_activity >= self.cfg.idle_timeout_min * 60:
+        idle = self._clock() - self._last_activity
+        shared = self._shared_idle_seconds()
+        if shared is not None:
+            idle = min(idle, shared)
+        if idle >= self.cfg.idle_timeout_min * 60:
             log.info("stopping idle llama-server")
             self.stop()
             return True
