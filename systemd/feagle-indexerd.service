@@ -1,0 +1,20 @@
+[Unit]
+Description=feagle indexer (watch documents and keep the index fresh)
+Documentation=https://github.com/microwavedKing/feagle
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/feagle indexerd
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+RuntimeDirectory=feagle
+# Stay out of the way: lowest priority, idle I/O.
+Nice=19
+IOSchedulingClass=idle
+# Cap CPU usage if needed. 200% = two CPUs (percent of a single CPU).
+#CPUQuota=200%
+
+[Install]
+WantedBy=default.target
