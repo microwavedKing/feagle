@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from .. import __version__, config
+from ..embeddings import presets
 from . import (
     cmd_doctor,
     cmd_index,
@@ -13,6 +14,7 @@ from . import (
     cmd_open,
     cmd_queryd,
     cmd_search,
+    cmd_setup,
     cmd_status,
 )
 
@@ -59,6 +61,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--fast", action="store_true", help="skip hashing the model file"
     )
     doctor.set_defaults(func=cmd_doctor.run)
+
+    setup_cmd = subparsers.add_parser("setup", help="first-run interactive setup")
+    setup_cmd.add_argument(
+        "--root", action="append", default=None, metavar="PATH",
+        help="directories to index (repeatable)",
+    )
+    setup_cmd.add_argument("--model", default=None, help="model preset or GGUF path")
+    setup_cmd.add_argument("--mrl-dim", type=int, default=None, choices=presets.MRL_DIMS)
+    setup_cmd.add_argument("--launcher", default=None, choices=cmd_setup.LAUNCHER_CHOICES)
+    setup_cmd.add_argument(
+        "--yes", action="store_true", help="accept defaults (non-interactive)"
+    )
+    setup_cmd.add_argument("--no-download", action="store_true", help="skip model download")
+    setup_cmd.add_argument("--no-units", action="store_true", help="skip systemd units")
+    setup_cmd.add_argument(
+        "--no-enable", action="store_true",
+        help="install the units but do not enable/start them",
+    )
+    setup_cmd.add_argument("--no-index", action="store_true", help="skip the first index")
+    setup_cmd.add_argument("--no-backup", action="store_true", help="do not back up the config")
+    setup_cmd.set_defaults(func=cmd_setup.run)
 
     open_cmd = subparsers.add_parser("open", help="open a file at a line or page")
     open_cmd.add_argument("path", help="file to open")
