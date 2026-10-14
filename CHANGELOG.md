@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page number.
 - `feagle open <path> [+N]` with configurable opener templates (`openers.py`),
   plus a `--dry-run` mode.
+- Indexer daemon (`feagle indexerd`): `watchfiles` loop, periodic rescan,
+  per-root rescan on change and battery/load pauses (`power.py`).
+- systemd user units (`systemd/`) for the indexer and query daemon, with resource
+  limits, and an installer (`units.py`).
+- `feagle doctor`: environment checks with concrete fix hints.
+- `feagle setup`: interactive first-run configuration (roots, launcher, model
+  profile, model download, units, first index) with `--yes` and flags for
+  non-interactive use.
 
 ### Changed
 
@@ -53,3 +61,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sqlite-vec` is pre-1.0; `vec0` deletions do not shrink the file until
   `index --rebuild`.
 - Scanned PDFs without a text layer yield no text (no OCR yet).
+- Launcher adapters and packaging are not implemented yet (later phases).

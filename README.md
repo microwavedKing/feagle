@@ -9,9 +9,10 @@ source line). Everything stays on your machine: no cloud, no accounts, no
 telemetry.
 
 > **Status:** early development (`0.1.0`). Full-text and semantic search work, as
-> do PDF extraction and opening results at a line/page. Systemd units, launcher
-> adapters and packaging are still to come. `llama-server` is optional — without
-> it `feagle` degrades gracefully to full-text search.
+> do PDF indexing, opening results at a line/page, systemd user units, `feagle
+> setup` and `feagle doctor`. Launcher adapters and packaging are still to come.
+> `llama-server` is optional — without it `feagle` degrades gracefully to
+> full-text search.
 
 ## Requirements
 
@@ -36,9 +37,26 @@ python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
+Then run the interactive first-time setup, which writes the config, downloads
+the model (SHA256-verified), installs and enables the systemd user units, and
+runs the first index:
+
+```sh
+.venv/bin/feagle setup
+```
+
+A non-interactive equivalent:
+
+```sh
+.venv/bin/feagle setup --yes --root ~/Documents --model embeddinggemma-2-q8
+```
+
 ## Usage
 
 ```sh
+feagle setup                 # first-run configuration (interactive)
+feagle doctor                # environment check with fix hints
+
 feagle index                 # scan configured roots (semantic when available)
 feagle index --no-embed      # full-text indexing only
 feagle index --backfill      # embed files that still lack vectors
@@ -53,6 +71,7 @@ feagle open ~/src/app.py +42       # open a source file at line 42
 
 feagle status
 feagle queryd                # run the query daemon in the foreground
+feagle indexerd              # run the indexing daemon in the foreground
 ```
 
 Configuration lives in `$XDG_CONFIG_HOME/feagle/config.toml`
@@ -112,6 +131,33 @@ Commands are split with `shlex` and executed without a shell. `feagle open
 --dry-run` prints the command it would run, which is handy for checking a
 template.
 
+## Services (systemd user units)
+
+`feagle setup` installs `feagle-indexerd.service` and `feagle-queryd.service`
+into `$XDG_CONFIG_HOME/systemd/user/` and enables them. To do it by hand:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now feagle-indexerd feagle-queryd
+```
+
+The indexer watches the configured roots (inotify via `watchfiles`; polling as a
+fallback with `feagle indexerd --poll`), rescans periodically, and pauses while
+on battery or when the load average is too high. Resource limits live in the
+indexer unit: `Nice=19`, `IOSchedulingClass=idle` and a commented
+`CPUQuota=200%` (200% = two CPUs). These directives need cgroup v2, which
+`feagle doctor` verifies.
+
+## Diagnostics
+
+```sh
+feagle doctor            # python, sqlite/vec, index, units, server, model, launcher, ...
+feagle doctor --json
+```
+
+Each line is `OK` / `WARN` / `FAIL` with a concrete fix hint (for example which
+package to install or which command to run).
+
 ## Measured performance
 
 Measured on the target laptop (Intel i7-8565U, 4 cores / 8 threads, NVMe, no
@@ -136,8 +182,8 @@ p50/p95/RAM measurements arrive in a later phase.
   `feagle index --rebuild`.
 - Scanned PDFs (images without a text layer) yield no text; OCR is not supported
   yet.
-- Systemd units, launcher adapters and packaging are not implemented yet (later
-  phases).
+- Launcher adapters (`feagle search --pick`) and packaging are not implemented
+  yet (later phases).
 
 ## License
 
