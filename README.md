@@ -171,6 +171,13 @@ document that says `книга`, `книге` or `книгами`. Exact matchin
 two rankings are fused with RRF like everything else. Stemming is on by default
 (`[search].stemming = "auto"`); set it to `"none"` to disable it.
 
+**Text encodings.** Text files are decoded as UTF-8. When a file is not valid
+UTF-8, `feagle` falls back to cp1251 (only if the result is actually Cyrillic,
+so Western European files are not mangled) and then to cp1252/latin-1. This
+covers the legacy Russian `.txt` files that are common in book corpora; koi8-r
+is not detected (it cannot be told apart from cp1251 reliably) and such files
+will be decoded as cp1251.
+
 **OCR.** Scanned PDFs have no text layer. With OCR enabled, pages that have
 almost no text are rendered to an image (`pdftoppm`, from poppler) and passed to
 `tesseract`:
