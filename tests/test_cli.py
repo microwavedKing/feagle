@@ -134,6 +134,15 @@ def test_config_error_returns_two(env, capsys):
     assert "configuration error" in capsys.readouterr().err
 
 
+def test_main_configures_logging(env, monkeypatch):
+    called = {}
+    monkeypatch.setattr(
+        "feagle.cli.__main__.setup_logging", lambda *a, **k: called.setdefault("yes", True)
+    )
+    main(["status"])
+    assert called.get("yes") is True
+
+
 # -- hybrid path with a stubbed embedder ----------------------------------
 
 
