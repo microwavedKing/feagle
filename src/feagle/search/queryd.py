@@ -171,7 +171,7 @@ class _Handler(socketserver.StreamRequestHandler):
                 response = self.server.engine.dispatch(request)
             self.wfile.write((json.dumps(response, ensure_ascii=False) + "\n").encode())
             self.wfile.flush()
-            hook = getattr(self.server, "idle_hook", None)
+            hook = getattr(self.server, "request_hook", None)
             if hook is not None:
                 hook()
 
@@ -179,8 +179,9 @@ class _Handler(socketserver.StreamRequestHandler):
 class _UnixServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
 
-    def __init__(self, path: str, handler, engine: QueryEngine, idle_hook=None) -> None:
+    def __init__(self, path: str, handler, engine: QueryEngine, request_hook=None, idle_hook=None):
         self.engine = engine
+        self.request_hook = request_hook
         self.idle_hook = idle_hook
         super().__init__(path, handler)
 
@@ -193,10 +194,12 @@ class QuerydServer:
         engine: QueryEngine,
         *,
         socket_path: Path | None = None,
+        request_hook: Callable[[], Any] | None = None,
         idle_hook: Callable[[], Any] | None = None,
     ) -> None:
         self.engine = engine
         self.socket_path = socket_path or paths.socket_path()
+        self.request_hook = request_hook
         self.idle_hook = idle_hook
         self._server: _UnixServer | None = None
         self._thread: threading.Thread | None = None
@@ -205,7 +208,9 @@ class QuerydServer:
     def _bind(self) -> _UnixServer:
         paths.ensure_runtime_dir()
         self.socket_path.unlink(missing_ok=True)
-        server = _UnixServer(str(self.socket_path), _Handler, self.engine, self.idle_hook)
+        server = _UnixServer(
+            str(self.socket_path), _Handler, self.engine, self.request_hook, self.idle_hook
+        )
         with contextlib.suppress(OSError):
             os.chmod(self.socket_path, 0o600)
         return server
