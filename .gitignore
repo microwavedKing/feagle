@@ -1,0 +1,28 @@
+# Virtualenv / build
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local databases / indexes
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.bak
+
+# Benchmark outputs
+bench/results/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
