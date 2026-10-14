@@ -61,6 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search quality controls: `[search].max_distance` drops unrelated vector
   neighbours (an unrelated query no longer returns a full page of weak matches)
   and `[search].max_per_file` keeps one document from filling the result list.
+- Legacy text encodings: non-UTF-8 files are decoded with a cp1251 (Cyrillic) /
+  cp1252 / latin-1 fallback instead of becoming mojibake.
 - Hotkey examples for Hyprland (hyprlang and the new Lua config), Sway, niri,
   River and mango (TOML since 0.18) in the README.
 
