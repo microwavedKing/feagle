@@ -253,6 +253,38 @@ def test_embedder_restarts_when_the_server_drops(root, conn):
     assert len(attempts) == 2
 
 
+def test_embedder_restart_failure_degrades_instead_of_crashing(root, conn):
+    (root / "a.txt").write_text("content", encoding="utf-8")
+
+    class Flaky:
+        dim = 4
+
+        def embed_documents(self, items):
+            raise ServerUnavailable("down")
+
+        def embed_queries(self, texts):
+            raise ServerUnavailable("down")
+
+    calls = []
+
+    def provider():
+        calls.append(1)
+        if len(calls) == 1:
+            return Flaky()
+        raise OSError("model vanished")
+
+    daemon = IndexerDaemon(
+        make_cfg(root),
+        conn=conn,
+        embedder_provider=provider,
+        on_embedder_failure=lambda: None,
+        pause_check=lambda: None,
+    )
+    stats = daemon.index_once()  # must not raise
+    assert stats.vectors == 0
+    assert embedded_of(conn, root / "a.txt") == 0
+
+
 def test_idle_hook_is_called_in_the_wait_loop(root, conn):
     calls = []
 

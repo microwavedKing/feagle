@@ -61,7 +61,11 @@ class _ResilientEmbedder:
             log.warning("embeddings server unavailable (%s); restarting it", exc)
             with contextlib.suppress(Exception):
                 self._on_failure()
-            self._embedder = self._provider()
+            try:
+                self._embedder = self._provider()
+            except Exception as new_exc:  # noqa: BLE001 - degrade instead of crashing
+                log.warning("could not restart embeddings: %s", new_exc)
+                raise ServerUnavailable(str(new_exc)) from new_exc
             return getattr(self._embedder, method)(*args)
 
     def embed_documents(self, items: list[tuple[str, str | None]]) -> list[list[float]]:
