@@ -1,12 +1,15 @@
 """Text extraction.
 
-Phase 1 handles plain text, markdown and source code (any allowlisted
-extension). PDF is a stub that raises a clear, catchable error; the real
-``pdftotext`` extractor arrives in a later phase.
+Plain text, markdown and source code are read directly (any allowlisted
+extension). PDF is extracted with ``pdftotext`` (poppler-utils) run as a
+subprocess: one string per page, split on the form feed (``\\f``) that poppler
+emits between pages.
 """
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,13 +20,18 @@ log = get_logger("indexer.extract")
 #: Bytes inspected for a NUL byte when deciding whether a file is binary.
 BINARY_SNIFF = 8192
 
+#: Wall-clock limit for a single ``pdftotext`` invocation.
+PDF_TIMEOUT = 30.0
+
+PDF_MISSING_HINT = "install poppler-utils (pdftotext) to index PDF files"
+
 
 class ExtractionError(Exception):
     """A file could not be read or decoded."""
 
 
 class UnsupportedFile(Exception):
-    """A file is intentionally not indexed (binary, or not implemented yet)."""
+    """A file is intentionally not indexed (binary, or a missing tool)."""
 
 
 @dataclass(frozen=True)
@@ -36,6 +44,11 @@ class Extracted:
 
     pages: tuple[str, ...]
     kind: str
+
+
+def pdftotext_available() -> bool:
+    """Whether the ``pdftotext`` binary is on ``PATH``."""
+    return shutil.which("pdftotext") is not None
 
 
 def extract(path: Path, *, max_bytes: int | None = None) -> Extracted:
@@ -53,9 +66,37 @@ def extract_text(path: Path, *, max_bytes: int | None = None) -> Extracted:
     return Extracted(pages=(text,), kind="text")
 
 
-def extract_pdf(path: Path) -> Extracted:
-    """Placeholder for the ``pdftotext`` extractor (planned for a later phase)."""
-    raise UnsupportedFile(f"PDF extraction is not implemented yet: {path}")
+def extract_pdf(path: Path, *, timeout: float = PDF_TIMEOUT) -> Extracted:
+    """Extract a PDF page by page using ``pdftotext``."""
+    binary = shutil.which("pdftotext")
+    if binary is None:
+        raise UnsupportedFile(f"{PDF_MISSING_HINT}: {path}")
+
+    try:
+        proc = subprocess.run(
+            [binary, "-enc", "UTF-8", "-q", "--", str(path), "-"],
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ExtractionError(f"pdftotext timed out after {timeout:.0f}s: {path}") from exc
+    except OSError as exc:
+        raise ExtractionError(f"cannot run pdftotext: {exc}") from exc
+
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise ExtractionError(
+            f"pdftotext failed ({proc.returncode}) for {path}: {detail[:200]}"
+        )
+
+    text = proc.stdout.decode("utf-8", errors="replace")
+    pages = text.split("\f")
+    if pages and pages[-1] == "":
+        pages.pop()  # poppler terminates the last page with a form feed too
+    if not pages:
+        pages = [""]
+    return Extracted(pages=tuple(pages), kind="pdf")
 
 
 def _read_bytes(path: Path, max_bytes: int | None) -> bytes:
