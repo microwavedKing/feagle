@@ -6,11 +6,13 @@ import argparse
 import json
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
-from .. import db, paths
+from .. import db, launchers, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.service import EmbeddingService, ModelMissingError
+from ..openers import OpenError, open_result
 from ..search import hybrid
 from ..search.queryd import QuerydClient
 
@@ -107,6 +109,30 @@ def _location(result: dict[str, Any]) -> str:
     return location
 
 
+def _pick_and_open(cfg: dict[str, Any], result: dict[str, Any]) -> int:
+    results = result.get("results") or []
+    if not results:
+        return 0
+    items = [
+        (item["path"], f"{_location(item)}  {item['snippet']}") for item in results
+    ]
+    choice = launchers.pick(items, program=cfg["launcher"]["program"])
+    if choice is None:
+        return 0
+
+    hit = next((item for item in results if item["path"] == choice), None)
+    if hit is None:
+        return 0
+    try:
+        open_result(
+            cfg["openers"], Path(hit["path"]), line=hit.get("line"), page=hit.get("page")
+        )
+    except OpenError as exc:
+        print(f"feagle: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     if not paths.db_path().exists():
         print("feagle: no index yet; run 'feagle index' first.", file=sys.stderr)
@@ -118,6 +144,9 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     result = _request_from_daemon(args.query, limit, mode)
     if result is None:
         result = _search_in_process(cfg, args.query, limit, mode)
+
+    if args.pick:
+        return _pick_and_open(cfg, result)
 
     if args.json:
         payload = {

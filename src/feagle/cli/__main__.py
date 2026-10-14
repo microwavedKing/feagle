@@ -49,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="search mode (default: from config)",
     )
     search.add_argument("--json", action="store_true", help="emit JSON")
+    search.add_argument(
+        "--pick", action="store_true",
+        help="choose a result in a launcher (dmenu) and open it",
+    )
     search.set_defaults(func=cmd_search.run)
 
     status = subparsers.add_parser("status", help="show index statistics")
