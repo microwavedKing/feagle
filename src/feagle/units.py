@@ -34,7 +34,10 @@ ExecStart={feagle} indexerd
 Restart=on-failure
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
-RuntimeDirectory=feagle
+# The runtime directory ($XDG_RUNTIME_DIR/feagle) is created by feagle itself
+# with mode 0700. Do NOT use RuntimeDirectory=feagle here: both units share the
+# directory, and systemd removes it when either unit stops, which would delete
+# the other service's socket and port file.
 # Stay out of the way: lowest priority, idle I/O.
 Nice=19
 IOSchedulingClass=idle
@@ -56,7 +59,8 @@ ExecStart={feagle} queryd
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
-RuntimeDirectory=feagle
+# RuntimeDirectory is deliberately not set: the shared runtime directory is
+# managed by feagle (see the comment in feagle-indexerd.service).
 
 [Install]
 WantedBy=default.target

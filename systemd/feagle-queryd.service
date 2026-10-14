@@ -9,7 +9,8 @@ ExecStart=/usr/bin/feagle queryd
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
-RuntimeDirectory=feagle
+# RuntimeDirectory is deliberately not set: the shared runtime directory is
+# managed by feagle (see the comment in feagle-indexerd.service).
 
 [Install]
 WantedBy=default.target

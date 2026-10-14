@@ -34,6 +34,18 @@ def test_queryd_unit_has_no_nice():
     assert "ExecStart=/usr/bin/feagle queryd" in text
 
 
+def test_units_do_not_manage_the_shared_runtime_directory():
+    # systemd deletes a managed RuntimeDirectory when either unit stops, which
+    # would remove the other unit's socket; feagle creates it itself instead.
+    for name in units.UNIT_NAMES:
+        directives = [
+            line.strip()
+            for line in units.render_unit(name, "/usr/bin/feagle").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        assert not any(line.startswith("RuntimeDirectory=") for line in directives)
+
+
 def test_unknown_unit_raises():
     with pytest.raises(KeyError, match="unknown unit"):
         units.render_unit("nope.service", "/usr/bin/feagle")
