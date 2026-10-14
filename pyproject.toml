@@ -27,6 +27,7 @@ dependencies = [
   "watchfiles>=1.2",
   "httpx>=0.27",
   "sqlite-vec>=0.1.6",
+  "snowballstemmer>=2.2",
 ]
 
 [project.optional-dependencies]

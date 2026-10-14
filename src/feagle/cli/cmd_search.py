@@ -11,7 +11,7 @@ from typing import Any
 from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.service import EmbeddingService, ModelMissingError
-from ..search import fts, hybrid
+from ..search import hybrid
 from ..search.queryd import QuerydClient
 
 _DEGRADE_ERRORS = (ModelMissingError, ServerUnavailable, EmbeddingError, OSError)
@@ -37,6 +37,7 @@ def _request_from_daemon(query: str, limit: int, mode: str) -> dict[str, Any] | 
 
 def _search_in_process(cfg: dict[str, Any], query: str, limit: int, mode: str) -> dict[str, Any]:
     search_cfg = cfg["search"]
+    stem = search_cfg["stemming"] != "none"
     started = time.perf_counter()
     conn = db.connect(paths.db_path(), read_only=True)
     service: EmbeddingService | None = None
@@ -60,12 +61,19 @@ def _search_in_process(cfg: dict[str, Any], query: str, limit: int, mode: str) -
                     limit=limit,
                     candidates=search_cfg["candidates"],
                     rrf_k=search_cfg["rrf_k"],
+                    stem=stem,
                 )
                 used = "hybrid"
             else:
-                hits = fts.search_fts(conn, query, limit=limit)
+                hits = hybrid.search_text(
+                    conn, query, limit=limit,
+                    candidates=search_cfg["candidates"], rrf_k=search_cfg["rrf_k"], stem=stem,
+                )
         else:
-            hits = fts.search_fts(conn, query, limit=limit)
+            hits = hybrid.search_text(
+                conn, query, limit=limit,
+                candidates=search_cfg["candidates"], rrf_k=search_cfg["rrf_k"], stem=stem,
+            )
     finally:
         conn.close()
         if service is not None:

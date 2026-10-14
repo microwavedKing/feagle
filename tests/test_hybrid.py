@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from feagle import db
+from feagle import db, stemming
 from feagle.search import hybrid, vec
 
 DIM = 3
@@ -32,7 +32,10 @@ def add(conn, path, body, vector, *, page=None, line=None):
         (file_id, 0, page, line, body),
     )
     chunk_id = cur.lastrowid
-    conn.execute("INSERT INTO chunks_fts(body, chunk_id) VALUES(?, ?)", (body, chunk_id))
+    conn.execute(
+        "INSERT INTO chunks_fts(body, stem, chunk_id) VALUES(?,?,?)",
+        (body, stemming.stem_text(body), chunk_id),
+    )
     vec.insert_vectors(conn, [(chunk_id, vector)])
     conn.commit()
     return chunk_id
@@ -105,3 +108,22 @@ def test_hybrid_ignores_single_word_or_matches(conn):
         conn, "sleep hours need", query_vector=[1.0, 0.0, 0.0], limit=5, candidates=10
     )
     assert hits[0].chunk_id == target
+
+
+def test_search_text_matches_russian_word_forms(conn):
+    add(conn, "/d/book.txt", "В книге описана интересная история", [1.0, 0.0, 0.0])
+    hits = hybrid.search_text(conn, "книги", limit=5, candidates=10)
+    assert [h.path for h in hits] == ["/d/book.txt"]
+
+
+def test_search_text_without_stemming_finds_nothing(conn):
+    add(conn, "/d/book.txt", "В книге описана история", [1.0, 0.0, 0.0])
+    assert hybrid.search_text(conn, "книги", limit=5, candidates=10, stem=False) == []
+
+
+def test_hybrid_matches_russian_word_forms(conn):
+    target = add(conn, "/d/book.txt", "В книге описана история", [1.0, 0.0, 0.0])
+    hits = hybrid.search_hybrid(
+        conn, "книги", query_vector=[1.0, 0.0, 0.0], limit=5, candidates=10
+    )
+    assert target in [h.chunk_id for h in hits]

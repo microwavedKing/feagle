@@ -1,19 +1,19 @@
-"""Hybrid search: fuse BM25 and vector rankings with Reciprocal Rank Fusion.
+"""Hybrid search: fuse BM25 (exact and stemmed) with vector rankings via RRF.
 
 RRF score of a document is ``sum over rankings of 1 / (k + rank)`` where
 ``rank`` is 1-based within each ranking. RRF needs only the ranks, so the
 incompatible score scales of BM25 and cosine distance do not matter.
 
-The FTS side is used with AND semantics only: an OR fallback (enabled for pure
-full-text search) would let a single common word promote a document that the
-semantic side did not consider relevant.
+The exact FTS side is used with AND semantics only: an OR fallback (enabled for
+pure full-text search) would let a single common word promote a document that
+the semantic side did not consider relevant.
 """
 
 from __future__ import annotations
 
 import sqlite3
 
-from .fts import SearchHit, _snippet, search_fts
+from .fts import SearchHit, _snippet, search_fts, search_fts_stemmed
 from .vec import knn
 
 DEFAULT_RRF_K = 60
@@ -66,6 +66,40 @@ def _to_hits(
     return hits
 
 
+def _text_rankings(
+    conn: sqlite3.Connection, query: str, candidates: int, *, stem: bool, fallback_or: bool
+) -> list[list[int]]:
+    exact = [
+        hit.chunk_id
+        for hit in search_fts(conn, query, limit=candidates, fallback_or=fallback_or)
+    ]
+    rankings = [exact] if exact else []
+    if stem:
+        stemmed = [
+            hit.chunk_id
+            for hit in search_fts_stemmed(conn, query, limit=candidates, fallback_or=fallback_or)
+        ]
+        if stemmed:
+            rankings.append(stemmed)
+    return rankings
+
+
+def search_text(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int = 20,
+    candidates: int = 50,
+    rrf_k: int = DEFAULT_RRF_K,
+    stem: bool = True,
+) -> list[SearchHit]:
+    """Full-text search fusing the exact and stemmed rankings."""
+    rankings = _text_rankings(conn, query, candidates, stem=stem, fallback_or=True)
+    if not rankings:
+        return []
+    return _to_hits(conn, rrf(rankings, k=rrf_k), limit)
+
+
 def search_hybrid(
     conn: sqlite3.Connection,
     query: str,
@@ -74,22 +108,19 @@ def search_hybrid(
     limit: int = 20,
     candidates: int = 50,
     rrf_k: int = DEFAULT_RRF_K,
+    stem: bool = True,
 ) -> list[SearchHit]:
-    """Run FTS and (when available) KNN, fuse them and return top ``limit``.
+    """Run exact + stemmed FTS and (when available) KNN, then fuse.
 
-    With ``query_vector=None`` this degrades to a pure FTS search.
+    With ``query_vector=None`` this degrades to a full-text search.
     """
-    fts_ids = [
-        hit.chunk_id
-        for hit in search_fts(conn, query, limit=candidates, fallback_or=False)
-    ]
+    rankings = _text_rankings(conn, query, candidates, stem=stem, fallback_or=False)
 
-    vec_ids: list[int] = []
     if query_vector is not None:
         vec_ids = [hit.chunk_id for hit in knn(conn, query_vector, k=candidates)]
+        if vec_ids:
+            rankings.append(vec_ids)
 
-    if not fts_ids and not vec_ids:
+    if not rankings:
         return []
-
-    ranked = rrf([fts_ids, vec_ids], k=rrf_k)
-    return _to_hits(conn, ranked, limit)
+    return _to_hits(conn, rrf(rankings, k=rrf_k), limit)
