@@ -86,13 +86,25 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
-def _warn_unknown(user: dict[str, Any], defaults: dict[str, Any], prefix: str = "") -> None:
+def _warn_unknown(
+    user: dict[str, Any],
+    defaults: dict[str, Any],
+    prefix: str = "",
+    free_tables: frozenset[str] = frozenset({"openers"}),
+) -> None:
+    """Warn about keys that are not part of the schema.
+
+    ``openers`` is a free-form table: its keys are file extensions, so unknown
+    entries there are expected and must not be reported.
+    """
     for key, value in user.items():
         path = f"{prefix}{key}"
         if key not in defaults:
             log.warning("unknown config key ignored: %s", path)
         elif isinstance(value, dict) and isinstance(defaults[key], dict):
-            _warn_unknown(value, defaults[key], prefix=f"{path}.")
+            if key in free_tables:
+                continue
+            _warn_unknown(value, defaults[key], prefix=f"{path}.", free_tables=free_tables)
 
 
 def _check(condition: bool, key: str, message: str, source: Path) -> None:
