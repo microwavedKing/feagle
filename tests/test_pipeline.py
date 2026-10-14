@@ -202,6 +202,36 @@ def test_missing_root_is_skipped(root, conn):
     assert stats.scanned == 0
 
 
+# -- images (OCR) ----------------------------------------------------------
+
+
+def test_scanner_allowlist_gains_images_with_ocr_images(root):
+    assert ".png" not in pipeline._build_scanner(make_cfg(root)).include_ext
+    scanner = pipeline._build_scanner(make_cfg(root, ocr_images=True))
+    assert {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif"} <= scanner.include_ext
+
+
+def test_images_are_ignored_when_ocr_images_is_off(root, conn):
+    (root / "shot.png").write_bytes(b"PNG")
+    stats = pipeline.index_roots(conn, make_cfg(root))
+    assert stats.scanned == 0
+    assert file_row(conn, root / "shot.png") is None
+
+
+def test_images_are_indexed_and_searchable(root, conn, monkeypatch):
+    (root / "shot.png").write_bytes(b"PNG")
+    monkeypatch.setattr(extract, "image_ocr_available", lambda: True)
+    monkeypatch.setattr(extract, "ocr_image", lambda p, **kw: "charlie screenshot words")
+
+    stats = pipeline.index_roots(conn, make_cfg(root, ocr_images=True))
+    assert stats.reindexed == 1
+    hits = search_fts(conn, "charlie")
+    assert hits and hits[0].path.endswith("shot.png")
+    # an image has no meaningful line or page
+    row = conn.execute("SELECT line, page FROM chunks").fetchone()
+    assert row["line"] is None and row["page"] is None
+
+
 def test_pause_check_stops_the_run(root, conn):
     for i in range(5):
         (root / f"f{i}.txt").write_text(f"content {i}", encoding="utf-8")

@@ -14,7 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..log import get_logger
-from .ocr import DEFAULT_DPI, DEFAULT_LANGS, ocr_pages
+from .ocr import (
+    DEFAULT_DPI,
+    DEFAULT_LANGS,
+    IMAGE_SUFFIXES,
+    OCR_TIMEOUT,
+    OcrError,
+    image_ocr_available,
+    ocr_image,
+    ocr_pages,
+)
 
 log = get_logger("indexer.extract")
 
@@ -25,6 +34,9 @@ BINARY_SNIFF = 8192
 PDF_TIMEOUT = 30.0
 
 PDF_MISSING_HINT = "install poppler (pdftotext) to index PDF files"
+
+IMAGE_DISABLED_HINT = "image OCR is off (set [index].ocr_images = true to index images)"
+IMAGE_NO_TESSERACT_HINT = "install tesseract to index images"
 
 #: Encodings tried (in order) when a text file is not valid UTF-8. cp1251 (the
 #: common legacy Russian encoding) is only accepted when the result actually
@@ -52,8 +64,9 @@ class Extracted:
     """Extracted text.
 
     ``pages`` holds one string per logical page: a single entry for plain text,
-    one entry per PDF page (in order). ``kind`` is ``"text"`` or ``"pdf"``.
-    ``encoding`` records how a text file was decoded (``"utf-8"`` by default).
+    one entry per PDF page (in order), and one entry for an OCR'd image. ``kind``
+    is ``"text"``, ``"pdf"`` or ``"image"``. ``encoding`` records how a text file
+    was decoded (``"utf-8"`` by default).
     """
 
     pages: tuple[str, ...]
@@ -71,13 +84,15 @@ def extract(
     *,
     max_bytes: int | None = None,
     ocr: bool = False,
+    ocr_images: bool = False,
     ocr_langs: str = DEFAULT_LANGS,
     ocr_dpi: int = DEFAULT_DPI,
     ocr_min_chars: int = 20,
     ocr_max_pages: int = 200,
 ) -> Extracted:
     """Extract indexable text from ``path`` based on its extension."""
-    if path.suffix.lower() == ".pdf":
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
         return extract_pdf(
             path,
             ocr=ocr,
@@ -85,6 +100,12 @@ def extract(
             ocr_dpi=ocr_dpi,
             ocr_min_chars=ocr_min_chars,
             ocr_max_pages=ocr_max_pages,
+        )
+    if suffix in IMAGE_SUFFIXES:
+        return extract_image(
+            path,
+            enabled=ocr_images,
+            ocr_langs=ocr_langs,
         )
     return extract_text(path, max_bytes=max_bytes)
 
@@ -135,6 +156,33 @@ def extract_text(path: Path, *, max_bytes: int | None = None) -> Extracted:
     if encoding != "utf-8":
         log.info("decoded %s as %s", path, encoding)
     return Extracted(pages=(text,), kind="text", encoding=encoding)
+
+
+def extract_image(
+    path: Path,
+    *,
+    enabled: bool = False,
+    ocr_langs: str = DEFAULT_LANGS,
+    timeout: float = OCR_TIMEOUT,
+) -> Extracted:
+    """OCR an image file directly with ``tesseract``.
+
+    Images need only ``tesseract`` (there is nothing to render), unlike scanned
+    PDF pages which also need ``pdftoppm``. When image OCR is disabled in the
+    config, or ``tesseract`` is missing, the file is skipped with a clear
+    message instead of failing the run.
+    """
+    if not enabled:
+        raise UnsupportedFile(f"{IMAGE_DISABLED_HINT}: {path}")
+    if not image_ocr_available():
+        raise UnsupportedFile(f"{IMAGE_NO_TESSERACT_HINT}: {path}")
+    try:
+        text = ocr_image(path, langs=ocr_langs, timeout=timeout)
+    except OcrError as exc:
+        raise ExtractionError(str(exc)) from exc
+    if not text.strip():
+        log.info("no text recognized in %s", path)
+    return Extracted(pages=(text,), kind="image")
 
 
 def extract_pdf(

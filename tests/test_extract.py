@@ -99,6 +99,64 @@ def test_extract_dispatches_pdf(monkeypatch):
     assert extract(PDF_FIXTURE).kind == "pdf"
 
 
+# -- images (OCR) ----------------------------------------------------------
+
+
+def test_extract_image_when_enabled(tmp_path, monkeypatch):
+    path = tmp_path / "shot.png"
+    path.write_bytes(b"PNG")
+    monkeypatch.setattr("feagle.indexer.extract.image_ocr_available", lambda: True)
+    monkeypatch.setattr("feagle.indexer.extract.ocr_image", lambda p, **kw: "recognized words")
+    result = extract(path, ocr_images=True, ocr_langs="eng")
+    assert result.kind == "image"
+    assert result.pages == ("recognized words",)
+
+
+def test_image_without_the_flag_is_unsupported(tmp_path, monkeypatch):
+    path = tmp_path / "shot.png"
+    path.write_bytes(b"PNG")
+    monkeypatch.setattr(
+        "feagle.indexer.extract.ocr_image",
+        lambda *a, **k: pytest.fail("must not OCR when disabled"),
+    )
+    with pytest.raises(UnsupportedFile, match="ocr_images"):
+        extract(path)
+
+
+def test_image_without_tesseract_is_unsupported(tmp_path, monkeypatch):
+    path = tmp_path / "shot.jpg"
+    path.write_bytes(b"JPG")
+    monkeypatch.setattr("feagle.indexer.extract.image_ocr_available", lambda: False)
+    with pytest.raises(UnsupportedFile, match="tesseract"):
+        extract(path, ocr_images=True)
+
+
+def test_image_ocr_error_becomes_extraction_error(tmp_path, monkeypatch):
+    from feagle.indexer.ocr import OcrError
+
+    path = tmp_path / "shot.webp"
+    path.write_bytes(b"WEBP")
+    monkeypatch.setattr("feagle.indexer.extract.image_ocr_available", lambda: True)
+
+    def boom(*args, **kwargs):
+        raise OcrError("no text")
+
+    monkeypatch.setattr("feagle.indexer.extract.ocr_image", boom)
+    with pytest.raises(ExtractionError):
+        extract(path, ocr_images=True)
+
+
+def test_image_extensions_are_recognized(tmp_path, monkeypatch):
+    from feagle.indexer.ocr import IMAGE_SUFFIXES
+
+    monkeypatch.setattr("feagle.indexer.extract.image_ocr_available", lambda: True)
+    monkeypatch.setattr("feagle.indexer.extract.ocr_image", lambda p, **kw: "text")
+    for ext in IMAGE_SUFFIXES:
+        path = tmp_path / f"shot{ext}"
+        path.write_bytes(b"x")
+        assert extract(path, ocr_images=True).kind == "image"
+
+
 def test_pdf_without_poppler_is_unsupported(tmp_path, monkeypatch):
     path = tmp_path / "doc.pdf"
     path.write_bytes(b"%PDF-1.7")

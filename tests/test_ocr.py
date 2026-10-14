@@ -17,8 +17,14 @@ def _which(names):
 def test_availability(monkeypatch):
     monkeypatch.setattr(ocr.shutil, "which", _which({"tesseract", "pdftoppm"}))
     assert ocr.ocr_available() is True
+    assert ocr.image_ocr_available() is True
     monkeypatch.setattr(ocr.shutil, "which", _which({"pdftoppm"}))
     assert ocr.ocr_available() is False
+    assert ocr.image_ocr_available() is False
+    # images need only tesseract, no renderer
+    monkeypatch.setattr(ocr.shutil, "which", _which({"tesseract"}))
+    assert ocr.ocr_available() is False
+    assert ocr.image_ocr_available() is True
 
 
 def test_tesseract_languages(monkeypatch):
@@ -62,7 +68,44 @@ def test_ocr_pdf_page_builds_expected_commands(tmp_path, monkeypatch):
     assert render[render.index("-f") + 1] == "2"
     assert render[render.index("-r") + 1] == "200"
     image = str(Path(render[-1]).with_suffix(".png"))
-    assert calls[1] == ["tesseract", image, "stdout", "-l", "rus+eng"]
+    assert calls[1] == [
+        "tesseract", image, "stdout", "-l", "rus+eng",
+        "--oem", "1", "-c", "preserve_interword_spaces=1",
+    ]
+
+
+def test_ocr_image_builds_expected_command(tmp_path, monkeypatch):
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"PNG")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"hello screenshot\n", b"")
+
+    monkeypatch.setattr(ocr.subprocess, "run", fake_run)
+
+    text = ocr.ocr_image(image, langs="eng", tesseract="tesseract")
+    assert text == "hello screenshot\n"
+    assert calls == [[
+        "tesseract", str(image), "stdout", "-l", "eng",
+        "--oem", "1", "-c", "preserve_interword_spaces=1",
+    ]]
+
+
+def test_ocr_image_without_tesseract_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(ocr.shutil, "which", _which(set()))
+    with pytest.raises(ocr.OcrError, match="tesseract"):
+        ocr.ocr_image(tmp_path / "x.png")
+
+
+def test_ocr_image_reports_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        ocr.subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a[0], 1, b"", b"boom"),
+    )
+    with pytest.raises(ocr.OcrError, match="tesseract exited"):
+        ocr.ocr_image(tmp_path / "x.png", tesseract="tesseract")
 
 
 def test_ocr_pdf_page_render_failure(tmp_path, monkeypatch):

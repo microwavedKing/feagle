@@ -44,6 +44,7 @@ DEFAULTS: dict[str, Any] = {
         "embed_batch_size": 16,
         "follow_symlinks": False,
         "ocr": False,
+        "ocr_images": False,
         "ocr_langs": "rus+eng",
         "ocr_dpi": 300,
         "ocr_min_chars": 20,
@@ -159,6 +160,7 @@ def validate(cfg: dict[str, Any], source: Path | None = None) -> None:
     _check_type(index, "pause_on_loadavg", (int, float), source)
     _check(index["pause_on_loadavg"] >= 0, "index.pause_on_loadavg", "must be >= 0", source)
     _check_type(index, "ocr", (bool,), source)
+    _check_type(index, "ocr_images", (bool,), source)
     _check_type(index, "ocr_langs", (str,), source)
     _check(bool(index["ocr_langs"].strip()), "index.ocr_langs", "must not be empty", source)
     for key in ("ocr_dpi", "ocr_max_pages"):
@@ -267,8 +269,10 @@ pause_on_battery = true
 pause_on_loadavg = 4.0
 embed_batch_size = 16
 follow_symlinks = false
-# OCR for scanned PDFs (needs tesseract + tesseract-data-*). Off by default.
+# OCR for scanned PDFs (needs tesseract + pdftoppm and tesseract-data-*). Off by default.
 ocr = false
+# OCR image files (png/jpg/jpeg/webp/tiff) directly with tesseract. Off by default.
+ocr_images = false
 ocr_langs = "rus+eng"
 ocr_dpi = 300
 # A page is OCR'd only when its text layer has fewer than this many characters.

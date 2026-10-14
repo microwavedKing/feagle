@@ -29,6 +29,7 @@ from ..embeddings.service import Embedder
 from ..log import get_logger
 from .chunker import chunk_extracted
 from .extract import ExtractionError, UnsupportedFile, extract
+from .ocr import IMAGE_SUFFIXES
 from .scanner import ScanCandidate, Scanner
 
 log = get_logger("indexer.pipeline")
@@ -230,6 +231,7 @@ def index_file(
             candidate.path,
             max_bytes=limit,
             ocr=index_cfg["ocr"],
+            ocr_images=index_cfg["ocr_images"],
             ocr_langs=index_cfg["ocr_langs"],
             ocr_dpi=index_cfg["ocr_dpi"],
             ocr_min_chars=index_cfg["ocr_min_chars"],
@@ -340,8 +342,13 @@ def backfill(
 
 def _build_scanner(cfg: dict[str, Any]) -> Scanner:
     index_cfg = cfg["index"]
+    include_ext = list(index_cfg["include_ext"])
+    if index_cfg["ocr_images"]:
+        # Images are only worth indexing when OCR is on: without a text layer
+        # (and without image embeddings, yet) they yield nothing.
+        include_ext += [ext for ext in IMAGE_SUFFIXES if ext not in include_ext]
     return Scanner(
-        include_ext=index_cfg["include_ext"],
+        include_ext=include_ext,
         exclude_dirs=index_cfg["exclude_dirs"],
         use_gitignore=index_cfg["use_gitignore"],
         max_file_size_mb=index_cfg["max_file_size_mb"],
