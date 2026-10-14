@@ -39,6 +39,10 @@ def state_home() -> Path:
     return _from_env("XDG_STATE_HOME", Path.home() / ".local" / "state")
 
 
+def cache_home() -> Path:
+    return _from_env("XDG_CACHE_HOME", Path.home() / ".cache")
+
+
 def runtime_dir() -> Path:
     """Return ``$XDG_RUNTIME_DIR`` or the conventional per-UID fallback."""
     return _from_env("XDG_RUNTIME_DIR", Path("/run/user") / str(os.getuid()))
@@ -58,6 +62,10 @@ def data_dir() -> Path:
 
 def state_dir() -> Path:
     return state_home() / APP_NAME
+
+
+def cache_dir() -> Path:
+    return cache_home() / APP_NAME
 
 
 def db_path() -> Path:
