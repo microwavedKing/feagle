@@ -288,9 +288,10 @@ being filtered out, lower it for stricter results.
 
 ## Measured performance
 
-Target laptop: Intel i7-8565U (4 cores / 8 threads), 8 GB RAM, NVMe, no discrete
-GPU, CPU-only inference. Measured 2026-10-15 with `feagle bench` (60 synthetic
-documents, seed 1, 65 chunks) and `bench/quality_eval.py`; raw results are in
+Measured on this development machine: Intel i7-8565U (4 cores / 8 threads),
+**16 GB RAM**, NVMe, no discrete GPU, CPU-only inference. The project's design
+target is a weaker 4-core U-series laptop with 8 GB RAM, so treat these numbers
+as an upper bound for that class of hardware. Raw results are in
 `bench/results/`. Reproduce with:
 
 ```sh
