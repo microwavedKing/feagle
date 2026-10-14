@@ -43,6 +43,11 @@ DEFAULTS: dict[str, Any] = {
         "pause_on_loadavg": 4.0,
         "embed_batch_size": 16,
         "follow_symlinks": False,
+        "ocr": False,
+        "ocr_langs": "rus+eng",
+        "ocr_dpi": 300,
+        "ocr_min_chars": 20,
+        "ocr_max_pages": 200,
     },
     "embeddings": {
         "model": "embeddinggemma-2-q8",
@@ -148,6 +153,14 @@ def validate(cfg: dict[str, Any], source: Path | None = None) -> None:
     _check(index["rescan_interval_min"] >= 0, "index.rescan_interval_min", "must be >= 0", source)
     _check_type(index, "pause_on_loadavg", (int, float), source)
     _check(index["pause_on_loadavg"] >= 0, "index.pause_on_loadavg", "must be >= 0", source)
+    _check_type(index, "ocr", (bool,), source)
+    _check_type(index, "ocr_langs", (str,), source)
+    _check(bool(index["ocr_langs"].strip()), "index.ocr_langs", "must not be empty", source)
+    for key in ("ocr_dpi", "ocr_max_pages"):
+        _check_type(index, key, (int,), source)
+        _check(index[key] > 0, f"index.{key}", "must be > 0", source)
+    _check_type(index, "ocr_min_chars", (int,), source)
+    _check(index["ocr_min_chars"] >= 0, "index.ocr_min_chars", "must be >= 0", source)
 
     emb = cfg["embeddings"]
     _check_type(emb, "model", (str,), source)
@@ -245,6 +258,14 @@ pause_on_battery = true
 pause_on_loadavg = 4.0
 embed_batch_size = 16
 follow_symlinks = false
+# OCR for scanned PDFs (needs tesseract + tesseract-data-*). Off by default.
+ocr = false
+ocr_langs = "rus+eng"
+ocr_dpi = 300
+# A page is OCR'd only when its text layer has fewer than this many characters.
+ocr_min_chars = 20
+# Safety limit on how many pages per PDF are OCR'd (OCR is slow).
+ocr_max_pages = 200
 
 [embeddings]
 # Preset name from embeddings/presets.py, or an absolute path to a GGUF file.

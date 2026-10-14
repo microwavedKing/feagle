@@ -268,6 +268,35 @@ def check_pdftotext() -> Check:
                  "sudo pacman -S poppler-utils")
 
 
+def check_ocr(cfg: dict[str, Any]) -> Check:
+    from .indexer import ocr
+
+    enabled = bool(cfg["index"]["ocr"])
+    if not ocr.ocr_available():
+        missing = [
+            name for name, present in (
+                ("tesseract", ocr.tesseract_available()),
+                ("pdftoppm", ocr.pdftoppm_available()),
+            ) if not present
+        ]
+        status = "warn" if enabled else "info"
+        return Check(
+            "ocr", status, "not available (missing: " + ", ".join(missing) + ")",
+            "sudo pacman -S tesseract tesseract-data-rus tesseract-data-eng",
+        )
+
+    langs = ocr.tesseract_languages()
+    wanted = [code for code in cfg["index"]["ocr_langs"].split("+") if code]
+    missing_langs = [code for code in wanted if code not in langs]
+    detail = "available" + ("" if enabled else " (disabled in config)")
+    if missing_langs:
+        return Check(
+            "ocr", "warn", f"{detail}; missing languages: {', '.join(missing_langs)}",
+            "install tesseract-data-" + "/tesseract-data-".join(missing_langs),
+        )
+    return Check("ocr", "ok", f"{detail}; languages: {', '.join(wanted)}")
+
+
 def check_launcher(cfg: dict[str, Any]) -> Check:
     program = cfg["launcher"]["program"]
     candidates = ("fuzzel", "wofi", "rofi", "tofi", "walker")
@@ -346,6 +375,7 @@ def run_checks(cfg: dict[str, Any], *, verify_model_hash: bool = True) -> list[C
         check_server_health(cfg),
         check_embedding_dim(cfg),
         check_pdftotext(),
+        check_ocr(cfg),
         check_launcher(cfg),
         check_power(),
         check_inotify(),

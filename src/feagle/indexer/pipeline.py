@@ -200,7 +200,15 @@ def index_file(
     ) * 1024 * 1024
 
     try:
-        extracted = extract(candidate.path, max_bytes=limit)
+        extracted = extract(
+            candidate.path,
+            max_bytes=limit,
+            ocr=index_cfg["ocr"],
+            ocr_langs=index_cfg["ocr_langs"],
+            ocr_dpi=index_cfg["ocr_dpi"],
+            ocr_min_chars=index_cfg["ocr_min_chars"],
+            ocr_max_pages=index_cfg["ocr_max_pages"],
+        )
         chunks = chunk_extracted(extracted)[: index_cfg["max_chunks_per_file"]]
     except UnsupportedFile as exc:
         with conn:

@@ -101,6 +101,48 @@ def test_pdf_timeout_is_reported(tmp_path, monkeypatch):
         extract_pdf(path)
 
 
+def test_pdf_ocr_is_invoked_for_empty_pages(tmp_path, monkeypatch):
+    path = tmp_path / "scan.pdf"
+    path.write_bytes(b"%PDF-1.7")
+
+    class Proc:
+        returncode = 0
+        stdout = b""
+        stderr = b""
+
+    monkeypatch.setattr("feagle.indexer.extract.subprocess.run", lambda *a, **k: Proc())
+    captured = {}
+
+    def fake_ocr(pdf, pages, **kwargs):
+        captured["pages"] = list(pages)
+        captured["kwargs"] = kwargs
+        return (["recognized page"], 1)
+
+    monkeypatch.setattr("feagle.indexer.extract.ocr_pages", fake_ocr)
+    result = extract_pdf(path, ocr=True, ocr_langs="rus+eng", ocr_min_chars=5)
+    assert result.pages == ("recognized page",)
+    assert captured["pages"] == [""]
+    assert captured["kwargs"]["langs"] == "rus+eng"
+
+
+def test_pdf_without_ocr_does_not_call_ocr(tmp_path, monkeypatch):
+    path = tmp_path / "scan.pdf"
+    path.write_bytes(b"%PDF-1.7")
+
+    class Proc:
+        returncode = 0
+        stdout = b""
+        stderr = b""
+
+    monkeypatch.setattr("feagle.indexer.extract.subprocess.run", lambda *a, **k: Proc())
+
+    def fail(*args, **kwargs):
+        raise AssertionError("OCR must not run when disabled")
+
+    monkeypatch.setattr("feagle.indexer.extract.ocr_pages", fail)
+    assert extract_pdf(path).pages == ("",)
+
+
 def test_empty_file(tmp_path):
     path = tmp_path / "empty.txt"
     path.write_text("", encoding="utf-8")
