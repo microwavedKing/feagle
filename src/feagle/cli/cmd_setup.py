@@ -210,7 +210,7 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         _first_index(updated)
 
     print(
-        "\nDone. Next: 'feagle search \"your query\"' "
-        "or bind a hotkey to 'feagle search --pick'."
+        "\nDone. Next: 'feagle search \"your query\"'.\n"
+        "Launcher adapters and hotkey bindings ('feagle search --pick') arrive in a later phase."
     )
     return 0

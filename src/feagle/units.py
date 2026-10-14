@@ -8,8 +8,10 @@ rendered with ``/usr/bin/feagle`` (verified by a test).
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import stat
+import sys
 from pathlib import Path
 
 from . import paths
@@ -84,9 +86,30 @@ def installed_paths() -> list[Path]:
 
 
 def exec_path(default: str = "feagle") -> str:
-    """Absolute path of the running ``feagle`` executable if it can be found."""
-    found = shutil.which(default)
-    return str(Path(found).resolve()) if found else default
+    """Absolute path of the running ``feagle`` executable.
+
+    systemd does not inherit the shell's ``PATH``, and a venv/pipx install is
+    usually not in the system-wide ``PATH``, so a bare ``feagle`` in
+    ``ExecStart`` would not resolve. We therefore look at how we were invoked
+    (``sys.argv[0]``), next to the running interpreter, and finally on ``PATH``.
+    """
+    candidates: list[Path] = []
+
+    argv0 = sys.argv[0] if sys.argv else ""
+    if argv0 and Path(argv0).name == default:
+        candidates.append(Path(argv0))
+
+    candidates.append(Path(sys.executable).parent / default)
+
+    on_path = shutil.which(default)
+    if on_path:
+        candidates.append(Path(on_path))
+
+    for candidate in candidates:
+        with contextlib.suppress(OSError):
+            if candidate.is_file():
+                return str(candidate.resolve())
+    return default
 
 
 def install(feagle_exec: str | None = None) -> list[Path]:

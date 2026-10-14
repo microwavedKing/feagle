@@ -55,3 +55,37 @@ def test_install_writes_units(tmp_path, monkeypatch):
 def test_are_installed_false_when_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     assert units.are_installed() is False
+
+
+def test_exec_path_prefers_invoked_script(tmp_path, monkeypatch):
+    script = tmp_path / "bin" / "feagle"
+    script.parent.mkdir()
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", [str(script), "setup"])
+    assert units.exec_path() == str(script)
+
+
+def test_exec_path_falls_back_to_venv_bin(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "python").write_text("", encoding="utf-8")
+    (bindir / "feagle").write_text("", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["-m", "feagle.cli"])  # not a 'feagle' argv0
+    monkeypatch.setattr("sys.executable", str(bindir / "python"))
+    monkeypatch.setattr(units.shutil, "which", lambda name: None)
+    assert units.exec_path() == str(bindir / "feagle")
+
+
+def test_exec_path_uses_path_lookup(tmp_path, monkeypatch):
+    script = tmp_path / "feagle"
+    script.write_text("", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["feagle"])
+    monkeypatch.setattr(units.shutil, "which", lambda name: str(script))
+    assert units.exec_path() == str(script)
+
+
+def test_exec_path_last_resort(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["feagle"])
+    monkeypatch.setattr("sys.executable", "/nonexistent/python")
+    monkeypatch.setattr(units.shutil, "which", lambda name: None)
+    assert units.exec_path() == "feagle"
