@@ -1,0 +1,145 @@
+"""Tests for embedding-aware indexing and backfill."""
+
+from __future__ import annotations
+
+import pytest
+
+from feagle import config, db
+from feagle.embeddings.client import ServerUnavailable
+from feagle.indexer import pipeline
+from feagle.search import vec
+
+DIM = 4
+
+
+class FakeEmbedder:
+    def __init__(self, dim: int = DIM) -> None:
+        self.dim = dim
+        self.seen: list[tuple[str, str | None]] = []
+
+    def embed_documents(self, items):
+        self.seen.extend(items)
+        return [[float(i + 1)] * self.dim for i in range(len(items))]
+
+    def embed_queries(self, texts):
+        return [[0.0] * self.dim for _ in texts]
+
+
+class BrokenEmbedder(FakeEmbedder):
+    def embed_documents(self, items):
+        raise ServerUnavailable("boom")
+
+
+@pytest.fixture
+def conn(tmp_path):
+    connection = db.open_database(tmp_path / "index.sqlite")
+    yield connection
+    connection.close()
+
+
+@pytest.fixture
+def root(tmp_path):
+    path = tmp_path / "root"
+    path.mkdir()
+    return path
+
+
+def make_cfg(root):
+    cfg = config.default_config()
+    cfg["index"]["roots"] = [str(root)]
+    return cfg
+
+
+def chunk_count(conn):
+    return conn.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"]
+
+
+def embedded_of(conn, path):
+    import os
+
+    row = conn.execute(
+        "SELECT embedded FROM files WHERE path = ?", (os.path.realpath(path),)
+    ).fetchone()
+    return row["embedded"]
+
+
+def test_index_with_embedder_stores_vectors(conn, root):
+    (root / "a.txt").write_text("semantic content here", encoding="utf-8")
+    embedder = FakeEmbedder()
+    stats = pipeline.index_roots(conn, make_cfg(root), embedder=embedder)
+
+    assert stats.reindexed == 1
+    assert stats.vectors == chunk_count(conn) == 1
+    assert vec.vec_count(conn) == 1
+    assert embedded_of(conn, root / "a.txt") == 1
+    assert db.get_embedding_dim(conn) == DIM
+    assert embedder.seen[0][1] == "a"  # title = file stem
+
+
+def test_index_without_embedder_has_no_vectors(conn, root):
+    (root / "a.txt").write_text("plain text", encoding="utf-8")
+    stats = pipeline.index_roots(conn, make_cfg(root))
+    assert stats.vectors == 0
+    assert embedded_of(conn, root / "a.txt") == 0
+    assert db.has_vec_table(conn) is False
+
+
+def test_embedding_failure_degrades_to_text_only(conn, root):
+    (root / "a.txt").write_text("text survives", encoding="utf-8")
+    stats = pipeline.index_roots(conn, make_cfg(root), embedder=BrokenEmbedder())
+    assert stats.errors == 0
+    assert chunk_count(conn) == 1
+    assert embedded_of(conn, root / "a.txt") == 0
+    assert vec.vec_count(conn) == 0
+
+
+def test_reindex_replaces_vectors(conn, root):
+    path = root / "a.txt"
+    path.write_text("first version", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root), embedder=FakeEmbedder())
+
+    path.write_text("second version, changed", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root), embedder=FakeEmbedder())
+
+    # every stored vector points at a live chunk, and counts match
+    stored = {r["chunk_id"] for r in conn.execute("SELECT chunk_id FROM chunks_vec")}
+    live = {r["id"] for r in conn.execute("SELECT id FROM chunks")}
+    assert stored == live
+    assert len(stored) == chunk_count(conn)
+
+
+def test_backfill_embeds_existing_files(conn, root):
+    for i in range(3):
+        (root / f"f{i}.txt").write_text(f"document number {i}", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root))  # no embedder -> embedded=0
+
+    done = pipeline.backfill(conn, make_cfg(root), FakeEmbedder())
+    assert done == 3
+    assert vec.vec_count(conn) == chunk_count(conn)
+    assert all(row["embedded"] == 1 for row in conn.execute("SELECT embedded FROM files"))
+
+
+def test_backfill_stops_when_server_dies(conn, root):
+    (root / "a.txt").write_text("content", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root))
+    assert pipeline.backfill(conn, make_cfg(root), BrokenEmbedder()) == 0
+    assert embedded_of(conn, root / "a.txt") == 0
+
+
+def test_rebuild_drops_and_recreates_vectors(conn, root):
+    (root / "a.txt").write_text("content", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root), embedder=FakeEmbedder())
+    assert db.has_vec_table(conn) is True
+
+    pipeline.index_roots(conn, make_cfg(root), rebuild=True, embedder=FakeEmbedder())
+    assert db.get_embedding_dim(conn) == DIM
+    assert vec.vec_count(conn) == chunk_count(conn) == 1
+
+
+def test_prune_removes_vectors(conn, root):
+    path = root / "a.txt"
+    path.write_text("content", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root), embedder=FakeEmbedder())
+    path.unlink()
+    pipeline.index_roots(conn, make_cfg(root), embedder=FakeEmbedder())
+    assert vec.vec_count(conn) == 0

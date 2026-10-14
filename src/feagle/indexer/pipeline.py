@@ -3,7 +3,13 @@
 For every scanned file we compare ``(size, mtime_ns)`` with the database and, if
 they differ, hash the content (blake2b). An unchanged hash only refreshes the
 stored stat ("touch"); a changed hash triggers extraction and re-chunking in a
-single transaction per file. The indexer is the only writer.
+single transaction per file. When an :class:`~feagle.embeddings.service.Embedder`
+is supplied, chunk vectors are computed *before* the write transaction (so the
+write lock is never held during a network call) and stored in ``chunks_vec``.
+
+The indexer is the only writer. If embeddings fail, chunks are still stored so
+that full-text search keeps working; such files stay ``embedded=0`` and are
+completed later by :func:`backfill`.
 """
 
 from __future__ import annotations
@@ -16,7 +22,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .. import paths
+from .. import db, paths
+from ..embeddings.client import EmbeddingError, ServerUnavailable
+from ..embeddings.service import Embedder
 from ..log import get_logger
 from .chunker import chunk_extracted
 from .extract import ExtractionError, UnsupportedFile, extract
@@ -39,6 +47,7 @@ class IndexStats:
     errors: int = 0
     pruned: int = 0
     chunks: int = 0
+    vectors: int = 0
     error_samples: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -46,7 +55,7 @@ class IndexStats:
             f"scanned={self.scanned} reindexed={self.reindexed} "
             f"touched={self.touched} unchanged={self.unchanged} "
             f"unsupported={self.unsupported} errors={self.errors} "
-            f"pruned={self.pruned} chunks={self.chunks}"
+            f"pruned={self.pruned} chunks={self.chunks} vectors={self.vectors}"
         )
 
 
@@ -70,12 +79,15 @@ def _now() -> int:
     return int(time.time())
 
 
-def _delete_file_chunks(conn: sqlite3.Connection, file_id: int) -> None:
+def _delete_file_chunks(conn: sqlite3.Connection, file_id: int) -> list[int]:
+    """Delete a file's chunks (and their FTS rows); return the deleted chunk ids."""
+    ids = [row["id"] for row in conn.execute("SELECT id FROM chunks WHERE file_id = ?", (file_id,))]
     conn.execute(
         "DELETE FROM chunks_fts WHERE chunk_id IN (SELECT id FROM chunks WHERE file_id = ?)",
         (file_id,),
     )
     conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
+    return ids
 
 
 def _upsert_file(
@@ -106,17 +118,30 @@ def _upsert_file(
     return file_id
 
 
-def _write_chunks(conn: sqlite3.Connection, file_id: int, chunks: list[Any]) -> int:
+def _write_chunks(conn: sqlite3.Connection, file_id: int, chunks: list[Any]) -> list[int]:
+    ids: list[int] = []
     for chunk in chunks:
         cur = conn.execute(
             "INSERT INTO chunks(file_id, seq, page, line, body) VALUES(?,?,?,?,?)",
             (file_id, chunk.seq, chunk.page, chunk.line, chunk.body),
         )
+        chunk_id = int(cur.lastrowid or 0)
         conn.execute(
-            "INSERT INTO chunks_fts(body, chunk_id) VALUES(?, ?)",
-            (chunk.body, cur.lastrowid),
+            "INSERT INTO chunks_fts(body, chunk_id) VALUES(?, ?)", (chunk.body, chunk_id)
         )
-    return len(chunks)
+        ids.append(chunk_id)
+    return ids
+
+
+def _embed(
+    embedder: Embedder, items: list[tuple[str, str | None]]
+) -> list[list[float]] | None:
+    """Embed documents, degrading to ``None`` instead of failing the file."""
+    try:
+        return embedder.embed_documents(items)
+    except (ServerUnavailable, EmbeddingError) as exc:
+        log.warning("embedding failed, keeping text index only: %s", exc)
+        return None
 
 
 def index_file(
@@ -125,10 +150,11 @@ def index_file(
     cfg: dict[str, Any],
     *,
     force: bool = False,
-) -> tuple[str, int]:
+    embedder: Embedder | None = None,
+) -> tuple[str, int, int]:
     """Index a single candidate.
 
-    Returns ``(status, chunks_written)`` where status is one of
+    Returns ``(status, chunks_written, vectors_written)`` where status is one of
     ``unchanged|touched|reindexed|unsupported|error``.
     """
     index_cfg = cfg["index"]
@@ -142,7 +168,7 @@ def index_file(
         and row["size"] == candidate.size
         and row["mtime_ns"] == candidate.mtime_ns
     ):
-        return "unchanged", 0
+        return "unchanged", 0, 0
 
     try:
         digest = hash_file(candidate.path)
@@ -150,7 +176,7 @@ def index_file(
         log.warning("cannot hash %s: %s", candidate.path, exc)
         with conn:
             _upsert_file(conn, path, candidate, None, state="error", error=str(exc))
-        return "error", 0
+        return "error", 0, 0
 
     if row is not None and not force and row["state"] == "ok" and row["hash"] == digest:
         with conn:
@@ -158,7 +184,7 @@ def index_file(
                 "UPDATE files SET size=?, mtime_ns=?, updated_at=? WHERE id=?",
                 (candidate.size, candidate.mtime_ns, _now(), row["id"]),
             )
-        return "touched", 0
+        return "touched", 0, 0
 
     limit = (
         index_cfg["max_pdf_file_size_mb"] if candidate.path.suffix.lower() == ".pdf"
@@ -171,17 +197,84 @@ def index_file(
     except UnsupportedFile as exc:
         with conn:
             _upsert_file(conn, path, candidate, digest, state="unsupported", error=str(exc))
-        return "unsupported", 0
+        return "unsupported", 0, 0
     except ExtractionError as exc:
         log.warning("extraction failed for %s: %s", candidate.path, exc)
         with conn:
             _upsert_file(conn, path, candidate, digest, state="error", error=str(exc))
-        return "error", 0
+        return "error", 0, 0
+
+    # Embed before touching the database: never hold the write lock during I/O.
+    vectors: list[list[float]] | None = None
+    if embedder is not None and chunks:
+        vectors = _embed(embedder, [(chunk.body, candidate.path.stem) for chunk in chunks])
+
+    if embedder is not None:
+        db.ensure_vec_table(conn, embedder.dim, model_id=cfg["embeddings"]["model"])
 
     with conn:
+        existing = conn.execute("SELECT id FROM files WHERE path = ?", (path,)).fetchone()
+        if existing is not None:
+            old_ids = _delete_file_chunks(conn, existing["id"])
+            if old_ids and db.has_vec_table(conn):
+                vec_delete(conn, old_ids)
         file_id = _upsert_file(conn, path, candidate, digest, state="ok", error=None)
-        written = _write_chunks(conn, file_id, chunks)
-    return "reindexed", written
+        chunk_ids = _write_chunks(conn, file_id, chunks)
+        inserted = 0
+        if vectors is not None:
+            inserted = vec_insert(conn, list(zip(chunk_ids, vectors, strict=True)))
+        conn.execute("UPDATE files SET embedded=? WHERE id=?", (1 if vectors else 0, file_id))
+
+    return "reindexed", len(chunks), inserted
+
+
+# Indirections keep the indexer's coupling to sqlite-vec in one place and make
+# the pipeline easy to test with a stub.
+def vec_insert(conn: sqlite3.Connection, items: list[tuple[int, list[float]]]) -> int:
+    from ..search import vec
+
+    return vec.insert_vectors(conn, items)
+
+
+def vec_delete(conn: sqlite3.Connection, chunk_ids: list[int]) -> None:
+    from ..search import vec
+
+    vec.delete_vectors(conn, chunk_ids)
+
+
+def backfill(
+    conn: sqlite3.Connection, cfg: dict[str, Any], embedder: Embedder, *, limit: int | None = None
+) -> int:
+    """Embed chunks of files that are marked ``embedded=0``. Returns file count."""
+    rows = conn.execute(
+        "SELECT id, path FROM files WHERE state = 'ok' AND embedded = 0 ORDER BY id"
+    ).fetchall()
+    done = 0
+    for row in rows:
+        chunks = conn.execute(
+            "SELECT id, body FROM chunks WHERE file_id = ? ORDER BY seq", (row["id"],)
+        ).fetchall()
+        if not chunks:
+            with conn:
+                conn.execute("UPDATE files SET embedded = 1 WHERE id = ?", (row["id"],))
+            continue
+
+        vectors = _embed(
+            embedder, [(chunk["body"], Path(row["path"]).stem) for chunk in chunks]
+        )
+        if vectors is None:
+            break  # server unavailable: stop rather than spin
+
+        db.ensure_vec_table(conn, embedder.dim, model_id=cfg["embeddings"]["model"])
+        chunk_ids = [chunk["id"] for chunk in chunks]
+        with conn:
+            vec_delete(conn, chunk_ids)
+            vec_insert(conn, list(zip(chunk_ids, vectors, strict=True)))
+            conn.execute("UPDATE files SET embedded = 1 WHERE id = ?", (row["id"],))
+        done += 1
+        if limit is not None and done >= limit:
+            break
+    return done
 
 
 def _build_scanner(cfg: dict[str, Any]) -> Scanner:
@@ -203,6 +296,8 @@ def wipe(conn: sqlite3.Connection) -> None:
         conn.execute("DELETE FROM chunks_fts")
         conn.execute("DELETE FROM chunks")
         conn.execute("DELETE FROM files")
+    if db.has_vec_table(conn):
+        db.drop_vec_table(conn)
 
 
 def _prune_missing(
@@ -218,7 +313,9 @@ def _prune_missing(
         path = Path(stored)
         if any(path == root or root in path.parents for root in roots):
             with conn:
-                _delete_file_chunks(conn, row["id"])
+                old_ids = _delete_file_chunks(conn, row["id"])
+                if old_ids and db.has_vec_table(conn):
+                    vec_delete(conn, old_ids)
                 conn.execute("DELETE FROM files WHERE id = ?", (row["id"],))
             stats.pruned += 1
 
@@ -230,10 +327,13 @@ def index_roots(
     roots: list[str] | None = None,
     full: bool = False,
     rebuild: bool = False,
+    embedder: Embedder | None = None,
 ) -> IndexStats:
     """Run one indexing pass over the configured (or given) roots."""
     if rebuild:
         wipe(conn)
+    if embedder is not None:
+        db.ensure_vec_table(conn, embedder.dim, model_id=cfg["embeddings"]["model"])
 
     root_list = roots if roots is not None else cfg["index"]["roots"]
     active = [
@@ -248,7 +348,9 @@ def index_roots(
     for candidate in scanner.iter_files(active):
         stats.scanned += 1
         seen.add(_canonical(candidate.path))
-        outcome, written = index_file(conn, candidate, cfg, force=full)
+        outcome, written, inserted = index_file(
+            conn, candidate, cfg, force=full, embedder=embedder
+        )
         if outcome == "unchanged":
             stats.unchanged += 1
         elif outcome == "touched":
@@ -256,6 +358,7 @@ def index_roots(
         elif outcome == "reindexed":
             stats.reindexed += 1
             stats.chunks += written
+            stats.vectors += inserted
         elif outcome == "unsupported":
             stats.unsupported += 1
         elif outcome == "error":
