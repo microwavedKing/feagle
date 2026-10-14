@@ -217,6 +217,22 @@ def has_vec_table(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
+def list_indexed_files(
+    conn: sqlite3.Connection, *, limit: int = 500
+) -> list[tuple[str, str]]:
+    """Return ``(path, first chunk body)`` for indexed files, newest first.
+
+    Used by the launcher, which lists files without a query.
+    """
+    rows = conn.execute(
+        "SELECT f.path AS path, "
+        "(SELECT c.body FROM chunks c WHERE c.file_id = f.id ORDER BY c.seq LIMIT 1) AS body "
+        "FROM files f WHERE f.state = 'ok' ORDER BY f.updated_at DESC, f.path LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [(row["path"], row["body"] or "") for row in rows]
+
+
 def ensure_vec_table(
     conn: sqlite3.Connection, dim: int, *, model_id: str | None = None
 ) -> None:

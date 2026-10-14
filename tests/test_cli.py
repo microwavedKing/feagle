@@ -259,7 +259,7 @@ def test_search_pick_opens_the_selected_result(env, capsys, monkeypatch):
         opened["kwargs"] = kwargs
         return []
 
-    monkeypatch.setattr(cmd_search, "open_result", fake_open)
+    monkeypatch.setattr("feagle.picker.open_result", fake_open)
     assert main(["search", "semantic", "--pick"]) == 0
     assert opened["path"].name == "notes.txt"
 
@@ -273,5 +273,84 @@ def test_search_pick_without_results_does_nothing(env, capsys, monkeypatch):
     def fail(*args, **kwargs):
         raise AssertionError("must not open anything")
 
-    monkeypatch.setattr(cmd_search, "open_result", fail)
+    monkeypatch.setattr("feagle.picker.open_result", fail)
     assert main(["search", "zzzznotfound", "--pick"]) == 0
+
+
+# -- pick (applications + files) -------------------------------------------
+
+
+def _fake_app():
+    from pathlib import Path as _Path
+
+    from feagle import apps
+
+    return apps.App("fake.desktop", "Fake App", "fake", False, _Path("/fake.desktop"))
+
+
+def test_pick_opens_a_file_without_a_query(env, capsys, monkeypatch):
+    docs = make_docs(env)
+    write_config(env, '[launcher]\nprogram = "stdout"\n')
+    main(["index", "--root", str(docs), "--no-embed"])
+    capsys.readouterr()
+
+    import io
+    import sys
+
+    monkeypatch.setattr("feagle.picker.apps.discover_apps", lambda: [])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("1\n"))
+    opened = {}
+    monkeypatch.setattr(
+        "feagle.picker.open_result", lambda openers, path, **kw: opened.update(path=path)
+    )
+    assert main(["pick"]) == 0
+    assert opened["path"].name == "notes.txt"
+
+
+def test_pick_lists_applications_first(env, capsys, monkeypatch):
+    write_config(env, '[launcher]\nprogram = "stdout"\n')
+    import io
+    import sys
+
+    monkeypatch.setattr("feagle.picker.apps.discover_apps", lambda: [_fake_app()])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("1\n"))
+    launched = []
+    monkeypatch.setattr("feagle.picker.apps.launch", lambda app, **kw: launched.append(app.id))
+    assert main(["pick", "--no-files"]) == 0
+    assert launched == ["fake.desktop"]
+
+
+def test_pick_with_query_lists_semantic_results(env, capsys, monkeypatch):
+    docs = make_docs(env)
+    write_config(env, '[launcher]\nprogram = "stdout"\n')
+    main(["index", "--root", str(docs), "--no-embed"])
+    capsys.readouterr()
+
+    import io
+    import sys
+
+    monkeypatch.setattr("feagle.picker.apps.discover_apps", lambda: [])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("1\n"))
+    opened = {}
+    monkeypatch.setattr(
+        "feagle.picker.open_result", lambda openers, path, **kw: opened.update(path=path)
+    )
+    assert main(["pick", "--query", "semantic"]) == 0
+    assert opened["path"].name == "notes.txt"
+
+
+def test_search_pick_with_apps_puts_applications_first(env, capsys, monkeypatch):
+    docs = make_docs(env)
+    write_config(env, '[launcher]\nprogram = "stdout"\n')
+    main(["index", "--root", str(docs), "--no-embed"])
+    capsys.readouterr()
+
+    import io
+    import sys
+
+    monkeypatch.setattr("feagle.picker.apps.discover_apps", lambda: [_fake_app()])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("1\n"))
+    launched = []
+    monkeypatch.setattr("feagle.picker.apps.launch", lambda app, **kw: launched.append(app.id))
+    assert main(["search", "semantic", "--pick", "--with-apps"]) == 0
+    assert launched == ["fake.desktop"]

@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Launcher adapters (`launchers.py`) for fuzzel, wofi, rofi, tofi and walker with
   auto-detection, a `stdout` fallback, and `feagle search --pick` which opens the
   chosen result.
+- `feagle pick`: one launcher window with desktop applications (parsed from XDG
+  `.desktop` entries) first and indexed files after them, so applications win
+  when both match. `--query` ranks the files semantically;
+  `search --pick --with-apps` mixes applications into search results.
 - Search quality controls: `[search].max_distance` drops unrelated vector
   neighbours (an unrelated query no longer returns a full page of weak matches)
   and `[search].max_per_file` keeps one document from filling the result list.
