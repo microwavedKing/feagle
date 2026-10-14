@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "feagle"
+version = "0.1.0"
+description = "Local semantic file search for Arch Linux + Wayland: full-text and meaning-based lookup, fully offline."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "microwavedKing" }]
+keywords = ["search", "semantic", "embeddings", "fts5", "sqlite", "wayland", "archlinux"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Desktop Environment",
+  "Topic :: Text Processing :: Indexing",
+]
+dependencies = [
+  "watchfiles>=1.2",
+  "httpx>=0.27",
+  "sqlite-vec>=0.1.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+feagle = "feagle.cli.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/microwavedKing/feagle"
+Repository = "https://github.com/microwavedKing/feagle"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/feagle"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
