@@ -68,13 +68,21 @@ def _snippet(body: str, limit: int = SNIPPET_CHARS) -> str:
     return flat[:limit]
 
 
-def search_fts(conn: sqlite3.Connection, query: str, *, limit: int = 20) -> list[SearchHit]:
-    """Return BM25-ranked hits for ``query`` (AND first, then OR)."""
+def search_fts(
+    conn: sqlite3.Connection, query: str, *, limit: int = 20, fallback_or: bool = True
+) -> list[SearchHit]:
+    """Return BM25-ranked hits for ``query``.
+
+    With ``fallback_or`` the search retries an OR of the terms when the AND finds
+    nothing (good for a pure full-text index). Hybrid search passes
+    ``fallback_or=False``: there the vector side already supplies recall, and an
+    OR on a single common word would inject noise into the fusion.
+    """
     terms = fts_terms(query)
     if not terms or limit <= 0:
         return []
 
     rows = conn.execute(_SELECT, (_match_expression(terms, "AND"), limit)).fetchall()
-    if not rows and len(terms) > 1:
+    if not rows and fallback_or and len(terms) > 1:
         rows = conn.execute(_SELECT, (_match_expression(terms, "OR"), limit)).fetchall()
     return _rows_to_hits(rows)

@@ -88,3 +88,9 @@ def test_snippet_is_flattened(conn):
 def test_fts_terms_strips_quotes():
     assert fts_terms('hello "world"') == ["hello", "world"]
     assert fts_terms('   ') == []
+
+
+def test_or_fallback_can_be_disabled(conn):
+    add_doc(conn, "/tmp/a.txt", "alpha beta", seq=0)
+    assert search_fts(conn, "alpha zzz")  # OR fallback finds "alpha"
+    assert search_fts(conn, "alpha zzz", fallback_or=False) == []

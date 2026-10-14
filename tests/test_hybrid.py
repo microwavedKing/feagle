@@ -94,3 +94,14 @@ def test_snippet_is_flattened(conn):
     add(conn, "/d/a.txt", "first line\nsecond line", [1.0, 0.0, 0.0])
     hits = hybrid.search_hybrid(conn, "first", query_vector=None, limit=5, candidates=5)
     assert "\n" not in hits[0].snippet
+
+
+def test_hybrid_ignores_single_word_or_matches(conn):
+    # "noise" shares one query word with the query; "target" is the semantic match
+    add(conn, "/d/noise.txt", "need something unrelated", [0.0, 0.0, 1.0])
+    target = add(conn, "/d/target.txt", "totally different words", [1.0, 0.0, 0.0])
+
+    hits = hybrid.search_hybrid(
+        conn, "sleep hours need", query_vector=[1.0, 0.0, 0.0], limit=5, candidates=10
+    )
+    assert hits[0].chunk_id == target

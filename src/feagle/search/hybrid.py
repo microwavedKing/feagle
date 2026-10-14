@@ -3,6 +3,10 @@
 RRF score of a document is ``sum over rankings of 1 / (k + rank)`` where
 ``rank`` is 1-based within each ranking. RRF needs only the ranks, so the
 incompatible score scales of BM25 and cosine distance do not matter.
+
+The FTS side is used with AND semantics only: an OR fallback (enabled for pure
+full-text search) would let a single common word promote a document that the
+semantic side did not consider relevant.
 """
 
 from __future__ import annotations
@@ -75,7 +79,10 @@ def search_hybrid(
 
     With ``query_vector=None`` this degrades to a pure FTS search.
     """
-    fts_ids = [hit.chunk_id for hit in search_fts(conn, query, limit=candidates)]
+    fts_ids = [
+        hit.chunk_id
+        for hit in search_fts(conn, query, limit=candidates, fallback_or=False)
+    ]
 
     vec_ids: list[int] = []
     if query_vector is not None:
