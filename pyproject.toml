@@ -43,6 +43,9 @@ Repository = "https://github.com/microwavedKing/feagle"
 [tool.hatch.build.targets.wheel]
 packages = ["src/feagle"]
 
+[tool.hatch.build]
+exclude = ["**/__pycache__", "**/*.pyc", "**/*.pyo"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

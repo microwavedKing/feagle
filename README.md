@@ -33,6 +33,26 @@ telemetry.
 
 `feagle` follows XDG conventions and does not require root at runtime.
 
+### From the AUR (Arch Linux)
+
+```sh
+yay -S feagle        # or another AUR helper
+feagle setup
+```
+
+Note that `python-sqlite-vec` is an AUR package too, so the helper has to build
+it as well.
+
+### With uv or pipx
+
+```sh
+uv tool install git+https://github.com/microwavedKing/feagle
+# or:  pipx install git+https://github.com/microwavedKing/feagle
+feagle setup
+```
+
+### From a checkout (development)
+
 ```sh
 git clone https://github.com/microwavedKing/feagle.git
 cd feagle

@@ -1,0 +1,15 @@
+post_install() {
+  cat <<'EOF'
+feagle is installed. Recommended next steps (no root needed):
+
+  feagle setup                      # roots, model download, services, first index
+  systemctl --user enable --now feagle-queryd feagle-indexerd
+
+Without llama.cpp and a model, feagle still works as a full-text search.
+Check everything with:  feagle doctor
+EOF
+}
+
+post_upgrade() {
+  post_install
+}
