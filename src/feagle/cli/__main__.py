@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from .. import __version__, config
-from . import cmd_index, cmd_search, cmd_status
+from . import cmd_index, cmd_queryd, cmd_search, cmd_status
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -23,17 +23,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     index.add_argument("--full", action="store_true", help="re-extract every file")
     index.add_argument("--rebuild", action="store_true", help="wipe the index and rebuild it")
+    index.add_argument(
+        "--no-embed", action="store_true", help="skip embeddings (full-text indexing only)"
+    )
+    index.add_argument(
+        "--backfill", action="store_true", help="embed chunks of files that still lack vectors"
+    )
     index.set_defaults(func=cmd_index.run)
 
     search = subparsers.add_parser("search", help="search the index")
     search.add_argument("query", help="search query")
     search.add_argument("--limit", type=int, default=None, help="maximum number of results")
+    search.add_argument(
+        "--mode", choices=("auto", "hybrid", "fts"), default=None,
+        help="search mode (default: from config)",
+    )
     search.add_argument("--json", action="store_true", help="emit JSON")
     search.set_defaults(func=cmd_search.run)
 
     status = subparsers.add_parser("status", help="show index statistics")
     status.add_argument("--json", action="store_true", help="emit JSON")
     status.set_defaults(func=cmd_status.run)
+
+    queryd = subparsers.add_parser("queryd", help="run the query daemon (foreground)")
+    queryd.set_defaults(func=cmd_queryd.run)
 
     return parser
 
