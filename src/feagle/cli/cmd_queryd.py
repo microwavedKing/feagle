@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 from typing import Any
 
@@ -11,6 +12,10 @@ from ..embeddings.service import EmbeddingService, ModelMissingError
 from ..search.queryd import QuerydServer, QueryEngine
 
 _DEGRADE_ERRORS = (ModelMissingError, ServerUnavailable, EmbeddingError, OSError)
+
+
+def _raise_keyboard_interrupt(signum: int, frame: Any) -> None:
+    raise KeyboardInterrupt
 
 
 def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
@@ -31,10 +36,16 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         idle_hook=service.supervisor.stop_if_idle,
     )
     print(f"feagle: queryd listening on {server.socket_path}", file=sys.stderr)
+
+    # systemd stops units with SIGTERM; interrupting the serve loop lets the
+    # ``finally`` block stop an owned llama-server instead of orphaning it.
+    signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+    signal.signal(signal.SIGINT, _raise_keyboard_interrupt)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        server.shutdown()
         service.close()
     return 0
