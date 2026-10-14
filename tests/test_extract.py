@@ -119,6 +119,8 @@ def test_invalid_pdf_is_an_error(tmp_path):
 def test_pdf_timeout_is_reported(tmp_path, monkeypatch):
     path = tmp_path / "doc.pdf"
     path.write_bytes(b"%PDF-1.7")
+    # poppler is not installed everywhere; pretend it is and fake the timeout
+    monkeypatch.setattr("feagle.indexer.extract.shutil.which", lambda name: "/usr/bin/pdftotext")
 
     def fake_run(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd="pdftotext", timeout=1)
@@ -131,6 +133,7 @@ def test_pdf_timeout_is_reported(tmp_path, monkeypatch):
 def test_pdf_ocr_is_invoked_for_empty_pages(tmp_path, monkeypatch):
     path = tmp_path / "scan.pdf"
     path.write_bytes(b"%PDF-1.7")
+    monkeypatch.setattr("feagle.indexer.extract.shutil.which", lambda name: "/usr/bin/pdftotext")
 
     class Proc:
         returncode = 0
@@ -155,6 +158,7 @@ def test_pdf_ocr_is_invoked_for_empty_pages(tmp_path, monkeypatch):
 def test_pdf_without_ocr_does_not_call_ocr(tmp_path, monkeypatch):
     path = tmp_path / "scan.pdf"
     path.write_bytes(b"%PDF-1.7")
+    monkeypatch.setattr("feagle.indexer.extract.shutil.which", lambda name: "/usr/bin/pdftotext")
 
     class Proc:
         returncode = 0
