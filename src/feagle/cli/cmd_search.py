@@ -6,13 +6,12 @@ import argparse
 import json
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
-from .. import db, launchers, paths
+from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.service import EmbeddingService, ModelMissingError
-from ..openers import OpenError, open_result
+from ..picker import app_items, run_pick
 from ..search import hybrid
 from ..search.queryd import QuerydClient
 
@@ -37,7 +36,7 @@ def _request_from_daemon(query: str, limit: int, mode: str) -> dict[str, Any] | 
     return result if result.get("ok") else None
 
 
-def _search_in_process(cfg: dict[str, Any], query: str, limit: int, mode: str) -> dict[str, Any]:
+def search_in_process(cfg: dict[str, Any], query: str, limit: int, mode: str) -> dict[str, Any]:
     search_cfg = cfg["search"]
     stem = search_cfg["stemming"] != "none"
     started = time.perf_counter()
@@ -113,28 +112,13 @@ def _location(result: dict[str, Any]) -> str:
     return location
 
 
-def _pick_and_open(cfg: dict[str, Any], result: dict[str, Any]) -> int:
-    results = result.get("results") or []
-    if not results:
-        return 0
-    items = [
-        (item["path"], f"{_location(item)}  {item['snippet']}") for item in results
-    ]
-    choice = launchers.pick(items, program=cfg["launcher"]["program"])
-    if choice is None:
-        return 0
-
-    hit = next((item for item in results if item["path"] == choice), None)
-    if hit is None:
-        return 0
-    try:
-        open_result(
-            cfg["openers"], Path(hit["path"]), line=hit.get("line"), page=hit.get("page")
-        )
-    except OpenError as exc:
-        print(f"feagle: {exc}", file=sys.stderr)
-        return 1
-    return 0
+def _pick_and_open(cfg: dict[str, Any], result: dict[str, Any], *, with_apps: bool) -> int:
+    items, app_map = app_items() if with_apps else ([], {})
+    hits_by_path: dict[str, dict[str, Any]] = {}
+    for item in result.get("results") or []:
+        hits_by_path.setdefault(item["path"], item)
+        items.append((item["path"], f"{_location(item)}  {item['snippet']}"))
+    return run_pick(cfg, items, app_map, hits_by_path=hits_by_path)
 
 
 def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
@@ -147,10 +131,10 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
 
     result = _request_from_daemon(args.query, limit, mode)
     if result is None:
-        result = _search_in_process(cfg, args.query, limit, mode)
+        result = search_in_process(cfg, args.query, limit, mode)
 
     if args.pick:
-        return _pick_and_open(cfg, result)
+        return _pick_and_open(cfg, result, with_apps=args.with_apps)
 
     if args.json:
         payload = {

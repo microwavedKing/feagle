@@ -201,44 +201,63 @@ install. For Latin-only documents `ocr_langs = "eng"` gives cleaner results than
 
 ## Launcher and hotkeys
 
-`feagle search --pick` runs a search, shows the results in a dmenu-compatible
-launcher and opens the chosen hit at its position. The launcher is auto-detected
-(`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`) or forced with `[launcher].program`.
-With no launcher installed it prints a numbered list to stdout and reads a
-number, so it also works from scripts.
+`feagle pick` opens one launcher window containing **applications first and then
+indexed files**: type to filter, and Enter launches the application or opens the
+file at its position.
+
+```sh
+feagle pick                    # applications + indexed files
+feagle pick --query "tarts"    # rank the files semantically (applications on top)
+feagle pick --files 2000       # how many indexed files to list (default 500)
+feagle pick --no-apps          # files only
+```
+
+`feagle search --pick` shows search results (and with `--with-apps` the
+applications above them).
+
+Note how launchers work: `wofi`/`rofi` filter a list **we hand them beforehand** —
+they do not tell us the query while you type. So in `feagle pick` the files are
+matched by the launcher itself (keyword/fuzzy over path and snippet); semantic
+ranking needs the query as an argument, which is what `--query` and
+`feagle search --pick` are for. Applications always come first, so they win when
+both match.
+
+The launcher is auto-detected (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`) or
+forced with `[launcher].program`. With none installed it prints a numbered list
+and reads a number, so it also works from scripts.
 
 Bind it in your compositor:
 
 **Hyprland** (released versions):
 
 ```ini
-bind = SUPER, V, exec, feagle search --pick
+bind = SUPER, V, exec, feagle pick
 ```
 
 **Hyprland** (the latest git uses the new Lua-based config):
 
 ```lua
-hl.bind("SUPER + V", hl.dsp.exec_cmd("feagle search --pick"))
+hl.bind("SUPER + V", hl.dsp.exec_cmd("feagle pick"))
 ```
 
 **Sway**:
 
 ```
-bindsym $mod+v exec feagle search --pick
+bindsym $mod+v exec feagle pick
 ```
 
 **niri** (spawn does not use a shell; each argument is separate):
 
 ```kdl
 binds {
-    Mod+V { spawn "feagle" "search" "--pick"; }
+    Mod+V { spawn "feagle" "pick"; }
 }
 ```
 
 **River** (classic, `riverctl`):
 
 ```sh
-riverctl map normal Super V spawn 'feagle search --pick'
+riverctl map normal Super V spawn 'feagle pick'
 ```
 
 **mango** (mangowm, a dwl/wlroots-based compositor). Since 0.18 the config is
@@ -246,7 +265,10 @@ TOML at `~/.config/mango/config.toml`:
 
 ```toml
 [bind.default]
-"SUPER+s" = "spawn_shell,feagle search --pick"
+# one window: applications first, then indexed files
+"SUPER+d" = "spawn_shell,feagle pick"
+# semantic search: ask for the query, then show the ranked files
+"SUPER+s" = "spawn_shell,wofi --dmenu -p 'feagle:' | xargs -r feagle search --pick"
 ```
 
 `spawn_shell` runs the command through a shell; `spawn` is also available if you
@@ -254,11 +276,11 @@ prefer to hand over the arguments separately. Older mango (< 0.18) used
 `~/.config/mango/config.conf`:
 
 ```ini
-bind=SUPER,s,spawn,feagle search --pick
+bind=SUPER,d,spawn,feagle pick
 ```
 
 mango is wlroots-based, so layer-shell launchers such as `wofi` and `fuzzel`
-work with `feagle search --pick` without any extra setup.
+work with `feagle pick` without any extra setup.
 
 If `feagle` is not on the session's `PATH` (a venv or pipx install, for
 example), use its absolute path in the bind. The syntax above was checked

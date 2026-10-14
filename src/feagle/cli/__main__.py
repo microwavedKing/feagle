@@ -15,6 +15,7 @@ from . import (
     cmd_index,
     cmd_indexerd,
     cmd_open,
+    cmd_pick,
     cmd_queryd,
     cmd_search,
     cmd_setup,
@@ -55,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument(
         "--pick", action="store_true",
         help="choose a result in a launcher (dmenu) and open it",
+    )
+    search.add_argument(
+        "--with-apps", action="store_true",
+        help="also list desktop applications above the results (needs --pick)",
     )
     search.set_defaults(func=cmd_search.run)
 
@@ -102,6 +107,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="print the command instead of running it"
     )
     open_cmd.set_defaults(func=cmd_open.run)
+
+    pick = subparsers.add_parser(
+        "pick", help="open a launcher with applications and indexed files"
+    )
+    pick.add_argument(
+        "--query", default=None, help="rank the files semantically for this query"
+    )
+    pick.add_argument("--limit", type=int, default=None, help="results when --query is given")
+    pick.add_argument(
+        "--files", type=int, default=500, help="how many indexed files to list without a query"
+    )
+    pick.add_argument("--no-apps", action="store_true", help="only list files")
+    pick.add_argument("--no-files", action="store_true", help="only list applications")
+    pick.set_defaults(func=cmd_pick.run)
 
     queryd = subparsers.add_parser("queryd", help="run the query daemon (foreground)")
     queryd.set_defaults(func=cmd_queryd.run)
