@@ -106,6 +106,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`RuntimeDirectory=feagle`): restarting one unit deleted the other's socket.
 - `queryd` restarts the embeddings server on demand after a failed start or a
   crash; previously it stayed full-text-only until restarted by hand.
+- After the embeddings server was unloaded (idle) or crashed, the first query
+  stayed full-text-only until the retry cooldown expired; it now restarts the
+  server on the same request (~1.6 s) and returns semantic results. A port file
+  whose process is gone (including a zombie) is detected immediately instead of
+  waiting out the 15 s startup grace.
 
 ### Known limitations
 
