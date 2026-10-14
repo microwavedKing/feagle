@@ -130,3 +130,11 @@ def test_build_supervisor_carries_settings(env):
     assert sup.cfg.idle_timeout_min == 3
     assert sup.cfg.threads == 2
     assert sup.cfg.extra_args == ["-x"]
+
+
+def test_build_supervisor_can_isolate_its_runtime_files(env, tmp_path):
+    sup = service.build_supervisor(cfg_with(model="embeddinggemma-2-q8"), runtime_dir=tmp_path)
+    assert sup.port_file == tmp_path / "llama.port"
+    assert sup.pid_file == tmp_path / "llama.pid"
+    assert sup.lock_file == tmp_path / "llama.lock"
+    assert sup.touch_file == tmp_path / "llama.touch"

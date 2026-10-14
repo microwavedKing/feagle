@@ -40,3 +40,17 @@ def test_spec_for_path_returns_none():
 def test_mrl_and_mmproj_presets_exist():
     assert presets.MRL_DIMS == (128, 256, 512, 768)
     assert presets.MMPROJ_PRESETS["embeddinggemma-2-mmproj-q8"].size == 554_821_024
+
+
+def test_q4_preset_is_pinned_to_the_mirror():
+    spec = presets.get_preset("embeddinggemma-2-q4")
+    assert spec.repo == "unsloth/embeddinggemma-2-GGUF"
+    assert spec.size == 175_673_856
+    assert spec.sha256 == "ea905fd08e8061db77a0031cbb5096d459d7cfd2bdd0ad2ba66e483f16719493"
+    assert spec.dim == 768
+    assert spec.pooling is None
+
+
+def test_preset_filenames_are_unique():
+    filenames = [spec.filename for spec in presets.PRESETS.values()]
+    assert len(filenames) == len(set(filenames))

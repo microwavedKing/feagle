@@ -50,7 +50,7 @@ DEFAULTS: dict[str, Any] = {
         "ocr_max_pages": 200,
     },
     "embeddings": {
-        "model": "embeddinggemma-2-q8",
+        "model": "embeddinggemma-2-q4",
         "mrl_dim": 768,
         "server_url": "",
         "idle_timeout_min": 10,
@@ -278,7 +278,9 @@ ocr_max_pages = 200
 
 [embeddings]
 # Preset name from embeddings/presets.py, or an absolute path to a GGUF file.
-model = "embeddinggemma-2-q8"
+# q4 is the light default (about half the size of q8, ~30% faster indexing,
+# same measured retrieval quality); q8 is the official-repo alternative.
+model = "embeddinggemma-2-q4"
 # Matryoshka truncation, one of 128, 256, 512, 768.
 mrl_dim = 768
 # External llama-server base URL. Empty means feagle manages the server itself.

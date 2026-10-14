@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import random
+import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -102,27 +104,34 @@ CONCEPTS: list[dict[str, str | list[str]]] = [
     },
 ]
 
-_FILLER = {
-    "en": ["however", "in practice", "for example", "finally"],
-    "ru": ["однако", "на практике", "например", "наконец"],
+_CONNECTIVES = {
+    "en": ["and", "with", "about", "near", "plus"],
+    "ru": ["и", "с", "про", "возле", "при"],
 }
-_TEMPLATES = {
-    "en": ["{a}, {b} and {c} are usually considered together.",
-           "The main point concerns {a} and {c}.",
-           "In practice, {b} matters as much as {a}."],
-    "ru": ["{a}, {b} и {c} обычно рассматривают вместе.",
-           "Главная мысль касается {a} и {c}.",
-           "На практике {b} важно не меньше, чем {a}."],
-}
+#: Russian suffixes used to inflect document words (the query keeps the base
+#: form), which exercises the stemmed FTS column.
+_RU_SUFFIXES = ["", "ы", "и", "а", "ом", "ами", "ов", "е"]
+
+
+def _inflect(rng: random.Random, word: str, lang: str) -> str:
+    if lang != "ru":
+        return word
+    suffix = rng.choice(_RU_SUFFIXES)
+    return word + suffix if len(word) > 4 else word
+
+
+def _sentence(rng: random.Random, words: list[str], lang: str) -> str:
+    """A concept-dense sentence: mostly topic words, little shared wording."""
+    picked = rng.sample(words, min(rng.randint(3, 4), len(words)))
+    inflected = [_inflect(rng, word, lang) for word in picked]
+    connective = rng.choice(_CONNECTIVES[lang])
+    if len(inflected) >= 3:
+        return f"{inflected[0]} {connective} {inflected[1]}: {inflected[2]}."
+    return f"{inflected[0]} {connective} {inflected[1]}."
 
 
 def _paragraph(rng: random.Random, words: list[str], lang: str, sentences: int) -> str:
-    out = []
-    for _ in range(sentences):
-        a, b, c = (rng.choice(words) for _ in range(3))
-        sentence = rng.choice(_TEMPLATES[lang]).format(a=a, b=b, c=c)
-        out.append(f"{sentence} {rng.choice(_FILLER[lang])}.")
-    return " ".join(out)
+    return " ".join(_sentence(rng, words, lang) for _ in range(sentences))
 
 
 def generate_corpus(out_dir: Path, files: int, seed: int = 1) -> dict[str, Any]:
@@ -141,15 +150,16 @@ def generate_corpus(out_dir: Path, files: int, seed: int = 1) -> dict[str, Any]:
         kind = index % 3
         if kind == 0:
             name = f"doc{index:04d}.txt"
-            body = title + "\n\n" + "\n\n".join(_paragraph(rng, words, lang, 6) for _ in range(3))
+            body = title + "\n\n" + "\n\n".join(_paragraph(rng, words, lang, 6) for _ in range(6))
         elif kind == 1:
             name = f"doc{index:04d}.md"
             body = f"# {title}\n\n" + "\n\n".join(
-                f"## {words[1]}\n\n{_paragraph(rng, words, lang, 5)}" for _ in range(3)
+                f"## {_inflect(rng, words[1], lang)}\n\n{_paragraph(rng, words, lang, 6)}"
+                for _ in range(4)
             )
         else:
             name = f"doc{index:04d}.py"
-            comment = _paragraph(rng, words, lang, 2).replace(". ", ".\n# ")
+            comment = "\n# ".join(_sentence(rng, words, lang) for _ in range(8))
             body = (
                 f"# {title}\n# {comment}\n\n"
                 f"def {words[0]}_{index}():\n"
@@ -157,6 +167,7 @@ def generate_corpus(out_dir: Path, files: int, seed: int = 1) -> dict[str, Any]:
                 f"    return {index}\n\n"
                 f"def {words[1]}_{words[2]}(value):\n"
                 f"    # {words[3]} of the {words[0]}\n"
+                f"    # {_sentence(rng, words, lang)}\n"
                 f"    return value\n"
             )
         (docs_dir / name).write_text(body + "\n", encoding="utf-8")
@@ -199,10 +210,16 @@ def measure_queries(
     limit: int,
     cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    """Measure query latency for full-text and (if possible) hybrid search."""
+    """Measure query latency for full-text and (if possible) hybrid search.
+
+    ``hybrid`` is the end-to-end latency (query embedding + search); the
+    breakdown is reported separately so the bottleneck is visible.
+    """
     search_cfg = cfg["search"]
     fts_lat: list[float] = []
     hybrid_lat: list[float] = []
+    embed_lat: list[float] = []
+    vector_search_lat: list[float] = []
     for _ in range(max(1, repeats)):
         for item in queries:
             query = item["query"]
@@ -216,19 +233,28 @@ def measure_queries(
 
             if embedder is None:
                 continue
+            start = time.perf_counter()
             try:
                 vector = embedder.embed_queries([query])[0]
             except _DEGRADE_ERRORS:
                 continue
+            embed_lat.append((time.perf_counter() - start) * 1000)
+
             start = time.perf_counter()
             hybrid.search_hybrid(
                 conn, query, query_vector=vector, limit=limit,
                 candidates=search_cfg["candidates"], rrf_k=search_cfg["rrf_k"], stem=True,
                 max_distance=search_cfg["max_distance"], max_per_file=search_cfg["max_per_file"],
             )
-            hybrid_lat.append((time.perf_counter() - start) * 1000)
+            vector_search_lat.append((time.perf_counter() - start) * 1000)
+            hybrid_lat.append(embed_lat[-1] + vector_search_lat[-1])
 
-    return {"fts": summarise(fts_lat), "hybrid": summarise(hybrid_lat)}
+    return {
+        "fts": summarise(fts_lat),
+        "hybrid": summarise(hybrid_lat),
+        "hybrid_embed": summarise(embed_lat),
+        "hybrid_search": summarise(vector_search_lat),
+    }
 
 
 def evaluate_quality(
@@ -241,6 +267,12 @@ def evaluate_quality(
 ) -> dict[str, Any]:
     """MRR@10 and Recall@10/20 for full-text and hybrid search."""
     search_cfg = cfg["search"]
+    # Documents are generated from shared concepts (several languages/documents
+    # per concept), so any document of the same concept counts as a hit.
+    expected_by_concept: dict[Any, set[str]] = {}
+    for item in queries:
+        expected_by_concept.setdefault(item["concept"], set()).add(item["expected"])
+
     results: dict[str, Any] = {}
     for mode in ("fts", "hybrid"):
         if mode == "hybrid" and embedder is None:
@@ -263,14 +295,15 @@ def evaluate_quality(
                     max_distance=search_cfg["max_distance"],
                     max_per_file=search_cfg["max_per_file"],
                 )
+            accepted = expected_by_concept[item["concept"]]
             rank = next(
-                (i for i, hit in enumerate(hits, 1) if Path(hit.path).name == item["expected"]),
+                (i for i, hit in enumerate(hits, 1) if Path(hit.path).name in accepted),
                 None,
             )
             ranks.append(rank)
             langs.append(item.get("lang"))
             if rank is None or rank > 10:
-                misses.append(f"{item['expected']}#{rank or '-'}")
+                misses.append(f"{item['concept']}#{rank or '-'}")
 
         def _mrr(selected: list[int | None]) -> float:
             reciprocal = [1.0 / r for r in selected if r]
@@ -309,8 +342,9 @@ def quality_report(
     manifest = generate_corpus(corpus_dir, files=files, seed=seed)
     db_path = corpus_dir / "quality.sqlite"
     _clean_db(db_path)
+    runtime_dir = Path(tempfile.mkdtemp(prefix="feagle-bench-"))
 
-    service = EmbeddingService(cfg)
+    service = EmbeddingService(cfg, runtime_dir=runtime_dir)
     embedder = None
     try:
         try:
@@ -325,6 +359,7 @@ def quality_report(
             conn.close()
     finally:
         service.close()
+        shutil.rmtree(runtime_dir, ignore_errors=True)
     if not keep_db:
         _clean_db(db_path)
 
@@ -356,66 +391,73 @@ def run_bench(
 
     db_path = corpus_dir / "bench.sqlite"
     _clean_db(db_path)
+    # An isolated runtime dir keeps the benchmark from reusing (and then
+    # measuring) a llama-server that another process already owns with a
+    # different model.
+    runtime_dir = Path(tempfile.mkdtemp(prefix="feagle-bench-"))
 
-    # --- indexing ---------------------------------------------------------
     service: EmbeddingService | None = None
     embedder = None
     cold_start_s = 0.0
-    if embed:
-        service = EmbeddingService(cfg)
+    conn = None
+    try:
+        if embed:
+            service = EmbeddingService(cfg, runtime_dir=runtime_dir)
+            started = time.perf_counter()
+            try:
+                embedder = service.start()
+                cold_start_s = time.perf_counter() - started
+            except _DEGRADE_ERRORS as exc:
+                log.warning("benchmark running without embeddings: %s", exc)
+                embedder = None
+
+        conn = db.open_database(db_path)
+        peak_before = _self_peak_rss()
         started = time.perf_counter()
-        try:
-            embedder = service.start()
-            cold_start_s = time.perf_counter() - started
-        except _DEGRADE_ERRORS as exc:
-            log.warning("benchmark running without embeddings: %s", exc)
-            embedder = None
+        stats = pipeline.index_roots(conn, cfg, roots=[str(docs_dir)], embedder=embedder)
+        index_s = time.perf_counter() - started
+        peak_after = _self_peak_rss()
 
-    conn = db.open_database(db_path)
-    peak_before = _self_peak_rss()
-    started = time.perf_counter()
-    stats = pipeline.index_roots(conn, cfg, roots=[str(docs_dir)], embedder=embedder)
-    index_s = time.perf_counter() - started
-    peak_after = _self_peak_rss()
+        db_size = db_path.stat().st_size
+        chunk_count = stats.chunks
+        result: dict[str, Any] = {
+            "corpus": str(corpus_dir),
+            "model": cfg["embeddings"]["model"],
+            "files": len(manifest["files"]),
+            "seed": seed,
+            "indexing": {
+                "seconds": round(index_s, 2),
+                "files_per_second": round(stats.reindexed / index_s, 2) if index_s else 0.0,
+                "chunks": chunk_count,
+                "chunks_per_second": round(chunk_count / index_s, 2) if index_s else 0.0,
+                "vectors": stats.vectors,
+                "coverage": round(stats.vectors / chunk_count, 4) if chunk_count else 0.0,
+                "db_size_bytes": db_size,
+                "db_size_per_chunk": round(db_size / chunk_count) if chunk_count else 0,
+                "cold_start_s": round(cold_start_s, 2),
+                "peak_rss_self_mb": _delta(peak_before, peak_after),
+            },
+        }
 
-    db_size = db_path.stat().st_size
-    chunk_count = stats.chunks
-    result: dict[str, Any] = {
-        "corpus": str(corpus_dir),
-        "files": len(manifest["files"]),
-        "seed": seed,
-        "indexing": {
-            "seconds": round(index_s, 2),
-            "files_per_second": round(stats.reindexed / index_s, 2) if index_s else 0.0,
-            "chunks": chunk_count,
-            "chunks_per_second": round(chunk_count / index_s, 2) if index_s else 0.0,
-            "vectors": stats.vectors,
-            "coverage": round(stats.vectors / chunk_count, 4) if chunk_count else 0.0,
-            "db_size_bytes": db_size,
-            "db_size_per_chunk": round(db_size / chunk_count) if chunk_count else 0,
-            "cold_start_s": round(cold_start_s, 2),
-            "peak_rss_self_mb": _delta(peak_before, peak_after),
-        },
-    }
+        queries = manifest["queries"]
+        if query_limit:
+            queries = queries[:query_limit]
+        result["queries"] = measure_queries(
+            conn, embedder, queries, repeats=repeats, limit=limit, cfg=cfg
+        )
+        result["quality"] = evaluate_quality(conn, embedder, queries, cfg=cfg)
 
-    # --- queries ----------------------------------------------------------
-    queries = manifest["queries"]
-    if query_limit:
-        queries = queries[:query_limit]
-    result["queries"] = measure_queries(
-        conn, embedder, queries, repeats=repeats, limit=limit, cfg=cfg
-    )
-    result["quality"] = evaluate_quality(conn, embedder, queries, cfg=cfg)
-
-    pid = _llama_pid()
-    if pid is not None:
-        result["llama_server_rss_mb"] = round(current_rss_mb(pid) or 0.0, 1)
-
-    conn.close()
-    if service is not None:
-        service.close()
-    if not keep_db:
-        _clean_db(db_path)
+        pid = _llama_pid(runtime_dir)
+        if pid is not None:
+            result["llama_server_rss_mb"] = round(current_rss_mb(pid) or 0.0, 1)
+    finally:
+        if conn is not None:
+            conn.close()
+        if service is not None:
+            service.close()
+        shutil.rmtree(runtime_dir, ignore_errors=True)
+        if not keep_db:
+            _clean_db(db_path)
     return result
 
 
@@ -429,5 +471,5 @@ def _delta(before: float | None, after: float | None) -> float | None:
     return round(after - before, 1)
 
 
-def _llama_pid() -> int | None:
-    return llama_server_pid(paths.runtime_dir())
+def _llama_pid(runtime_dir: Path) -> int | None:
+    return llama_server_pid(runtime_dir)

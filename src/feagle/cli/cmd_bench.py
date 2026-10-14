@@ -29,7 +29,7 @@ def print_report(result: dict[str, Any], corpus: Path) -> None:
           f"llama-server {llama if llama is not None else '?'} MiB")
     for name, stats in result["queries"].items():
         if stats["count"]:
-            print(f"Query {name:>6}: p50 {stats['p50']} ms, p95 {stats['p95']} ms "
+            print(f"Query {name:>13}: p50 {stats['p50']} ms, p95 {stats['p95']} ms "
                   f"(min {stats['min']}, max {stats['max']}, n={stats['count']})")
     for mode, metrics in result.get("quality", {}).items():
         parts = [f"MRR@10 {metrics['mrr@10']:.3f}", f"Recall@20 {metrics['recall@20']:.3f}"]

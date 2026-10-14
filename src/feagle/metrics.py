@@ -30,9 +30,9 @@ def current_rss_mb(pid: int) -> float | None:
 
 
 def llama_server_pid(runtime_dir: Path) -> int | None:
-    """PID of the shared ``llama-server`` from its pid file, if any."""
+    """PID of the shared ``llama-server`` from ``<runtime_dir>/llama.pid``."""
     try:
-        return int((runtime_dir / "feagle" / "llama.pid").read_text(encoding="utf-8").strip())
+        return int((runtime_dir / "llama.pid").read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
 

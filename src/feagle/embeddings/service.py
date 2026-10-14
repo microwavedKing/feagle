@@ -79,6 +79,7 @@ def build_supervisor(
     *,
     health: Callable[[str], bool] | None = None,
     spawn: Callable[[list[str]], Any] | None = None,
+    runtime_dir: Path | None = None,
 ) -> LlamaSupervisor:
     embeddings = cfg["embeddings"]
     model_path, _spec = resolve_model(cfg)
@@ -89,7 +90,18 @@ def build_supervisor(
         threads=embeddings["threads"],
         extra_args=list(embeddings["extra_args"]),
     )
-    return LlamaSupervisor(supervisor_cfg, health=health, spawn=spawn)
+    files: dict[str, Path] = {}
+    if runtime_dir is not None:
+        # Isolate from a server another process may already own (used by the
+        # benchmarks, which must measure *this* model).
+        runtime_dir = Path(runtime_dir)
+        files = {
+            "port_file": runtime_dir / "llama.port",
+            "pid_file": runtime_dir / "llama.pid",
+            "lock_file": runtime_dir / "llama.lock",
+            "touch_file": runtime_dir / "llama.touch",
+        }
+    return LlamaSupervisor(supervisor_cfg, health=health, spawn=spawn, **files)
 
 
 class EmbeddingService:
@@ -102,9 +114,12 @@ class EmbeddingService:
         health: Callable[[str], bool] | None = None,
         spawn: Callable[[list[str]], Any] | None = None,
         transport: Any | None = None,
+        runtime_dir: Path | None = None,
     ) -> None:
         self.cfg = cfg
-        self.supervisor = build_supervisor(cfg, health=health, spawn=spawn)
+        self.supervisor = build_supervisor(
+            cfg, health=health, spawn=spawn, runtime_dir=runtime_dir
+        )
         self._transport = transport
         self._client: EmbeddingClient | None = None
         self._adapter: EmbedderAdapter | None = None
