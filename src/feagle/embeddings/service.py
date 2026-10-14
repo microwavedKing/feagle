@@ -42,16 +42,27 @@ class Embedder(Protocol):
 
 @dataclass
 class EmbedderAdapter:
-    """Adapts :class:`EmbeddingClient` to the :class:`Embedder` protocol."""
+    """Adapts :class:`EmbeddingClient` to the :class:`Embedder` protocol.
+
+    Every successful call refreshes the shared activity stamp so that the
+    server's owner does not unload it while it is still in use.
+    """
 
     client: EmbeddingClient
     dim: int
+    touch: Callable[[], None] | None = None
 
     def embed_documents(self, items: list[tuple[str, str | None]]) -> list[list[float]]:
-        return self.client.embed_documents(items)
+        vectors = self.client.embed_documents(items)
+        if self.touch is not None:
+            self.touch()
+        return vectors
 
     def embed_queries(self, texts: list[str]) -> list[list[float]]:
-        return self.client.embed_queries(texts)
+        vectors = self.client.embed_queries(texts)
+        if self.touch is not None:
+            self.touch()
+        return vectors
 
 
 def resolve_model(cfg: dict[str, Any]) -> tuple[Path, ModelSpec | None]:
@@ -128,7 +139,9 @@ class EmbeddingService:
                 base_url = self.supervisor.ensure_running()
                 self._client = self._make_client(base_url)
 
-        self._adapter = EmbedderAdapter(client=self._client, dim=dim)
+        self._adapter = EmbedderAdapter(
+            client=self._client, dim=dim, touch=self.supervisor.touch
+        )
         log.info("embeddings ready: dim=%d at %s", dim, base_url)
         return self._adapter
 

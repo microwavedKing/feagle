@@ -100,6 +100,19 @@ def test_reset_drops_the_cached_embedder(env):
     assert svc.dim is None
 
 
+def test_embedder_refreshes_the_activity_stamp(env):
+    touched = []
+    svc = service.EmbeddingService(
+        cfg_with(model="embeddinggemma-2-q8", server_url="http://127.0.0.1:9"),
+        transport=echo_transport(dim=5),
+    )
+    embedder = svc.start()
+    embedder.touch = lambda: touched.append(1)
+    embedder.embed_queries(["hello world"])
+    embedder.embed_documents([("body", "title")])
+    assert touched == [1, 1]
+
+
 def test_close_does_not_stop_external(env):
     svc = service.EmbeddingService(
         cfg_with(model="embeddinggemma-2-q8", server_url="http://127.0.0.1:9"),
