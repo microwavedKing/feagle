@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -55,6 +57,7 @@ def make_supervisor(tmp_path, *, health, spawn=None, cfg_kwargs=None, clock=None
         cfg,
         port_file=tmp_path / "llama.port",
         pid_file=tmp_path / "llama.pid",
+        lock_file=tmp_path / "llama.lock",
         log_file=tmp_path / "llama.log",
         spawn=spawn or (lambda cmd: FakeProc()),
         health=health,
@@ -123,6 +126,39 @@ def test_waits_for_a_slow_existing_server(tmp_path):
     sup, _ = make_supervisor(tmp_path, health=health, spawn=spawn)
     assert sup.ensure_running() == "http://127.0.0.1:5050"
     assert sup.owned is False
+
+
+def test_concurrent_start_spawns_only_once(tmp_path):
+    spawned: list[int] = []
+    state: dict[str, int | None] = {"port": None}
+
+    def spawn(cmd):
+        port = int(cmd[cmd.index("--port") + 1])
+        state["port"] = port
+        time.sleep(0.2)  # emulate startup
+        (tmp_path / "llama.port").write_text(str(port), encoding="utf-8")
+        (tmp_path / "llama.pid").write_text("1", encoding="utf-8")
+        spawned.append(port)
+        return FakeProc()
+
+    def health(url):
+        port = state["port"]
+        return port is not None and url.endswith(f":{port}")
+
+    results: list[str] = []
+
+    def worker():
+        sup, _ = make_supervisor(tmp_path, health=health, spawn=spawn)
+        results.append(sup.ensure_running())
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(set(results)) == 1  # both ended up with the same server
+    assert len(spawned) == 1  # and only one was started
 
 
 def test_spawns_when_no_server(tmp_path):
