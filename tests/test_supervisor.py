@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
 
 import pytest
 
+from feagle.embeddings import supervisor as supervisor_module
 from feagle.embeddings.supervisor import (
     LlamaSupervisor,
     SupervisorConfig,
@@ -226,6 +228,22 @@ def test_touch_resets_idle(tmp_path):
     sup.touch()
     clock.t += 50
     assert sup.stop_if_idle() is False  # only 50s since touch
+
+
+def test_dead_owner_is_not_waited_out(tmp_path):
+    """A port file whose process is gone is replaced immediately (no grace)."""
+    (tmp_path / "llama.port").write_text("5050", encoding="utf-8")
+    (tmp_path / "llama.pid").write_text("2147483647", encoding="utf-8")  # no such process
+
+    sup, clock = make_supervisor(tmp_path, health=lambda url: ":5050" not in url)
+    url = sup.ensure_running()
+    assert ":5050" not in url
+    assert clock.t < 1.0  # no 15 s grace period was spent
+
+
+def test_process_alive_helper():
+    assert supervisor_module._process_alive(os.getpid()) is True
+    assert supervisor_module._process_alive(2147483647) is False  # no such process
 
 
 def test_shared_touch_keeps_the_server_alive(tmp_path):

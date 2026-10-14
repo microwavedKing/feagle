@@ -157,6 +157,48 @@ def test_embedding_failure_falls_back_and_resets(db_path):
     assert engine.embedder is None  # next request may restart it
 
 
+def test_embedding_failure_restarts_the_server_and_retries(db_path):
+    """An unloaded server must come back on the same request, not 30 s later."""
+    calls = []
+
+    class Flaky(FakeEmbedder):
+        def __init__(self):
+            self.failures = 1
+
+        def embed_queries(self, texts):
+            if self.failures:
+                self.failures -= 1
+                raise ServerUnavailable("server unloaded")
+            return super().embed_queries(texts)
+
+    def provider():
+        calls.append(1)
+        return FakeEmbedder()
+
+    engine = QueryEngine(
+        make_cfg(), db_path=db_path, embedder=Flaky(), embedder_provider=provider,
+        on_embedder_failure=lambda: None,
+    )
+    result = engine.dispatch({"op": "search", "query": "alpha"})
+    assert result["mode"] == "hybrid"
+    assert calls == [1]  # the provider was asked to start the server again
+
+
+def test_retry_failure_still_degrades_to_text(db_path):
+    def provider():
+        raise ServerUnavailable("still down")
+
+    class Broken(FakeEmbedder):
+        def embed_queries(self, texts):
+            raise ServerUnavailable("gone")
+
+    engine = QueryEngine(
+        make_cfg(), db_path=db_path, embedder=Broken(), embedder_provider=provider,
+        on_embedder_failure=lambda: None,
+    )
+    assert engine.dispatch({"op": "search", "query": "alpha"})["mode"] == "fts"
+
+
 def test_status_op(engine):
     result = engine.dispatch({"op": "status"})
     assert result["files"] == 2
