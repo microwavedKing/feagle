@@ -41,8 +41,10 @@ feagle status
 ```
 
 Configuration lives in `$XDG_CONFIG_HOME/feagle/config.toml`
-(`~/.config/feagle/config.toml` by default) and is created with documented
-defaults on first run.
+(`~/.config/feagle/config.toml` by default). Built-in defaults apply when the
+file is absent; a commented template is written by `feagle setup` (planned for
+a later phase). You can index a directory ad hoc with `feagle index --root PATH`
+before any config exists.
 
 ## Known limitations
 
