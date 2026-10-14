@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from .. import __version__, config
-from . import cmd_index, cmd_queryd, cmd_search, cmd_status
+from . import cmd_index, cmd_open, cmd_queryd, cmd_search, cmd_status
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +44,19 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="show index statistics")
     status.add_argument("--json", action="store_true", help="emit JSON")
     status.set_defaults(func=cmd_status.run)
+
+    open_cmd = subparsers.add_parser("open", help="open a file at a line or page")
+    open_cmd.add_argument("path", help="file to open")
+    open_cmd.add_argument(
+        "position", nargs="?", type=cmd_open.position_type, default=None, metavar="+N",
+        help="line (text) or page (PDF)",
+    )
+    open_cmd.add_argument("--line", type=int, default=None, help="line number")
+    open_cmd.add_argument("--page", type=int, default=None, help="page number (PDF)")
+    open_cmd.add_argument(
+        "--dry-run", action="store_true", help="print the command instead of running it"
+    )
+    open_cmd.set_defaults(func=cmd_open.run)
 
     queryd = subparsers.add_parser("queryd", help="run the query daemon (foreground)")
     queryd.set_defaults(func=cmd_queryd.run)
