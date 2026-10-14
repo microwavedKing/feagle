@@ -24,10 +24,10 @@ telemetry.
     (EmbeddingGemma 2 support). `extra/llama-cpp` may be too old; the AUR
     `llama.cpp-git` package tracks master.
   - the `embeddinggemma-2-q4` GGUF model, or `embeddinggemma-2-q8` (see below)
-- `poppler-utils` (`pdftotext`) for PDF indexing
+- `poppler` (`pdftotext`) for PDF indexing
 - Optional, for OCR of scanned PDFs: `tesseract` plus the language data you need
   (`tesseract-data-eng`, `tesseract-data-rus`, ...)
-- Optional: a dmenu-compatible launcher (`fuzzel`, `wofi`, `rofi-wayland`, `tofi`, `walker`)
+- Optional: a dmenu-compatible launcher (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
 
 ## Install
 

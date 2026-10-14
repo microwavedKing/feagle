@@ -265,7 +265,7 @@ def check_pdftotext() -> Check:
     if pdftotext_available():
         return Check("pdftotext", "ok", _which("pdftotext") or "")
     return Check("pdftotext", "warn", "not installed (PDFs are skipped)",
-                 "sudo pacman -S poppler-utils")
+                 "sudo pacman -S poppler")
 
 
 def check_ocr(cfg: dict[str, Any]) -> Check:
@@ -308,7 +308,7 @@ def check_launcher(cfg: dict[str, Any]) -> Check:
     if available:
         return Check("launcher", "ok", "auto: " + ", ".join(available))
     return Check("launcher", "warn", "no launcher found (stdout fallback)",
-                 "install fuzzel/wofi/rofi-wayland/tofi/walker")
+                 "install fuzzel/wofi/rofi/tofi/walker")
 
 
 def check_power() -> Check:

@@ -133,6 +133,9 @@ def _download_model(cfg: dict[str, Any]) -> bool:
 
 
 def _install_units() -> None:
+    if units.using_packaged():
+        print("systemd units are already provided by the package (system-wide)")
+        return
     written = units.install()
     print("installed units: " + ", ".join(path.name for path in written))
 

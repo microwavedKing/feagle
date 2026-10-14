@@ -69,6 +69,13 @@ def test_are_installed_false_when_missing(tmp_path, monkeypatch):
     assert units.are_installed() is False
 
 
+def test_using_packaged_detects_system_units(tmp_path):
+    assert units.using_packaged(tmp_path) is False
+    for name in units.UNIT_NAMES:
+        (tmp_path / name).write_text("", encoding="utf-8")
+    assert units.using_packaged(tmp_path) is True
+
+
 def test_exec_path_prefers_invoked_script(tmp_path, monkeypatch):
     script = tmp_path / "bin" / "feagle"
     script.parent.mkdir()
