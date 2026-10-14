@@ -36,8 +36,11 @@ class SupervisorConfig:
     server_url: str = ""
     idle_timeout_min: float = 10.0
     threads: int = 0
-    context: int = 4096
-    slots: int = 8
+    #: Total context and parallel slots. Each slot gets context/slots tokens,
+    #: and an embeddings input must fit in one slot (see RESEARCH §4.1), so keep
+    #: the per-slot size comfortably above the largest chunk (~2200 chars).
+    context: int = 8192
+    slots: int = 4
     batch: int = 4096
     ubatch: int = 4096
     extra_args: list[str] = field(default_factory=list)

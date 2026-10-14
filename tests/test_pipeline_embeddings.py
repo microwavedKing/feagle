@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from feagle import config, db
-from feagle.embeddings.client import ServerUnavailable
+from feagle.embeddings.client import EmbeddingError, ServerUnavailable
 from feagle.indexer import pipeline
 from feagle.search import vec
 
@@ -28,6 +28,24 @@ class FakeEmbedder:
 class BrokenEmbedder(FakeEmbedder):
     def embed_documents(self, items):
         raise ServerUnavailable("boom")
+
+
+class BatchOnlyEmbedder(FakeEmbedder):
+    """Rejects batches with more than one input, but works input by input."""
+
+    def embed_documents(self, items):
+        if len(items) > 1:
+            raise EmbeddingError("batch too large")
+        return super().embed_documents(items)
+
+
+class MarkerEmbedder(FakeEmbedder):
+    """Always refuses chunks containing a marker (like an oversized input)."""
+
+    def embed_documents(self, items):
+        if any("MARKER" in text for text, _ in items):
+            raise EmbeddingError("refusing MARKER chunk")
+        return super().embed_documents(items)
 
 
 @pytest.fixture
@@ -143,3 +161,24 @@ def test_prune_removes_vectors(conn, root):
     path.unlink()
     pipeline.index_roots(conn, make_cfg(root), embedder=FakeEmbedder())
     assert vec.vec_count(conn) == 0
+
+
+def test_batch_failure_falls_back_to_per_chunk(conn, root):
+    (root / "long.txt").write_text(" ".join(f"word{i}" for i in range(600)), encoding="utf-8")
+    stats = pipeline.index_roots(conn, make_cfg(root), embedder=BatchOnlyEmbedder())
+
+    assert chunk_count(conn) > 1  # the batch was actually multi-chunk
+    assert stats.vectors == chunk_count(conn)
+    assert vec.vec_count(conn) == chunk_count(conn)
+    assert embedded_of(conn, root / "long.txt") == 1
+
+
+def test_one_unembeddable_chunk_does_not_lose_the_file(conn, root):
+    body = ("alpha beta gamma delta " * 120) + "\nMARKER\n" + ("epsilon zeta eta " * 120)
+    (root / "mixed.txt").write_text(body, encoding="utf-8")
+    stats = pipeline.index_roots(conn, make_cfg(root), embedder=MarkerEmbedder())
+
+    total = chunk_count(conn)
+    assert total > 1
+    assert 0 < stats.vectors < total  # the MARKER chunk was skipped
+    assert embedded_of(conn, root / "mixed.txt") == 0  # so backfill can retry
