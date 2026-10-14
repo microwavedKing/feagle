@@ -10,6 +10,7 @@ neither spawns nor stops anything.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import os
 import socket
 import subprocess
@@ -99,6 +100,7 @@ class LlamaSupervisor:
         *,
         port_file: Path | None = None,
         pid_file: Path | None = None,
+        lock_file: Path | None = None,
         log_file: Path | None = None,
         spawn: Callable[[list[str]], Any] | None = None,
         health: Callable[[str], bool] | None = None,
@@ -108,6 +110,7 @@ class LlamaSupervisor:
         self.cfg = cfg
         self.port_file = port_file or (paths.runtime_subdir() / "llama.port")
         self.pid_file = pid_file or (paths.runtime_subdir() / "llama.pid")
+        self.lock_file = lock_file or (paths.runtime_subdir() / "llama.lock")
         self.log_file = log_file or (paths.state_dir() / "llama.log")
         self._spawn = spawn or self._default_spawn
         self._health = health or _default_health
@@ -170,7 +173,25 @@ class LlamaSupervisor:
             self._url = self.cfg.server_url.rstrip("/")
             self._owned = False
             return self._url
+        # Serialize the reuse/spawn decision across processes so that two daemons
+        # starting at the same time cannot each spawn their own server.
+        with self._spawn_lock():
+            return self._ensure_running_locked()
 
+    @contextlib.contextmanager
+    def _spawn_lock(self):
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(self.lock_file.parent, 0o700)
+        with open(self.lock_file, "w", encoding="utf-8") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                with contextlib.suppress(OSError):
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def _ensure_running_locked(self) -> str:
         port = self._read_port()
         if port is not None:
             url = f"http://127.0.0.1:{port}"
