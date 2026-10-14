@@ -77,12 +77,15 @@ class QueryEngine:
                     candidates=search_cfg["candidates"],
                     rrf_k=search_cfg["rrf_k"],
                     stem=stem,
+                    max_distance=search_cfg["max_distance"],
+                    max_per_file=search_cfg["max_per_file"],
                 )
                 used = "hybrid"
             else:
                 hits = hybrid.search_text(
                     conn, query, limit=limit,
-                    candidates=search_cfg["candidates"], rrf_k=search_cfg["rrf_k"], stem=stem,
+                    candidates=search_cfg["candidates"], rrf_k=search_cfg["rrf_k"],
+                    stem=stem, max_per_file=search_cfg["max_per_file"],
                 )
                 used = "fts"
         finally:

@@ -41,21 +41,30 @@ def _fetch_details(conn: sqlite3.Connection, chunk_ids: list[int]) -> dict[int, 
 
 
 def _to_hits(
-    conn: sqlite3.Connection, ranked: list[tuple[int, float]], limit: int
+    conn: sqlite3.Connection,
+    ranked: list[tuple[int, float]],
+    limit: int,
+    *,
+    max_per_file: int = 0,
 ) -> list[SearchHit]:
     ordered_ids = [chunk_id for chunk_id, _ in ranked]
     details = _fetch_details(conn, ordered_ids)
     scores = dict(ranked)
     hits: list[SearchHit] = []
+    per_file: dict[str, int] = {}
     for chunk_id in ordered_ids:
         row = details.get(chunk_id)
         if row is None:
             continue
+        path = row["path"]
+        if max_per_file and per_file.get(path, 0) >= max_per_file:
+            continue
+        per_file[path] = per_file.get(path, 0) + 1
         hits.append(
             SearchHit(
                 chunk_id=chunk_id,
                 score=scores[chunk_id],
-                path=row["path"],
+                path=path,
                 page=row["page"],
                 line=row["line"],
                 snippet=_snippet(row["body"]),
@@ -92,12 +101,13 @@ def search_text(
     candidates: int = 50,
     rrf_k: int = DEFAULT_RRF_K,
     stem: bool = True,
+    max_per_file: int = 0,
 ) -> list[SearchHit]:
     """Full-text search fusing the exact and stemmed rankings."""
     rankings = _text_rankings(conn, query, candidates, stem=stem, fallback_or=True)
     if not rankings:
         return []
-    return _to_hits(conn, rrf(rankings, k=rrf_k), limit)
+    return _to_hits(conn, rrf(rankings, k=rrf_k), limit, max_per_file=max_per_file)
 
 
 def search_hybrid(
@@ -109,18 +119,26 @@ def search_hybrid(
     candidates: int = 50,
     rrf_k: int = DEFAULT_RRF_K,
     stem: bool = True,
+    max_distance: float = 0.0,
+    max_per_file: int = 0,
 ) -> list[SearchHit]:
     """Run exact + stemmed FTS and (when available) KNN, then fuse.
 
-    With ``query_vector=None`` this degrades to a full-text search.
+    ``max_distance`` drops vector neighbours that are too far away, so an
+    unrelated query does not return a page of weak matches. With
+    ``query_vector=None`` this degrades to a full-text search.
     """
     rankings = _text_rankings(conn, query, candidates, stem=stem, fallback_or=False)
 
     if query_vector is not None:
-        vec_ids = [hit.chunk_id for hit in knn(conn, query_vector, k=candidates)]
+        vec_ids = [
+            hit.chunk_id
+            for hit in knn(conn, query_vector, k=candidates)
+            if max_distance <= 0 or hit.distance <= max_distance
+        ]
         if vec_ids:
             rankings.append(vec_ids)
 
     if not rankings:
         return []
-    return _to_hits(conn, rrf(rankings, k=rrf_k), limit)
+    return _to_hits(conn, rrf(rankings, k=rrf_k), limit, max_per_file=max_per_file)

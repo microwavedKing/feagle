@@ -88,6 +88,53 @@ def test_hybrid_limit_is_respected(conn):
     assert len(hits) == 2
 
 
+def add_doc(conn, path, bodies, vector):
+    cur = conn.execute(
+        "INSERT INTO files(path, size, mtime_ns, state, updated_at) VALUES(?,?,?,'ok',?)",
+        (path, 1, 1, int(time.time())),
+    )
+    file_id = cur.lastrowid
+    for seq, body in enumerate(bodies):
+        cur = conn.execute(
+            "INSERT INTO chunks(file_id, seq, line, body) VALUES(?,?,?,?)",
+            (file_id, seq, seq + 1, body),
+        )
+        chunk_id = cur.lastrowid
+        conn.execute(
+            "INSERT INTO chunks_fts(body, stem, chunk_id) VALUES(?,?,?)",
+            (body, stemming.stem_text(body), chunk_id),
+        )
+        vec.insert_vectors(conn, [(chunk_id, vector)])
+    conn.commit()
+
+
+def test_max_distance_drops_unrelated_neighbours(conn):
+    add(conn, "/d/far.txt", "totally unrelated text", [0.0, 0.0, 1.0])  # far from [1,0,0]
+
+    without = hybrid.search_hybrid(
+        conn, "zzz", query_vector=[1.0, 0.0, 0.0], limit=5, candidates=5
+    )
+    assert without  # without a threshold the neighbour is still returned
+
+    capped = hybrid.search_hybrid(
+        conn, "zzz", query_vector=[1.0, 0.0, 0.0], limit=5, candidates=5, max_distance=0.5
+    )
+    assert capped == []
+
+
+def test_max_per_file_limits_repetition(conn):
+    add_doc(conn, "/d/big.txt", [f"alpha chunk {i}" for i in range(4)], [1.0, 0.0, 0.0])
+    add_doc(conn, "/d/other.txt", ["alpha other file"], [1.0, 0.0, 0.0])
+
+    hits = hybrid.search_hybrid(
+        conn, "alpha", query_vector=[1.0, 0.0, 0.0], limit=10, candidates=10, max_per_file=2
+    )
+    counts = {}
+    for hit in hits:
+        counts[hit.path] = counts.get(hit.path, 0) + 1
+    assert counts["/d/big.txt"] == 2
+    assert counts["/d/other.txt"] == 1  # the other file is no longer crowded out
+
 def test_hybrid_no_matches_returns_empty(conn):
     add(conn, "/d/a.txt", "alpha", [1.0, 0.0, 0.0])
     assert hybrid.search_hybrid(conn, "zzz", query_vector=None, limit=5, candidates=5) == []

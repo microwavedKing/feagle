@@ -63,6 +63,11 @@ DEFAULTS: dict[str, Any] = {
         "candidates": 50,
         "rrf_k": 60,
         "stemming": "auto",
+        # Drop vector neighbours whose L2 distance (on normalized vectors) is
+        # above this; unrelated results otherwise always fill the list. 0 disables.
+        "max_distance": 0.8,
+        # At most this many chunks of the same file in the results (0 = no cap).
+        "max_per_file": 3,
     },
     "launcher": {
         "program": "auto",
@@ -190,6 +195,10 @@ def validate(cfg: dict[str, Any], source: Path | None = None) -> None:
     _check_type(search, "stemming", (str,), source)
     _check(search["stemming"] in STEMMING_MODES, "search.stemming",
            f"must be one of {STEMMING_MODES}", source)
+    _check_type(search, "max_distance", (int, float), source)
+    _check(search["max_distance"] >= 0, "search.max_distance", "must be >= 0", source)
+    _check_type(search, "max_per_file", (int,), source)
+    _check(search["max_per_file"] >= 0, "search.max_per_file", "must be >= 0", source)
 
     launcher = cfg["launcher"]
     _check_type(launcher, "program", (str,), source)
@@ -286,6 +295,10 @@ candidates = 50
 rrf_k = 60
 # Russian stemming for the full-text index: auto | none
 stemming = "auto"
+# Ignore vector neighbours farther than this (L2 on normalized vectors; 0 = off).
+max_distance = 0.8
+# Maximum chunks of one file in the results (0 = unlimited).
+max_per_file = 3
 
 [launcher]
 # auto | fuzzel | wofi | rofi | tofi | walker | stdout
