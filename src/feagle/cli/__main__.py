@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from .. import __version__, config
 from ..embeddings import presets
+from ..log import setup_logging
 from . import (
     cmd_doctor,
     cmd_index,
@@ -119,8 +121,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _log_level(command: str) -> str | None:
+    """Daemons log at INFO (journald); interactive commands stay quiet.
+
+    ``FEAGLE_LOG_LEVEL`` always wins.
+    """
+    if os.environ.get("FEAGLE_LOG_LEVEL"):
+        return None
+    return "INFO" if command in ("indexerd", "queryd") else "WARNING"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    setup_logging(_log_level(args.command))
     try:
         cfg = config.load_config()
     except config.ConfigError as exc:

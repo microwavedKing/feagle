@@ -46,6 +46,10 @@ class SupervisorConfig:
     extra_args: list[str] = field(default_factory=list)
     llama_server: str = "llama-server"
     health_timeout: float = 60.0
+    #: How long to wait for an already-listed server to become healthy before
+    #: declaring it stale. Prevents two daemons from each spawning a server when
+    #: they start at the same time.
+    startup_grace: float = 15.0
     alias: str = "feagle"
 
 
@@ -170,7 +174,7 @@ class LlamaSupervisor:
         port = self._read_port()
         if port is not None:
             url = f"http://127.0.0.1:{port}"
-            if self._health(url):
+            if self._health(url) or self._await_healthy(url):
                 log.debug("reusing llama-server at %s", url)
                 self._url = url
                 self._owned = False
@@ -198,6 +202,15 @@ class LlamaSupervisor:
             f"llama-server did not become healthy in {self.cfg.health_timeout:.0f}s; "
             f"see {self.log_file}"
         )
+
+    def _await_healthy(self, url: str) -> bool:
+        """Give an already-running server a grace period to become ready."""
+        deadline = self._clock() + self.cfg.startup_grace
+        while self._clock() < deadline:
+            if self._health(url):
+                return True
+            self._sleep(0.5)
+        return False
 
     def _wait_healthy(self, url: str) -> bool:
         deadline = self._clock() + self.cfg.health_timeout

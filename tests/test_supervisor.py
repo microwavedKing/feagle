@@ -108,6 +108,23 @@ def test_reuses_healthy_server_from_port_file(tmp_path):
     assert sup.owned is False
 
 
+def test_waits_for_a_slow_existing_server(tmp_path):
+    """Two daemons starting together must not spawn two servers."""
+    (tmp_path / "llama.port").write_text("5050", encoding="utf-8")
+    state = {"probes": 0}
+
+    def health(url):
+        state["probes"] += 1
+        return state["probes"] >= 3  # ready on the third probe
+
+    def spawn(cmd):
+        raise AssertionError("must not spawn a duplicate server")
+
+    sup, _ = make_supervisor(tmp_path, health=health, spawn=spawn)
+    assert sup.ensure_running() == "http://127.0.0.1:5050"
+    assert sup.owned is False
+
+
 def test_spawns_when_no_server(tmp_path):
     sup, _ = make_supervisor(tmp_path, health=lambda url: True)
     url = sup.ensure_running()
