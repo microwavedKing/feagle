@@ -58,7 +58,8 @@ package() {
   python -m installer --destdir="$pkgdir" dist/*.whl
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  install -Dm644 NOTICE README.md CHANGELOG.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -Dm644 NOTICE README.md CHANGELOG.md docs/INSTALL.ru.md \
+    -t "$pkgdir/usr/share/doc/$pkgname/"
 
   install -Dm644 systemd/feagle-indexerd.service \
     "$pkgdir/usr/lib/systemd/user/feagle-indexerd.service"

@@ -10,9 +10,9 @@ telemetry.
 
 > **Status:** early development (`0.1.0`). Full-text and semantic search work,
 > Russian word forms are matched through stemming, scanned PDFs can be OCR'd,
-> results open at a line/page, and `feagle search --pick` drives a launcher.
-> There are systemd user units, `feagle setup` and `feagle doctor`. Packaging is
-> still to come. `llama-server` is optional — without it `feagle` degrades
+> results open at a line/page, `feagle pick` drives a launcher, and there are
+> systemd user units, `feagle setup`, `feagle doctor`, benchmarks and packaging
+> (`PKGBUILD` + CI). `llama-server` is optional — without it `feagle` degrades
 > gracefully to full-text search.
 
 ## Requirements
@@ -100,9 +100,11 @@ feagle indexerd              # run the indexing daemon in the foreground
 
 Configuration lives in `$XDG_CONFIG_HOME/feagle/config.toml`
 (`~/.config/feagle/config.toml`). Built-in defaults apply when the file is
-absent; a commented template is written by `feagle setup` (planned for a later
-phase). You can index a directory ad hoc with `feagle index --root PATH` before
-any config exists.
+absent; `feagle setup` writes a fully commented template. You can index a
+directory ad hoc with `feagle index --root PATH` before any config exists.
+
+A step-by-step Russian walkthrough (install, setup, hotkeys, troubleshooting) is
+in [`docs/INSTALL.ru.md`](docs/INSTALL.ru.md).
 
 ## Semantic search
 
@@ -404,9 +406,416 @@ corpus (**3.9× faster**, `stem_text` 7.8×, only 285 real stemmer calls). Searc
 - Upgrading from an older index version migrates the schema automatically on the
   next open; the full-text index is rebuilt from stored chunks (files are not
   re-read).
-- Packaging (PKGBUILD/AUR, CI, a tagged release) is not implemented yet.
+- The AUR package is prepared (`PKGBUILD`, `.SRCINFO`); publishing it is a manual
+  step.
 
 ## License
 
 MIT. See [LICENSE](LICENSE). Embedding model weights are distributed under
 their own license — see [NOTICE](NOTICE).
+
+---
+
+# feagle (по-русски)
+
+Локальный семантический поиск по файлам для Arch Linux + Wayland.
+
+`feagle` индексирует ваши личные файлы и ищет по ним как по ключевым словам
+(полнотекстово, SQLite FTS5/BM25), так и по смыслу (векторные эмбеддинги).
+Вызывается хоткеем из композитора и открывает результат в нужном месте
+(страница PDF, строка кода). Всё остаётся на вашей машине: без облака, аккаунтов
+и телеметрии.
+
+> **Статус:** ранняя разработка (`0.1.0`). Работают полнотекстовый и семантический
+> поиск, русские словоформы (стемминг), OCR сканированных PDF, открытие на
+> строке/странице, `feagle pick` в лаунчере, есть systemd-юниты, `feagle setup`,
+> `feagle doctor`, бенчмарки и упаковка (`PKGBUILD` + CI). `llama-server` —
+> опционален: без него `feagle` деградирует до полнотекстового поиска.
+
+Пошаговое руководство (установка, настройка, хоткеи, решение проблем) —
+[`docs/INSTALL.ru.md`](docs/INSTALL.ru.md).
+
+## Требования
+
+- Python 3.12+
+- SQLite с FTS5 (в Arch Linux идёт со стандартной библиотекой Python)
+- Для семантического поиска (опционально):
+  - `llama-server` (llama.cpp) сборки **новее 2026-10-06** (поддержка
+    EmbeddingGemma 2). `extra/llama-cpp` может быть старой; AUR-пакет
+    `llama.cpp-git` следит за master.
+  - модель GGUF `embeddinggemma-2-q4` (по умолчанию) либо `embeddinggemma-2-q8`
+- `poppler` (`pdftotext`) — для индексации PDF
+- Для OCR сканированных PDF (опционально): `tesseract` и нужные языковые данные
+  (`tesseract-data-eng`, `tesseract-data-rus`, …)
+- Опционально: dmenu-совместимый лаунчер (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
+
+## Установка
+
+`feagle` следует XDG-конвенциям и не требует root в рантайме.
+
+### Из AUR (Arch Linux)
+
+```sh
+yay -S feagle        # или другой AUR-хелпер
+feagle setup
+```
+
+Учтите: `python-sqlite-vec` — тоже AUR-пакет, хелпер соберёт и его.
+
+### Через uv или pipx
+
+```sh
+uv tool install git+https://github.com/microwavedKing/feagle
+# или:  pipx install git+https://github.com/microwavedKing/feagle
+feagle setup
+```
+
+### Из репозитория (разработка)
+
+```sh
+git clone https://github.com/microwavedKing/feagle.git
+cd feagle
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/feagle setup
+```
+
+`feagle setup` — интерактивная первичная настройка: пишет конфиг, скачивает
+модель (с проверкой SHA256), ставит и включает systemd-юниты, запускает первую
+индексацию. Неинтерактивный вариант:
+
+```sh
+feagle setup --yes --root ~/Documents --model embeddinggemma-2-q4
+```
+
+## Использование
+
+```sh
+feagle setup                 # первичная настройка (интерактивно)
+feagle doctor                # проверка окружения с подсказками, что исправить
+
+feagle index                 # обход корней (семантика — если доступна)
+feagle index --no-embed      # только полнотекстовая индексация
+feagle index --backfill      # доэмбеддить файлы, у которых нет векторов
+feagle index --rebuild       # стереть индекс и пересобрать
+
+feagle search "борщ рецепт"  # гибридный поиск (режим из конфига)
+feagle search "rust" --mode fts
+feagle search "rust" --json
+feagle search --pick         # выбрать результат в лаунчере и открыть
+
+feagle open ~/docs/report.pdf +3   # открыть PDF на странице 3
+feagle open ~/src/app.py +42       # открыть код на строке 42
+
+feagle status
+feagle queryd                # демон запросов на переднем плане
+feagle indexerd              # демон индексации на переднем плане
+feagle pick                  # окно лаунчера: приложения + файлы
+```
+
+Конфиг: `$XDG_CONFIG_HOME/feagle/config.toml` (`~/.config/feagle/config.toml`).
+Если файла нет — работают встроенные значения по умолчанию; `feagle setup`
+записывает полностью закомментированный шаблон. Можно проиндексировать папку
+разово: `feagle index --root ПУТЬ`.
+
+## Семантический поиск
+
+Эмбеддинги считает локальный `llama-server` (`llama-server --embeddings`,
+OpenAI-совместимый `POST /v1/embeddings`), векторы хранит `sqlite-vec`.
+Документы и запросы эмбеддятся с task-префиксами, которых требует
+EmbeddingGemma 2; вектор можно усечь (MRL) до `[embeddings].mrl_dim` с
+перенормировкой.
+
+Модель: соберите/поставьте `llama-server` (AUR, например `llama.cpp-git`) и
+положите GGUF в `$XDG_DATA_HOME/feagle/models/`:
+
+```
+embeddinggemma-2-UD-Q4_K_XL.gguf
+sha256 ea905fd08e8061db77a0031cbb5096d459d7cfd2bdd0ad2ba66e483f16719493
+```
+
+либо укажите путь к своему GGUF в `[embeddings].model`. По умолчанию —
+лёгкий `embeddinggemma-2-q4`; доступен и `embeddinggemma-2-q8` (официальный
+репозиторий ggml-org, ~310 МБ) — см. замеры ниже.
+
+`feagle` запускает сервер по требованию, переиспользует уже запущенный (через
+файл `llama.port` в runtime-каталоге) и, если владелец — он, выгружает его
+после `[embeddings].idle_timeout_min` минут без запросов.
+
+### Деградация
+
+| Ситуация | Поведение |
+|---|---|
+| нет `llama-server` / модели | полнотекстовый поиск работает; индексация сохраняет чанки без векторов |
+| сервер упал в рантайме | перезапускается при следующем запросе; ошибки — в лог |
+| гибрид запрошен, эмбеддинги недоступны | откат к полнотексту с предупреждением в stderr |
+| `queryd` не запущен | CLI открывает БД только на чтение и ищет в своём процессе |
+
+## Открытие результатов
+
+`feagle open <путь> [+N]` (или `--line`/`--page`) запускает программу из
+`[openers]` по расширению файла, иначе — `default`. Плейсхолдеры: `{path}`,
+`{line}`, `{page}`; если позиция не задана, плейсхолдер и предшествующий ему
+флаг отбрасываются, поэтому один шаблон работает и с позицией, и без.
+
+```toml
+[openers]
+default = "xdg-open {path}"
+pdf     = "zathura --page {page} {path}"
+py      = "code --goto {path}:{line}"
+md      = "nvim +{line} {path}"
+```
+
+Команда разбирается через `shlex` и запускается без shell. `feagle open
+--dry-run` печатает команду — удобно проверять шаблон.
+
+## Службы (systemd user-юниты)
+
+`feagle setup` ставит `feagle-indexerd.service` и `feagle-queryd.service` в
+`$XDG_CONFIG_HOME/systemd/user/` и включает их. Вручную:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now feagle-indexerd feagle-queryd
+```
+
+Индексатор следит за корнями (inotify через `watchfiles`; фолбэк — опрос,
+`feagle indexerd --poll`), периодически пересканирует и ставится на паузу на
+батарее или при высокой загрузке. Лимиты — в юните индексатора: `Nice=19`,
+`IOSchedulingClass=idle` и закомментированный `CPUQuota=200%` (200% = два ядра).
+Эти директивы требуют cgroup v2 — `feagle doctor` это проверяет.
+
+## Диагностика
+
+```sh
+feagle doctor            # python, sqlite/vec, индекс, юниты, сервер, модель, лаунчер, ...
+feagle doctor --json
+```
+
+Каждая строка — `OK` / `WARN` / `FAIL` с конкретной подсказкой (какой пакет
+поставить или какую команду выполнить).
+
+## Русский текст и OCR
+
+**Стемминг.** В FTS5 нет русского стеммера, поэтому `feagle` держит
+дополнительную колонку со Snowball-стемами кириллических слов. Запрос `книги`
+найдёт документ со словами `книга`, `книге`, `книгами`. Точное совпадение по
+колонке `body` сохраняется, поэтому идентификаторы в коде и английские слова не
+затронуты; две выдачи сливаются через RRF. Стемминг включён по умолчанию
+(`[search].stemming = "auto"`), отключается значением `"none"`.
+
+**Кодировки.** Текстовые файлы читаются как UTF-8. Если файл не является
+валидным UTF-8, включается фолбэк: cp1251 (только если результат действительно
+кириллический — чтобы не портить западноевропейские файлы), затем cp1252/latin-1.
+Это покрывает старые русские `.txt`; koi8-r не определяется (его нельзя надёжно
+отличить от cp1251) — такие файлы декодируются как cp1251.
+
+**OCR.** У сканированных PDF нет текстового слоя. С включённым OCR страницы,
+где текста почти нет, рендерятся в картинку (`pdftoppm` из poppler) и отдаются
+`tesseract`:
+
+```toml
+[index]
+ocr = true
+ocr_langs = "rus+eng"   # для смешанных документов оставляйте английский
+ocr_dpi = 300
+ocr_min_chars = 20      # страницы, где текста меньше — распознаются
+ocr_max_pages = 200     # предохранитель: OCR медленный
+```
+
+OCR по умолчанию выключен (тяжёлый: примерно секунда и больше на страницу).
+Если нет `tesseract` или языковых данных — страницы просто останутся пустыми,
+остальной индекс не пострадает, а `feagle doctor` скажет, что поставить. Для
+чисто латинских документов `ocr_langs = "eng"` даёт более чистый результат, чем
+`rus+eng`.
+
+## Лаунчер и хоткеи
+
+`feagle pick` открывает одно окно лаунчера, в котором **сначала приложения, затем
+файлы из индекса**: печатаете — фильтруется, Enter запускает приложение или
+открывает файл на нужной позиции.
+
+```sh
+feagle pick                    # приложения + файлы из индекса
+feagle pick --query "борщ"     # ранжировать файлы по смыслу (приложения сверху)
+feagle pick --files 2000       # сколько файлов показывать (по умолчанию 500)
+feagle pick --no-apps          # только файлы
+```
+
+`feagle search --pick` показывает результаты поиска (а с `--with-apps` —
+приложения над ними).
+
+Важно про лаунчеры: `wofi`/`rofi` фильтруют список, который **мы им заранее
+отдали** — они не сообщают нам запрос по мере ввода. Поэтому в `feagle pick`
+файлы фильтрует сам лаунчер (подстрока/фаззи по пути и сниппету), а для
+семантического ранжирования запрос нужно передать аргументом: `--query` или
+`feagle search --pick`. Приложения всегда идут первыми, поэтому при совпадении
+выигрывают они.
+
+Лаунчер определяется автоматически (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
+или задаётся в `[launcher].program`. Если ничего нет — печатается нумерованный
+список и читается номер, так что работает и из скриптов.
+
+Бинды в композиторе:
+
+**Hyprland** (релизы):
+
+```ini
+bind = SUPER, V, exec, feagle pick
+```
+
+**Hyprland** (latest git — новый Lua-конфиг):
+
+```lua
+hl.bind("SUPER + V", hl.dsp.exec_cmd("feagle pick"))
+```
+
+**Sway**:
+
+```
+bindsym $mod+v exec feagle pick
+```
+
+**niri** (spawn не использует shell; аргументы раздельно):
+
+```kdl
+binds {
+    Mod+V { spawn "feagle" "pick"; }
+}
+```
+
+**River** (классический, `riverctl`):
+
+```sh
+riverctl map normal Super V spawn 'feagle pick'
+```
+
+**mango** (mangowm, на базе dwl/wlroots). С версии 0.18 конфиг — TOML,
+`~/.config/mango/config.toml`:
+
+```toml
+[bind.default]
+# одно окно: приложения + файлы из индекса
+"SUPER+d" = "spawn_shell,feagle pick"
+# семантический поиск: спросить запрос, затем показать ранжированные файлы
+"SUPER+s" = "spawn_shell,wofi --dmenu -p 'feagle:' | xargs -r feagle search --pick"
+```
+
+`spawn_shell` выполняет команду через shell; есть и `spawn`, если предпочитаете
+передавать аргументы раздельно. Старый mango (< 0.18) использовал
+`~/.config/mango/config.conf`:
+
+```ini
+bind=SUPER,d,spawn,feagle pick
+```
+
+mango основан на wlroots, поэтому лаунчеры на layer-shell (`wofi`, `fuzzel`)
+работают с `feagle pick` без дополнительной настройки.
+
+Если `feagle` не в `PATH` сессии (установка в venv или pipx) — укажите в бинде
+абсолютный путь. Синтаксис сверен с документацией композиторов 2026-10-14; mango
+перешёл на TOML в 0.18, а формат конфига Hyprland меняется — сверяйтесь с доками
+своей версии.
+
+## Качество поиска
+
+Две настройки не дают выдаче превратиться в «всё, что нашлось в векторах»:
+
+```toml
+[search]
+# Игнорировать векторных соседей дальше этого (L2-расстояние на нормированных
+# векторах). Неподходящий запрос тогда даёт мало результатов или ноль. 0 — выкл.
+max_distance = 0.8
+# Не больше стольких чанков одного файла, чтобы один документ не занял весь
+# список. 0 — без ограничения.
+max_per_file = 3
+```
+
+Семантика сама по себе почти всегда что-то возвращает — ближайшие чанки найдутся
+даже для запроса, которого нет в тексте. `max_distance` отделяет «похожее» от
+«ближайшего из плохих»: увеличьте, если отсекаются хорошие совпадения,
+уменьшите для строгости.
+
+## Измеренная производительность
+
+Замеры на этой машине: Intel i7-8565U (4 ядра / 8 потоков), **16 ГБ RAM**, NVMe,
+без дискретной видеокарты, вывод только на CPU. Целевая машина проекта слабее
+(4 ядра U-серии, 8 ГБ RAM), так что эти цифры — верхняя оценка для такого класса.
+Сырые результаты — в `bench/results/`. Повторить:
+
+```sh
+feagle bench --files 60 --seed 1 --out bench/results/bench.json
+python bench/quality_eval.py --files 60 --seed 1
+```
+
+### Модель: по умолчанию q4
+
+| | `embeddinggemma-2-q4` (по умолчанию) | `embeddinggemma-2-q8` |
+|---|---|---|
+| Размер файла | 169 МБ | 310 МБ |
+| Индексация | **2.30 чанка/с** | 1.81 чанка/с |
+| RSS `llama-server` | **458 МиБ** | 523 МиБ |
+| Холодный старт | 1.55 с | 1.59 с |
+| MRR@10 (hybrid) | 0.750 | 0.750 |
+| MRR@10 (англ. / рус.) | 0.667 / 0.833 | 0.667 / 0.833 |
+| Recall@20 (hybrid) | 0.750 | 0.750 |
+| p50 гибридного запроса | **52 мс** | 62 мс |
+
+Лёгкий квант примерно на 27 % быстрее индексирует и на ~65 МиБ меньше, при
+**одинаковом измеренном качестве** — поэтому он дефолт; `q8` (официальный
+репозиторий ggml-org) доступен через `[embeddings].model`. То же соотношение
+подтвердилось на реальных книгах (4 книги, 230 чанков, MRR 0.8 у обоих, q4
+индексирует на 30 % быстрее). Полнотекстовые метрики не зависят от модели:
+MRR@10 0.375, Recall@20 0.500 — точного совпадения мало на перефразированных
+запросах, для этого и нужна семантика.
+
+### Латентность, память, размер
+
+| Метрика | Результат |
+|---|---|
+| Гибридный запрос, p50 / p95 | 52 мс / 63 мс (эмбеддинг 50 мс, поиск 2 мс) |
+| Полнотекстовый запрос, p50 / p95 | 1.4 мс / 3.8 мс |
+| Скорость индексации | 2.3 чанка/с (~1.7 файла/с) — упор в CPU на обработке промпта |
+| RSS `llama-server` (загружен) | ~458 МиБ, выгружается после 10 мин простоя |
+| Процесс `feagle` при индексации | +6 МиБ пик |
+| Холодный старт (запуск → healthy) | 1.6 с |
+| База данных | ~5.6 КБ/чанк, когда векторная «страница» заполнена; на маленьких индексах доминирует предвыделение vec0 в 3.1 МиБ (см. ниже) |
+
+Латентность запроса определяется эмбеддингом запроса (~50 мс); сам поиск
+(KNN + FTS + RRF) — ~2 мс. Модель выгружается после `idle_timeout_min`, поэтому
+простаивающая машина не тратит ни CPU, ни память под модель.
+
+### О размере БД
+
+`sqlite-vec` выделяет векторы фиксированными «группами» по 1024 строки (в этой
+версии `chunk_size` не настраивается), поэтому новая таблица `chunks_vec`
+резервирует ~3.1 МиБ (1024 × 768 × 4 байта) независимо от числа строк. Поэтому
+бенчмарк на 65 чанках показывает ~50 КБ/чанк; в установившемся режиме — ~5.6 КБ
+на чанк (3 КБ вектор + текст и FTS).
+
+### Профилирование и одна измеренная оптимизация
+
+`cProfile` на индексации и поиске (с заглушкой вместо сервера, чтобы мерить
+только наш код) показал, что индексацию доминирует **стемминг**: 5840 вызовов
+`snowballstemmer` на 130 чанков, 0.45 с из 0.56 с. Теперь результаты стемминга
+кэшируются (`functools.lru_cache`), что сократило наш CPU на том же корпусе до
+0.14 с (**в 3.9 раза быстрее**, `stem_text` — в 7.8 раза, реальных вызовов
+стеммера 285). Поиск (~1.8 мс) упирается в сам SQLite — там ничего не менялось.
+
+## Известные ограничения
+
+- В FTS5 нет нативного русского стемминга; `feagle` компенсирует отдельной
+  колонкой со стемами (Snowball), а не токенизатором.
+- OCR включается вручную, тяжёлый (примерно секунда и больше на страницу) и
+  требует `tesseract` с языковыми данными.
+- `sqlite-vec` — pre-1.0: удаления из `vec0` не уменьшают файл без
+  `feagle index --rebuild`, а новая векторная таблица резервирует группу на 1024
+  строки.
+- Индексация упирается в CPU (~450 токенов/с на целевой машине); большой корпус
+  в первый раз индексируется небыстро.
+- AUR-пакет подготовлен (`PKGBUILD`, `.SRCINFO`), публикация — ручной шаг.
+
+## Лицензия
+
+MIT. См. [LICENSE](LICENSE). Веса модели распространяются по своей лицензии —
+см. [NOTICE](NOTICE).
