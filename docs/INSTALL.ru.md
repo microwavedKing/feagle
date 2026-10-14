@@ -15,7 +15,7 @@
 | SQLite с FTS5 | да | полнотекстовый индекс (в Arch идёт с Python) |
 | `llama-server` + модель | нет | семантический поиск «по смыслу» |
 | `poppler` (`pdftotext`) | нет | индексация PDF |
-| `tesseract` + языковые данные | нет | распознавание сканов |
+| `tesseract` + языковые данные | нет | распознавание сканов PDF и картинок |
 | лаунчер (`fuzzel`/`wofi`/`rofi`/`tofi`/`walker`) | нет | попап по хоткею |
 
 Без опциональных компонентов `feagle` не ломается: он просто работает на FTS и
@@ -207,7 +207,8 @@ roots = ["/home/имя/Documents", "/home/имя/Projects"]  # что индек
 max_file_size_mb = 10          # крупнее — пропускаем
 pause_on_battery = true        # не индексировать на батарее
 pause_on_loadavg = 4.0         # пауза при высокой загрузке (0 = выкл.)
-ocr = false                    # OCR сканов (нужен tesseract)
+ocr = false                    # OCR сканов PDF (нужен tesseract + pdftoppm)
+ocr_images = false             # OCR картинок png/jpg/webp/tiff (нужен tesseract)
 ocr_langs = "rus+eng"
 
 [embeddings]
@@ -257,7 +258,8 @@ journalctl --user -u feagle-queryd -n 50                 # последние с
 |---|---|---|
 | `search` находит мало или ничего | в индексе почти нет файлов | `feagle status`; добавить папки в `[index].roots` и `feagle index` |
 | PDF не находятся | нет `pdftotext` | `sudo pacman -S poppler` |
-| Сканы не находятся | у PDF нет текстового слоя, OCR выключен | `[index].ocr = true` + `tesseract` и `tesseract-data-rus/eng`, затем `feagle index` |
+| Сканы не находятся | у PDF нет текстового слоя, OCR выключен | `[index].ocr = true` + `tesseract`, `pdftoppm` и `tesseract-data-rus/eng`, затем `feagle index` |
+| Текст с картинки/скриншота не находится | картинки не индексируются, OCR выключен | `[index].ocr_images = true` + `tesseract` и языковые данные, затем `feagle index` |
 | Все результаты в режиме `fts` | нет `llama-server` или модели | `feagle doctor`; поставить AUR `llama.cpp-git`, модель — через `feagle setup` |
 | Первый запрос после простоя медленный (~1.5 с) | модель выгрузилась по простою | это нормально; уменьшить `idle_timeout_min` не нужно — выгрузка экономит память |
 | Русские словоформы не совпадают | стемминг выключен | `[search].stemming = "auto"` (по умолчанию) |

@@ -9,11 +9,11 @@ source line). Everything stays on your machine: no cloud, no accounts, no
 telemetry.
 
 > **Status:** early development (`0.1.1`). Full-text and semantic search work,
-> Russian word forms are matched through stemming, scanned PDFs can be OCR'd,
-> results open at a line/page, `feagle pick` drives a launcher, and there are
-> systemd user units, `feagle setup`, `feagle doctor`, benchmarks and packaging
-> (`PKGBUILD` + CI). `llama-server` is optional — without it `feagle` degrades
-> gracefully to full-text search.
+> Russian word forms are matched through stemming, scanned PDFs and images can be
+> OCR'd, results open at a line/page, `feagle pick` drives a launcher, and there
+> are systemd user units, `feagle setup`, `feagle doctor`, benchmarks and
+> packaging (`PKGBUILD` + CI). `llama-server` is optional — without it `feagle`
+> degrades gracefully to full-text search.
 
 ## Requirements
 
@@ -25,8 +25,9 @@ telemetry.
     `llama.cpp-git` package tracks master.
   - the `embeddinggemma-2-q4` GGUF model, or `embeddinggemma-2-q8` (see below)
 - `poppler` (`pdftotext`) for PDF indexing
-- Optional, for OCR of scanned PDFs: `tesseract` plus the language data you need
-  (`tesseract-data-eng`, `tesseract-data-rus`, ...)
+- Optional, for OCR of scanned PDFs and images: `tesseract` plus the language
+  data you need (`tesseract-data-eng`, `tesseract-data-rus`, ...); scanned PDF
+  pages also need `pdftoppm` from `poppler`
 - Optional: a dmenu-compatible launcher (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
 
 ## Install
@@ -221,6 +222,23 @@ empty, the rest of the index is unaffected, and `feagle doctor` says what to
 install. For Latin-only documents `ocr_langs = "eng"` gives cleaner results than
 `rus+eng`.
 
+**Images.** With `[index].ocr_images = true`, `feagle` indexes `png`, `jpg`,
+`jpeg`, `webp` and `tiff` files by OCR'ing them directly with `tesseract`. No
+renderer is involved, so `tesseract` alone is enough — unlike scanned PDF pages,
+which also need `pdftoppm`:
+
+```toml
+[index]
+ocr_images = true
+ocr_langs = "rus+eng"
+```
+
+Image OCR is off by default. Recognized text goes into the same full-text index,
+so a word on a screenshot becomes searchable. On the reference laptop a
+1700×2200 screenshot takes about 0.65 s (`ocr_langs = "eng"`) and a 200-dpi PDF
+page about 1.25 s. Without `tesseract` (or with the flag off) image files are
+skipped, not indexed as binary garbage.
+
 ## Launcher and hotkeys
 
 `feagle pick` opens one launcher window containing **applications first and then
@@ -399,8 +417,9 @@ corpus (**3.9× faster**, `stem_text` 7.8×, only 285 real stemmer calls). Searc
 
 ## Known limitations
 
-- OCR is opt-in and slow (roughly a second or more per page) and needs
-  `tesseract` plus language data.
+- OCR is opt-in and slow: about a second per PDF page and ~0.65 s per image on
+  the reference laptop. It needs `tesseract` plus language data; scanned PDF
+  pages also need `pdftoppm` from `poppler`.
 - `sqlite-vec` is pre-1.0; deletions from `vec0` do not shrink the file until
   `feagle index --rebuild`.
 - Upgrading from an older index version migrates the schema automatically on the
@@ -427,8 +446,8 @@ their own license — see [NOTICE](NOTICE).
 и телеметрии.
 
 > **Статус:** ранняя разработка (`0.1.1`). Работают полнотекстовый и семантический
-> поиск, русские словоформы (стемминг), OCR сканированных PDF, открытие на
-> строке/странице, `feagle pick` в лаунчере, есть systemd-юниты, `feagle setup`,
+> поиск, русские словоформы (стемминг), OCR сканированных PDF и картинок, открытие
+> на строке/странице, `feagle pick` в лаунчере, есть systemd-юниты, `feagle setup`,
 > `feagle doctor`, бенчмарки и упаковка (`PKGBUILD` + CI). `llama-server` —
 > опционален: без него `feagle` деградирует до полнотекстового поиска.
 
@@ -629,6 +648,24 @@ OCR по умолчанию выключен (тяжёлый: примерно �
 чисто латинских документов `ocr_langs = "eng"` даёт более чистый результат, чем
 `rus+eng`.
 
+**Картинки.** При `[index].ocr_images = true` `feagle` индексирует `png`, `jpg`,
+`jpeg`, `webp` и `tiff`, распознавая их напрямую через `tesseract`. Рендер не
+нужен, поэтому достаточно одного `tesseract` — в отличие от страниц сканированных
+PDF, которым ещё нужен `pdftoppm`:
+
+```toml
+[index]
+ocr_images = true
+ocr_langs = "rus+eng"
+```
+
+OCR картинок по умолчанию выключен. Распознанный текст попадает в тот же
+полнотекстовый индекс, так что слово со скриншота становится находимым. На
+эталонном ноутбуке скриншот 1700×2200 распознаётся примерно за 0.65 с
+(`ocr_langs = "eng"`), а страница PDF при 200 dpi — примерно за 1.25 с. Без
+`tesseract` (или при выключенном флаге) картинки пропускаются, а не индексируются
+как бинарный мусор.
+
 ## Лаунчер и хоткеи
 
 `feagle pick` открывает одно окно лаунчера, в котором **сначала приложения, затем
@@ -806,8 +843,9 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 
 - В FTS5 нет нативного русского стемминга; `feagle` компенсирует отдельной
   колонкой со стемами (Snowball), а не токенизатором.
-- OCR включается вручную, тяжёлый (примерно секунда и больше на страницу) и
-  требует `tesseract` с языковыми данными.
+- OCR включается вручную, тяжёлый (примерно секунда на страницу PDF и ~0.65 с на
+  картинку на эталонном ноутбуке) и требует `tesseract` с языковыми данными; для
+  страниц сканированных PDF нужен ещё `pdftoppm` из poppler.
 - `sqlite-vec` — pre-1.0: удаления из `vec0` не уменьшают файл без
   `feagle index --rebuild`, а новая векторная таблица резервирует группу на 1024
   строки.

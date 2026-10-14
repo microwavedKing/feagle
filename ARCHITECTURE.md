@@ -62,9 +62,9 @@
 |---|---|---|
 | `gitignore.py` | минимальный `.gitignore` | `GitIgnore(base, patterns)`, `matches_chain()` |
 | `scanner.py` | обход корней и фильтры | `Scanner.iter_files()` → `ScanCandidate`; скрытые, `exclude_dirs`, allowlist расширений, лимиты размера, симлинки не трогаем, `exclude_paths` (данные feagle) |
-| `extract.py` | текст/код/PDF | `extract()`, `Extracted(pages, kind, encoding)`; **фолбэк кодировок**; PDF через `pdftotext` |
-| `ocr.py` | OCR страниц PDF | `ocr_pdf_page()` (pdftoppm→tesseract), `ocr_pages()` с лимитами |
-| `chunker.py` | чанки ~1400 симв. | `chunk_extracted()`; прилипание к границе строки (точный `line`), перекрытие 150, cap 2200, PDF не пересекает страницу |
+| `extract.py` | текст/код/PDF/картинки | `extract()`, `Extracted(pages, kind, encoding)`; **фолбэк кодировок**; PDF через `pdftotext`; картинки — OCR (`kind="image"`) |
+| `ocr.py` | OCR страниц PDF и картинок | `ocr_pdf_page()` (pdftoppm→tesseract), `ocr_image()` (только tesseract), `ocr_pages()` с лимитами |
+| `chunker.py` | чанки ~1400 симв. | `chunk_extracted()`; прилипание к границе строки (точный `line`), перекрытие 150, cap 2200, PDF не пересекает страницу, у картинок `line`/`page` = None |
 | `pipeline.py` | инкрементальная синхронизация | `index_roots()`, `index_file()`, `backfill()`, `wipe()`; stat→hash→reindex, prune, `pause_check`, эмбеддинги **вне транзакции**, частичные векторы |
 | `watcher.py` | изменения ФС | обёртка `watchfiles`; источник инжектируется для тестов |
 | `daemon.py` | `feagle indexerd` | первый проход, пересканирование затронутых корней, периодический rescan, паузы, очередь событий |
@@ -182,7 +182,7 @@ llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
 
 `[index]` roots, include_ext, exclude_dirs, use_gitignore, лимиты, `rescan_interval_min`,
 `pause_on_battery`, `pause_on_loadavg`, `embed_batch_size`, `follow_symlinks`,
-`ocr*`; `[embeddings]` model, mrl_dim, server_url, idle_timeout_min, threads, extra_args;
+`ocr*` (в т.ч. `ocr_images`); `[embeddings]` model, mrl_dim, server_url, idle_timeout_min, threads, extra_args;
 `[search]` limit, mode, candidates, rrf_k, stemming, max_distance, max_per_file;
 `[launcher]` program; `[openers]` (свободная таблица: расширение → шаблон).
 
@@ -257,6 +257,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 20 | PKGBUILD: `python-sqlite-vec` из AUR; optdepends с AUR `llama.cpp-*`; `check()` = pytest; сумма от **архива тега** | sqlite-vec нет в репах; `extra/llama-cpp` старее нужной сборки; сумма тега — курица-яйцо (пояснено комментарием) | `PKGBUILD`, `.SRCINFO` |
 | 21 | `setup` не копирует юниты, если они уже стоят системно | иначе дубли в `~/.config/systemd/user` поверх пакетных | `units.using_packaged`, `cmd_setup` |
 | 22 | `AGENTS.md`/`RESEARCH.md` — вне git (`.gitignore`) | внутренние документы, не для публики | `.gitignore` |
+| 23 | OCR картинок за отдельным флагом `[index].ocr_images`, только `tesseract` (без `pdftoppm`) | без OCR/эмбеддингов картинки не дают текста; отдельный флаг не навязывает их тем, кому нужен только PDF-OCR, а рендерер для картинок не нужен | `config.DEFAULTS`, `pipeline._build_scanner`, `extract.extract_image` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 
