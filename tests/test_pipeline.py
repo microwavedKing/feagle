@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import os
+import shutil
+from pathlib import Path
 
 import pytest
 
 from feagle import config, db
-from feagle.indexer import pipeline
+from feagle.indexer import extract, pipeline
 from feagle.indexer.extract import ExtractionError
+from feagle.search.fts import search_fts
+
+PDF_FIXTURE = Path(__file__).parent / "fixtures" / "two_pages.pdf"
 
 
 @pytest.fixture
@@ -102,10 +107,27 @@ def test_binary_file_is_unsupported(root, conn):
     assert file_row(conn, root / "blob.txt")["state"] == "unsupported"
 
 
-def test_pdf_stub_is_unsupported(root, conn):
-    (root / "doc.pdf").write_bytes(b"%PDF-1.7 fake")
+def test_pdf_pages_are_indexed(root, conn):
+    if not extract.pdftotext_available():
+        pytest.skip("pdftotext not installed")
+    shutil.copy(PDF_FIXTURE, root / "doc.pdf")
+
     stats = pipeline.index_roots(conn, make_cfg(root))
-    assert stats.unsupported == 1
+    assert stats.reindexed == 1
+    pages = [row["page"] for row in conn.execute("SELECT page FROM chunks ORDER BY seq")]
+    assert pages == [1, 2]  # one chunk per page, page numbers preserved
+
+    hits = search_fts(conn, "heading")
+    assert {hit.page for hit in hits} == {1, 2}
+
+
+def test_invalid_pdf_is_recorded_as_error(root, conn):
+    if not extract.pdftotext_available():
+        pytest.skip("pdftotext not installed")
+    (root / "bad.pdf").write_bytes(b"%PDF-1.7 not really a pdf")
+    stats = pipeline.index_roots(conn, make_cfg(root))
+    assert stats.errors == 1
+    assert file_row(conn, root / "bad.pdf")["state"] == "error"
 
 
 def test_extraction_error_is_recorded(root, conn, monkeypatch):

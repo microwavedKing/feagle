@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 import pytest
 
-from feagle.indexer.extract import ExtractionError, UnsupportedFile, extract
+from feagle.indexer.extract import (
+    ExtractionError,
+    UnsupportedFile,
+    extract,
+    extract_pdf,
+    pdftotext_available,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures"
+PDF_FIXTURE = FIXTURES / "two_pages.pdf"
 
 
 def test_extracts_utf8_text(tmp_path):
@@ -42,11 +54,51 @@ def test_nul_after_sniff_window_is_text(tmp_path):
     assert extract(path).kind == "text"
 
 
-def test_pdf_is_not_implemented_yet(tmp_path):
+def test_pdf_pages_are_split(monkeypatch):
+    if not pdftotext_available():
+        pytest.skip("pdftotext not installed")
+    result = extract_pdf(PDF_FIXTURE)
+    assert result.kind == "pdf"
+    assert len(result.pages) == 2
+    assert "Page one heading" in result.pages[0]
+    assert "first page" in result.pages[0]
+    assert "Page two heading" in result.pages[1]
+    assert "second page" in result.pages[1]
+
+
+def test_extract_dispatches_pdf(monkeypatch):
+    if not pdftotext_available():
+        pytest.skip("pdftotext not installed")
+    assert extract(PDF_FIXTURE).kind == "pdf"
+
+
+def test_pdf_without_poppler_is_unsupported(tmp_path, monkeypatch):
     path = tmp_path / "doc.pdf"
-    path.write_bytes(b"%PDF-1.7 fake")
-    with pytest.raises(UnsupportedFile, match="not implemented"):
-        extract(path)
+    path.write_bytes(b"%PDF-1.7")
+    monkeypatch.setattr("feagle.indexer.extract.shutil.which", lambda name: None)
+    with pytest.raises(UnsupportedFile, match="poppler-utils"):
+        extract_pdf(path)
+
+
+def test_invalid_pdf_is_an_error(tmp_path):
+    if not pdftotext_available():
+        pytest.skip("pdftotext not installed")
+    path = tmp_path / "broken.pdf"
+    path.write_bytes(b"%PDF-1.7 this is not a real pdf")
+    with pytest.raises(ExtractionError):
+        extract_pdf(path)
+
+
+def test_pdf_timeout_is_reported(tmp_path, monkeypatch):
+    path = tmp_path / "doc.pdf"
+    path.write_bytes(b"%PDF-1.7")
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="pdftotext", timeout=1)
+
+    monkeypatch.setattr("feagle.indexer.extract.subprocess.run", fake_run)
+    with pytest.raises(ExtractionError, match="timed out"):
+        extract_pdf(path)
 
 
 def test_empty_file(tmp_path):
