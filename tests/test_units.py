@@ -80,8 +80,21 @@ def test_exec_path_uses_path_lookup(tmp_path, monkeypatch):
     script = tmp_path / "feagle"
     script.write_text("", encoding="utf-8")
     monkeypatch.setattr("sys.argv", ["feagle"])
+    # make the interpreter-adjacent and argv0 candidates miss, so PATH is used
+    monkeypatch.setattr("sys.executable", str(tmp_path / "python"))
     monkeypatch.setattr(units.shutil, "which", lambda name: str(script))
     assert units.exec_path() == str(script)
+
+
+def test_exec_path_ignores_non_feagle_argv0(tmp_path, monkeypatch):
+    other = tmp_path / "other-program"
+    other.write_text("", encoding="utf-8")
+    blocker = tmp_path / "feagle"
+    monkeypatch.setattr("sys.argv", [str(other)])
+    monkeypatch.setattr("sys.executable", str(tmp_path / "python"))
+    monkeypatch.setattr(units.shutil, "which", lambda name: None)
+    assert units.exec_path() == "feagle"
+    assert not blocker.exists()
 
 
 def test_exec_path_last_resort(monkeypatch):
