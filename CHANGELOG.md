@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Indexing: batched chunk embeddings, an `embedded` flag, and `index --backfill`.
 - CLI: semantic `search` modes (`--mode auto|hybrid|fts`), graceful degradation,
   `index --no-embed`, `index --backfill` and `feagle queryd`.
+- PDF indexing: `pdftotext` extraction with per-page text (`\f` pagination),
+  timeouts and a clear message when poppler-utils is missing; results carry the
+  page number.
+- `feagle open <path> [+N]` with configurable opener templates (`openers.py`),
+  plus a `--dry-run` mode.
 
 ### Changed
 
@@ -44,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations
 
-- PDF extraction is not implemented yet (planned for a later phase).
 - FTS5 has no Russian stemming; keyword search matches exact word forms.
 - `sqlite-vec` is pre-1.0; `vec0` deletions do not shrink the file until
   `index --rebuild`.
+- Scanned PDFs without a text layer yield no text (no OCR yet).

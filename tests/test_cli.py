@@ -188,3 +188,43 @@ def test_search_hybrid_degrades_without_model(env, capsys):
     captured = capsys.readouterr()
     assert "semantic search unavailable" in captured.err
     assert "notes.txt" in captured.out
+
+
+# -- open ------------------------------------------------------------------
+
+
+def test_open_dry_run_uses_default_template(env, capsys):
+    target = env / "note.txt"
+    target.write_text("hi", encoding="utf-8")
+    assert main(["open", str(target), "--dry-run"]) == 0
+    assert capsys.readouterr().out.strip() == f"xdg-open {target}"
+
+
+def test_open_pdf_with_page_uses_pdf_template(env, capsys):
+    target = env / "doc.pdf"
+    target.write_bytes(b"%PDF")
+    assert main(["open", str(target), "--page", "3", "--dry-run"]) == 0
+    assert capsys.readouterr().out.strip() == f"zathura --page 3 {target}"
+
+
+def test_open_positional_plus_is_a_page_for_pdf(env, capsys):
+    target = env / "doc.pdf"
+    target.write_bytes(b"%PDF")
+    assert main(["open", str(target), "+4", "--dry-run"]) == 0
+    assert "zathura --page 4" in capsys.readouterr().out
+
+
+def test_open_positional_plus_is_a_line_for_text(env, capsys):
+    write_config(
+        env,
+        '[openers]\ndefault = "xdg-open {path}"\ntxt = "code --goto {path}:{line}"\n',
+    )
+    target = env / "note.txt"
+    target.write_text("hi", encoding="utf-8")
+    assert main(["open", str(target), "+12", "--dry-run"]) == 0
+    assert f"code --goto {target}:12" in capsys.readouterr().out
+
+
+def test_open_missing_file_fails(env, capsys):
+    assert main(["open", str(env / "nope.txt")]) == 1
+    assert "no such file" in capsys.readouterr().err

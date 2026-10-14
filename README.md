@@ -8,10 +8,10 @@ from a compositor hotkey and opens the result at the right place (a PDF page, a
 source line). Everything stays on your machine: no cloud, no accounts, no
 telemetry.
 
-> **Status:** early development (`0.1.0`). Full-text and semantic search work;
-> PDF extraction, systemd units, launcher adapters and packaging are still to
-> come. `llama-server` is optional — without it `feagle` degrades gracefully to
-> full-text search.
+> **Status:** early development (`0.1.0`). Full-text and semantic search work, as
+> do PDF extraction and opening results at a line/page. Systemd units, launcher
+> adapters and packaging are still to come. `llama-server` is optional — without
+> it `feagle` degrades gracefully to full-text search.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ telemetry.
     (EmbeddingGemma 2 support). `extra/llama-cpp` may be too old; the AUR
     `llama.cpp-git` package tracks master.
   - the `embeddinggemma-2-q8` GGUF model (see below)
-- Optional: `poppler-utils` (`pdftotext`) for PDF indexing (later phase)
+- `poppler-utils` (`pdftotext`) for PDF indexing
 - Optional: a dmenu-compatible launcher (`fuzzel`, `wofi`, `rofi-wayland`, `tofi`, `walker`)
 
 ## Install
@@ -47,6 +47,9 @@ feagle index --rebuild       # wipe and rebuild the index
 feagle search "борщ recipe" # hybrid search (default from config)
 feagle search "rust" --mode fts
 feagle search "rust" --json
+
+feagle open ~/docs/report.pdf +3   # open a PDF at page 3
+feagle open ~/src/app.py +42       # open a source file at line 42
 
 feagle status
 feagle queryd                # run the query daemon in the foreground
@@ -90,6 +93,25 @@ Getting the model:
 | hybrid requested, embeddings down | falls back to full-text with a warning on stderr |
 | `queryd` not running | the CLI opens the database read-only and searches in-process |
 
+## Opening results
+
+`feagle open <path> [+N]` (or `--line`/`--page`) runs the opener configured for
+the file's extension from `[openers]`, falling back to `default`. Templates use
+`{path}`, `{line}` and `{page}`; an absent position drops the placeholder and a
+directly preceding flag, so one template works with or without a position.
+
+```toml
+[openers]
+default = "xdg-open {path}"
+pdf     = "zathura --page {page} {path}"
+py      = "code --goto {path}:{line}"
+md      = "nvim +{line} {path}"
+```
+
+Commands are split with `shlex` and executed without a shell. `feagle open
+--dry-run` prints the command it would run, which is handy for checking a
+template.
+
 ## Measured performance
 
 Measured on the target laptop (Intel i7-8565U, 4 cores / 8 threads, NVMe, no
@@ -112,8 +134,10 @@ p50/p95/RAM measurements arrive in a later phase.
   keyword search matches exact word forms, semantic search compensates for this.
 - `sqlite-vec` is pre-1.0; deletions from `vec0` do not shrink the file until
   `feagle index --rebuild`.
-- PDF extraction, systemd units, launcher adapters and packaging are not
-  implemented yet (later phases).
+- Scanned PDFs (images without a text layer) yield no text; OCR is not supported
+  yet.
+- Systemd units, launcher adapters and packaging are not implemented yet (later
+  phases).
 
 ## License
 
