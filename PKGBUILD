@@ -40,7 +40,7 @@ source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 # that archive necessarily carries the previous revision's sum, so build from a
 # checkout of the repository (or from the AUR) and use `makepkg --skipchecksums`
 # only if you knowingly build from the archived copy.
-sha256sums=('8857248df7790abd036600bf540783fc7826b4059df61f8dba8a848b76594d1a')
+sha256sums=('17170059c81dad4ee537395f6ce6cb0d522577307516f611b0b081b987c6d2be')
 
 build() {
   cd "$pkgname-$pkgver"
