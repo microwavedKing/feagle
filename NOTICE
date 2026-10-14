@@ -20,6 +20,9 @@ Third-party components
 
 - SQLite (public domain), including the FTS5 extension (blessing).
 - sqlite-vec (MIT OR Apache-2.0), loaded as a SQLite extension.
+- snowballstemmer (BSD-3-Clause), used for Russian stemming.
 - llama.cpp / llama-server (MIT), used as a separate process when available.
 - poppler-utils / pdftotext (GPL-2.0-or-later), invoked as a separate process
   when PDF support is enabled.
+- tesseract (Apache-2.0) and tesseract language data (Apache-2.0), invoked as a
+  separate process when OCR is enabled.

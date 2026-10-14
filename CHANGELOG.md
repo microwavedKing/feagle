@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `feagle setup`: interactive first-run configuration (roots, launcher, model
   profile, model download, units, first index) with `--yes` and flags for
   non-interactive use.
+- Russian stemming: a second FTS column holds Snowball stems of Cyrillic words;
+  exact and stemmed rankings are fused with RRF (`stemming.py`, schema v2 with
+  automatic migration); `[search].stemming`.
+- OCR for scanned PDFs: pages without a text layer are rendered with `pdftoppm`
+  and recognized with `tesseract` (`indexer/ocr.py`); configurable languages
+  (default `rus+eng`), DPI, trigger threshold and page limit.
 
 ### Changed
 
@@ -57,8 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations
 
-- FTS5 has no Russian stemming; keyword search matches exact word forms.
+- FTS5 has no Russian stemming natively; `feagle` compensates with a stemmed
+  column (Snowball), not a native tokenizer.
+- OCR is opt-in, CPU-heavy and needs `tesseract` plus language data.
 - `sqlite-vec` is pre-1.0; `vec0` deletions do not shrink the file until
   `index --rebuild`.
-- Scanned PDFs without a text layer yield no text (no OCR yet).
 - Launcher adapters and packaging are not implemented yet (later phases).

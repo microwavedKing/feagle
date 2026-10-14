@@ -8,9 +8,10 @@ from a compositor hotkey and opens the result at the right place (a PDF page, a
 source line). Everything stays on your machine: no cloud, no accounts, no
 telemetry.
 
-> **Status:** early development (`0.1.0`). Full-text and semantic search work, as
-> do PDF indexing, opening results at a line/page, systemd user units, `feagle
-> setup` and `feagle doctor`. Launcher adapters and packaging are still to come.
+> **Status:** early development (`0.1.0`). Full-text and semantic search work,
+> Russian word forms are matched through stemming, scanned PDFs can be OCR'd,
+> and results open at a line/page. There are systemd user units, `feagle setup`
+> and `feagle doctor`. Launcher adapters and packaging are still to come.
 > `llama-server` is optional — without it `feagle` degrades gracefully to
 > full-text search.
 
@@ -24,6 +25,8 @@ telemetry.
     `llama.cpp-git` package tracks master.
   - the `embeddinggemma-2-q8` GGUF model (see below)
 - `poppler-utils` (`pdftotext`) for PDF indexing
+- Optional, for OCR of scanned PDFs: `tesseract` plus the language data you need
+  (`tesseract-data-eng`, `tesseract-data-rus`, ...)
 - Optional: a dmenu-compatible launcher (`fuzzel`, `wofi`, `rofi-wayland`, `tofi`, `walker`)
 
 ## Install
@@ -158,6 +161,34 @@ feagle doctor --json
 Each line is `OK` / `WARN` / `FAIL` with a concrete fix hint (for example which
 package to install or which command to run).
 
+## Russian text and OCR
+
+**Stemming.** FTS5 has no Russian stemmer, so `feagle` keeps an extra FTS column
+holding Snowball stems of the Cyrillic words. A query like `книги` matches a
+document that says `книга`, `книге` or `книгами`. Exact matching on the original
+`body` column is kept, so code identifiers and English words are unaffected; the
+two rankings are fused with RRF like everything else. Stemming is on by default
+(`[search].stemming = "auto"`); set it to `"none"` to disable it.
+
+**OCR.** Scanned PDFs have no text layer. With OCR enabled, pages that have
+almost no text are rendered to an image (`pdftoppm`, from poppler) and passed to
+`tesseract`:
+
+```toml
+[index]
+ocr = true
+ocr_langs = "rus+eng"   # keep English in the list for mixed documents
+ocr_dpi = 300
+ocr_min_chars = 20      # pages with less text than this are OCR'd
+ocr_max_pages = 200     # safety limit; OCR is slow
+```
+
+OCR is off by default (it is CPU-heavy: roughly a second or more per page).
+If `tesseract` or the requested language data is missing, pages simply stay
+empty, the rest of the index is unaffected, and `feagle doctor` says what to
+install. For Latin-only documents `ocr_langs = "eng"` gives cleaner results than
+`rus+eng`.
+
 ## Measured performance
 
 Measured on the target laptop (Intel i7-8565U, 4 cores / 8 threads, NVMe, no
@@ -176,14 +207,15 @@ p50/p95/RAM measurements arrive in a later phase.
 
 ## Known limitations
 
-- No Russian stemming in FTS5 (the `porter` tokenizer covers English only);
-  keyword search matches exact word forms, semantic search compensates for this.
+- OCR is opt-in and slow (roughly a second or more per page) and needs
+  `tesseract` plus language data.
 - `sqlite-vec` is pre-1.0; deletions from `vec0` do not shrink the file until
   `feagle index --rebuild`.
-- Scanned PDFs (images without a text layer) yield no text; OCR is not supported
-  yet.
 - Launcher adapters (`feagle search --pick`) and packaging are not implemented
   yet (later phases).
+- Upgrading from an older index version migrates the schema automatically on the
+  next open; the full-text index is rebuilt from stored chunks (files are not
+  re-read).
 
 ## License
 
