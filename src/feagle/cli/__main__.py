@@ -6,7 +6,15 @@ import argparse
 import sys
 
 from .. import __version__, config
-from . import cmd_index, cmd_indexerd, cmd_open, cmd_queryd, cmd_search, cmd_status
+from . import (
+    cmd_doctor,
+    cmd_index,
+    cmd_indexerd,
+    cmd_open,
+    cmd_queryd,
+    cmd_search,
+    cmd_status,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +52,13 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="show index statistics")
     status.add_argument("--json", action="store_true", help="emit JSON")
     status.set_defaults(func=cmd_status.run)
+
+    doctor = subparsers.add_parser("doctor", help="check the environment and dependencies")
+    doctor.add_argument("--json", action="store_true", help="emit JSON")
+    doctor.add_argument(
+        "--fast", action="store_true", help="skip hashing the model file"
+    )
+    doctor.set_defaults(func=cmd_doctor.run)
 
     open_cmd = subparsers.add_parser("open", help="open a file at a line or page")
     open_cmd.add_argument("path", help="file to open")
