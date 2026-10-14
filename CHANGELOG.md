@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chunk the server rejects no longer costs the whole file its vectors.
 - Two daemons starting at the same time serialize on a lock file and share one
   `llama-server` instead of each spawning their own.
+- The systemd units no longer let systemd manage the shared runtime directory
+  (`RuntimeDirectory=feagle`): restarting one unit deleted the other's socket.
+- `queryd` restarts the embeddings server on demand after a failed start or a
+  crash; previously it stayed full-text-only until restarted by hand.
 
 ### Known limitations
 
