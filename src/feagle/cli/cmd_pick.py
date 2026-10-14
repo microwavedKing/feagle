@@ -33,26 +33,34 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
 
     if args.query:
         if not paths.db_path().exists():
-            print("feagle: no index yet; run 'feagle index' first.", file=sys.stderr)
-            return 1
-        limit = args.limit if args.limit is not None else cfg["search"]["limit"]
-        result = search_in_process(cfg, args.query, limit, cfg["search"]["mode"])
-        for item in result["results"]:
-            hits_by_path.setdefault(item["path"], item)
-            location = item["path"]
-            if item.get("line"):
-                location += f":{item['line']}"
-            items.append((item["path"], f"{location}  {item['snippet']}"))
+            print(
+                "feagle: no index yet; showing applications only "
+                "(run 'feagle index' first).",
+                file=sys.stderr,
+            )
+        else:
+            limit = args.limit if args.limit is not None else cfg["search"]["limit"]
+            result = search_in_process(cfg, args.query, limit, cfg["search"]["mode"])
+            for item in result["results"]:
+                hits_by_path.setdefault(item["path"], item)
+                location = item["path"]
+                if item.get("line"):
+                    location += f":{item['line']}"
+                items.append((item["path"], f"{location}  {item['snippet']}"))
     elif not args.no_files:
         if not paths.db_path().exists():
-            print("feagle: no index yet; run 'feagle index' first.", file=sys.stderr)
-            return 1
-        conn = db.connect(paths.db_path(), read_only=True)
-        try:
-            rows = db.list_indexed_files(conn, limit=args.files)
-        finally:
-            conn.close()
-        for path, body in rows:
-            items.append((path, f"{path}  {_snippet(body)}"))
+            print(
+                "feagle: no index yet; showing applications only "
+                "(run 'feagle index' first).",
+                file=sys.stderr,
+            )
+        else:
+            conn = db.connect(paths.db_path(), read_only=True)
+            try:
+                rows = db.list_indexed_files(conn, limit=args.files)
+            finally:
+                conn.close()
+            for path, body in rows:
+                items.append((path, f"{path}  {_snippet(body)}"))
 
     return run_pick(cfg, items, app_map, hits_by_path=hits_by_path)

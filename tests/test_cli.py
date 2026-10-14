@@ -339,6 +339,20 @@ def test_pick_with_query_lists_semantic_results(env, capsys, monkeypatch):
     assert opened["path"].name == "notes.txt"
 
 
+def test_pick_without_index_still_shows_applications(env, capsys, monkeypatch):
+    write_config(env, '[launcher]\nprogram = "stdout"\n')
+    import io
+    import sys
+
+    monkeypatch.setattr("feagle.picker.apps.discover_apps", lambda: [_fake_app()])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("1\n"))
+    launched = []
+    monkeypatch.setattr("feagle.picker.apps.launch", lambda app, **kw: launched.append(app.id))
+    assert main(["pick"]) == 0  # no index, but the picker still works
+    assert launched == ["fake.desktop"]
+    assert "no index yet" in capsys.readouterr().err
+
+
 def test_search_pick_with_apps_puts_applications_first(env, capsys, monkeypatch):
     docs = make_docs(env)
     write_config(env, '[launcher]\nprogram = "stdout"\n')
