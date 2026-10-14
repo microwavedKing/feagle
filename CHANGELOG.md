@@ -66,6 +66,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `feagle search` now uses a running `queryd` when available and otherwise
   searches in-process (degrading to full-text without embeddings).
 
+### Fixed
+
+- systemd user units are written with an absolute `feagle` path, so a venv or
+  pipx install can actually start them.
+- The CLI configures logging: daemons log at INFO to journald, interactive
+  commands stay quiet (previously INFO messages were lost entirely).
+- `llama-server` runs with enough per-slot context for the largest chunk, and a
+  chunk the server rejects no longer costs the whole file its vectors.
+- Two daemons starting at the same time serialize on a lock file and share one
+  `llama-server` instead of each spawning their own.
+
 ### Known limitations
 
 - FTS5 has no Russian stemming natively; `feagle` compensates with a stemmed
