@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OCR for scanned PDFs: pages without a text layer are rendered with `pdftoppm`
   and recognized with `tesseract` (`indexer/ocr.py`); configurable languages
   (default `rus+eng`), DPI, trigger threshold and page limit.
+- Launcher adapters (`launchers.py`) for fuzzel, wofi, rofi, tofi and walker with
+  auto-detection, a `stdout` fallback, and `feagle search --pick` which opens the
+  chosen result.
 
 ### Changed
 
@@ -68,4 +71,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OCR is opt-in, CPU-heavy and needs `tesseract` plus language data.
 - `sqlite-vec` is pre-1.0; `vec0` deletions do not shrink the file until
   `index --rebuild`.
-- Launcher adapters and packaging are not implemented yet (later phases).
+- Packaging (PKGBUILD/AUR, CI, a tagged release) is not implemented yet.

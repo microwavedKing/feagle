@@ -10,10 +10,10 @@ telemetry.
 
 > **Status:** early development (`0.1.0`). Full-text and semantic search work,
 > Russian word forms are matched through stemming, scanned PDFs can be OCR'd,
-> and results open at a line/page. There are systemd user units, `feagle setup`
-> and `feagle doctor`. Launcher adapters and packaging are still to come.
-> `llama-server` is optional — without it `feagle` degrades gracefully to
-> full-text search.
+> results open at a line/page, and `feagle search --pick` drives a launcher.
+> There are systemd user units, `feagle setup` and `feagle doctor`. Packaging is
+> still to come. `llama-server` is optional — without it `feagle` degrades
+> gracefully to full-text search.
 
 ## Requirements
 
@@ -68,6 +68,7 @@ feagle index --rebuild       # wipe and rebuild the index
 feagle search "борщ recipe" # hybrid search (default from config)
 feagle search "rust" --mode fts
 feagle search "rust" --json
+feagle search --pick         # choose a result in a launcher and open it
 
 feagle open ~/docs/report.pdf +3   # open a PDF at page 3
 feagle open ~/src/app.py +42       # open a source file at line 42
@@ -189,6 +190,53 @@ empty, the rest of the index is unaffected, and `feagle doctor` says what to
 install. For Latin-only documents `ocr_langs = "eng"` gives cleaner results than
 `rus+eng`.
 
+## Launcher and hotkeys
+
+`feagle search --pick` runs a search, shows the results in a dmenu-compatible
+launcher and opens the chosen hit at its position. The launcher is auto-detected
+(`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`) or forced with `[launcher].program`.
+With no launcher installed it prints a numbered list to stdout and reads a
+number, so it also works from scripts.
+
+Bind it in your compositor:
+
+**Hyprland** (released versions):
+
+```ini
+bind = SUPER, V, exec, feagle search --pick
+```
+
+**Hyprland** (the latest git uses the new Lua-based config):
+
+```lua
+hl.bind("SUPER + V", hl.dsp.exec_cmd("feagle search --pick"))
+```
+
+**Sway**:
+
+```
+bindsym $mod+v exec feagle search --pick
+```
+
+**niri** (spawn does not use a shell; each argument is separate):
+
+```kdl
+binds {
+    Mod+V { spawn "feagle" "search" "--pick"; }
+}
+```
+
+**River** (classic, `riverctl`):
+
+```sh
+riverctl map normal Super V spawn 'feagle search --pick'
+```
+
+If `feagle` is not on the session's `PATH` (a venv or pipx install, for
+example), use its absolute path in the bind. The syntax above was checked
+against the compositors' documentation on 2026-10-14; Hyprland's configuration
+format is changing, so check your version's docs.
+
 ## Measured performance
 
 Measured on the target laptop (Intel i7-8565U, 4 cores / 8 threads, NVMe, no
@@ -211,11 +259,10 @@ p50/p95/RAM measurements arrive in a later phase.
   `tesseract` plus language data.
 - `sqlite-vec` is pre-1.0; deletions from `vec0` do not shrink the file until
   `feagle index --rebuild`.
-- Launcher adapters (`feagle search --pick`) and packaging are not implemented
-  yet (later phases).
 - Upgrading from an older index version migrates the schema automatically on the
   next open; the full-text index is rebuilt from stored chunks (files are not
   re-read).
+- Packaging (PKGBUILD/AUR, CI, a tagged release) is not implemented yet.
 
 ## License
 
