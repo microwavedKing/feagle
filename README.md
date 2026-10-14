@@ -8,7 +8,7 @@ from a compositor hotkey and opens the result at the right place (a PDF page, a
 source line). Everything stays on your machine: no cloud, no accounts, no
 telemetry.
 
-> **Status:** early development (`0.1.0`). Full-text and semantic search work,
+> **Status:** early development (`0.1.1`). Full-text and semantic search work,
 > Russian word forms are matched through stemming, scanned PDFs can be OCR'd,
 > results open at a line/page, `feagle pick` drives a launcher, and there are
 > systemd user units, `feagle setup`, `feagle doctor`, benchmarks and packaging
@@ -426,7 +426,7 @@ their own license — see [NOTICE](NOTICE).
 (страница PDF, строка кода). Всё остаётся на вашей машине: без облака, аккаунтов
 и телеметрии.
 
-> **Статус:** ранняя разработка (`0.1.0`). Работают полнотекстовый и семантический
+> **Статус:** ранняя разработка (`0.1.1`). Работают полнотекстовый и семантический
 > поиск, русские словоформы (стемминг), OCR сканированных PDF, открытие на
 > строке/странице, `feagle pick` в лаунчере, есть systemd-юниты, `feagle setup`,
 > `feagle doctor`, бенчмарки и упаковка (`PKGBUILD` + CI). `llama-server` —

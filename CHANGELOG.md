@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-10-15
+
+Bug-fix release.
+
+### Fixed
+
+- `indexerd` no longer stays stuck with a dead or empty embedder: it retries the
+  embeddings service on every pass and resets and restarts the server on
+  `ServerUnavailable`, so a server that was down at startup or unloaded by
+  `queryd` no longer leaves new files permanently `embedded=0`. Files that still
+  lack vectors are backfilled at the end of a pass.
+- An `llama-server` owned by `indexerd` is unloaded when idle instead of staying
+  in memory (~460 MiB) forever.
+- Picking a search result opens the selected chunk: several chunks of the same
+  file (for example PDF pages) are keyed separately, so the second or third
+  result no longer opens the first chunk.
+- `feagle pick --query` uses a running `queryd` (and its warm embeddings)
+  instead of always searching in-process.
+- `queryd`'s `embed` operation accepts optional document titles instead of
+  clearing them to `null`.
+- `feagle setup` defaults the model prompt to the configured model and no longer
+  announces features as "coming in a later phase".
+- `feagle doctor` detects batteries by the `/sys` `type` file, so it also works
+  with batteries named `CMB0`, `BATT` or `macsmc-battery`.
+
 ## [0.1.0] - 2026-10-15
 
 First release: local, offline semantic + full-text file search for Arch Linux
@@ -116,9 +141,35 @@ on Wayland.
 - Publishing the package to the AUR is a manual step; the `PKGBUILD` is in the
   repository.
 
+[0.1.1]: https://github.com/microwavedKing/feagle/releases/tag/v0.1.1
 [0.1.0]: https://github.com/microwavedKing/feagle/releases/tag/v0.1.0
 
 ---
+
+## 0.1.1 (по-русски)
+
+Релиз исправлений.
+
+### Исправлено
+
+- `indexerd` больше не «застревает» со сломанным или пустым эмбеддером: он
+  запрашивает сервис эмбеддингов на каждом проходе и при `ServerUnavailable`
+  делает reset и перезапуск сервера, поэтому сервер, недоступный на старте или
+  выгруженный `queryd`, больше не оставляет новые файлы навсегда с `embedded=0`.
+  Файлы без векторов добираются в конце прохода.
+- Принадлежащий `indexerd` `llama-server` выгружается по простою, а не висит в
+  памяти (~460 МиБ) вечно.
+- Выбор результата поиска открывает именно выбранный чанк: несколько чанков
+  одного файла (например, страницы PDF) получают отдельные ключи, поэтому 2-й или
+  3-й результат больше не открывает первый чанк.
+- `feagle pick --query` использует работающий `queryd` (и его тёплые эмбеддинги),
+  а не всегда ищет внутри процесса.
+- Операция `embed` в `queryd` принимает опциональные заголовки документов, а не
+  затирает их в `null`.
+- `feagle setup` по умолчанию подставляет выбранную в конфиге модель и больше не
+  обещает функции «в следующей фазе».
+- `feagle doctor` определяет батарею по файлу `type` в `/sys`, поэтому работает и
+  с батареями `CMB0`, `BATT`, `macsmc-battery`.
 
 ## 0.1.0 (по-русски)
 

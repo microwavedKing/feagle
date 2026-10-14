@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "feagle"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local semantic file search for Arch Linux + Wayland: full-text and meaning-based lookup, fully offline."
 readme = "README.md"
 license = "MIT"
