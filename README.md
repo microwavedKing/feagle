@@ -10,11 +10,11 @@ telemetry.
 
 > **Status:** early development (`0.1.1`). Full-text and semantic search work,
 > Russian word forms are matched through stemming, scanned PDFs and images can be
-> OCR'd, images can be found by a text description (opt-in multimodal
-> embeddings), results open at a line/page, `feagle pick` drives a launcher, and
-> there are systemd user units, `feagle setup`, `feagle doctor`, benchmarks and
-> packaging (`PKGBUILD` + CI). `llama-server` is optional — without it `feagle`
-> degrades gracefully to full-text search.
+> OCR'd, images and videos can be found by a text description (opt-in multimodal
+> embeddings), results open at a line/page/timestamp, `feagle pick` drives a
+> launcher, and there are systemd user units, `feagle setup`, `feagle doctor`,
+> benchmarks and packaging (`PKGBUILD` + CI). `llama-server` is optional —
+> without it `feagle` degrades gracefully to full-text search.
 
 ## Requirements
 
@@ -262,6 +262,24 @@ second) and only a limited number are done per pass. It also makes the shared
 (`ocr_images`) is far cheaper and gives exact word matches — enable both to get
 both.
 
+**Video (semantic).** With `[media].video = true`, `feagle` extracts frames with
+`ffmpeg` (one every `video_frame_interval` seconds, up to `video_max_frames`) and
+embeds them like images, so a text query finds the right *moment*. Each result
+carries a timestamp, and `feagle open clip.mp4 +30` treats `+30` as seconds:
+
+```toml
+[media]
+video = true
+video_frame_interval = 10
+video_max_frames = 60
+
+[openers]
+mp4 = "mpv --start={time} {path}"
+```
+
+Video is the heaviest media: it is `video_max_frames` image embeddings per file,
+so keep the frame interval and cap modest on CPU.
+
 ## Launcher and hotkeys
 
 `feagle pick` opens one launcher window containing **applications first and then
@@ -446,6 +464,9 @@ corpus (**3.9× faster**, `stem_text` 7.8×, only 285 real stemmer calls). Searc
 - Image search is opt-in and CPU-heavy: it needs the `mmproj` file and `ffmpeg`,
   images are downscaled before embedding, and the embeddings server then uses
   about 1 GiB of RAM.
+- Video search is the heaviest media: it embeds one frame per
+  `video_frame_interval` seconds (up to `video_max_frames`), so a long clip takes
+  a while to index on CPU.
 - `sqlite-vec` is pre-1.0; deletions from `vec0` do not shrink the file until
   `feagle index --rebuild`.
 - Upgrading from an older index version migrates the schema automatically on the
@@ -473,11 +494,11 @@ their own license — see [NOTICE](NOTICE).
 
 > **Статус:** ранняя разработка (`0.1.1`). Работают полнотекстовый и семантический
 > поиск, русские словоформы (стемминг), OCR сканированных PDF и картинок, поиск
-> картинок по текстовому описанию (опциональные мультимодальные эмбеддинги),
-> открытие на строке/странице, `feagle pick` в лаунчере, есть systemd-юниты,
-> `feagle setup`, `feagle doctor`, бенчмарки и упаковка (`PKGBUILD` + CI).
-> `llama-server` — опционален: без него `feagle` деградирует до полнотекстового
-> поиска.
+> картинок и видео по текстовому описанию (опциональные мультимодальные
+> эмбеддинги), открытие на строке/странице/таймкоде, `feagle pick` в лаунчере,
+> есть systemd-юниты, `feagle setup`, `feagle doctor`, бенчмарки и упаковка
+> (`PKGBUILD` + CI). `llama-server` — опционален: без него `feagle` деградирует до
+> полнотекстового поиска.
 
 Пошаговое руководство (установка, настройка, хоткеи, решение проблем) —
 [`docs/INSTALL.ru.md`](docs/INSTALL.ru.md).
@@ -717,6 +738,25 @@ images_per_run = 200   # лимит на проход индексации (0 = 
 дешевле и даёт точные совпадения слов — включайте оба флага, чтобы получить и то,
 и другое.
 
+**Видео (семантический поиск).** При `[media].video = true` `feagle` извлекает
+кадры через `ffmpeg` (по одному каждые `video_frame_interval` секунд, не более
+`video_max_frames`) и эмбеддит их как картинки, поэтому текстовый запрос находит
+нужный *момент*. У результата есть таймкод, а `feagle open clip.mp4 +30` трактует
+`+30` как секунды:
+
+```toml
+[media]
+video = true
+video_frame_interval = 10
+video_max_frames = 60
+
+[openers]
+mp4 = "mpv --start={time} {path}"
+```
+
+Видео — самый тяжёлый медиа-формат: это `video_max_frames` эмбеддингов картинок на
+файл, поэтому на CPU держите интервал и лимит скромными.
+
 ## Лаунчер и хоткеи
 
 `feagle pick` открывает одно окно лаунчера, в котором **сначала приложения, затем
@@ -900,6 +940,9 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 - Поиск картинок включается вручную и тяжёл на CPU: нужны файл `mmproj` и `ffmpeg`,
   картинки уменьшаются перед эмбеддингом, а сервер эмбеддингов начинает занимать
   около 1 ГиБ RAM.
+- Поиск видео — самый тяжёлый: эмбеддится один кадр каждые `video_frame_interval`
+  секунд (не более `video_max_frames`), поэтому длинный клип на CPU индексируется
+  долго.
 - `sqlite-vec` — pre-1.0: удаления из `vec0` не уменьшают файл без
   `feagle index --rebuild`, а новая векторная таблица резервирует группу на 1024
   строки.
