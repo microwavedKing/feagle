@@ -104,6 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
     open_cmd.add_argument("--line", type=int, default=None, help="line number")
     open_cmd.add_argument("--page", type=int, default=None, help="page number (PDF)")
     open_cmd.add_argument(
+        "--time", type=float, default=None, help="start time in seconds (media)"
+    )
+    open_cmd.add_argument(
         "--dry-run", action="store_true", help="print the command instead of running it"
     )
     open_cmd.set_defaults(func=cmd_open.run)

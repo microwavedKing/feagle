@@ -31,9 +31,15 @@ def rrf(rankings: list[list[int]], *, k: int = DEFAULT_RRF_K) -> list[tuple[int,
 def _fetch_details(conn: sqlite3.Connection, chunk_ids: list[int]) -> dict[int, sqlite3.Row]:
     if not chunk_ids:
         return {}
+    from .. import db
+
+    time_col = (
+        "c.time_ms AS time_ms" if db.has_column(conn, "chunks", "time_ms") else "NULL AS time_ms"
+    )
     placeholders = ",".join("?" * len(chunk_ids))
     rows = conn.execute(
-        "SELECT c.id AS chunk_id, f.path AS path, c.page AS page, c.line AS line, c.body AS body "
+        "SELECT c.id AS chunk_id, f.path AS path, c.page AS page, c.line AS line, "
+        f"{time_col}, c.body AS body "
         f"FROM chunks c JOIN files f ON f.id = c.file_id WHERE c.id IN ({placeholders})",
         chunk_ids,
     ).fetchall()
@@ -68,6 +74,7 @@ def _to_hits(
                 page=row["page"],
                 line=row["line"],
                 snippet=_snippet(row["body"]),
+                time_ms=row["time_ms"],
             )
         )
         if len(hits) >= limit:

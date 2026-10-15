@@ -18,6 +18,13 @@ from ..log import get_logger
 log = get_logger("indexer.media")
 
 FFMPEG_TIMEOUT = 60.0
+#: Extracting frames from a long video can take much longer than one image.
+VIDEO_TIMEOUT = 900.0
+
+#: Video extensions recognized (frames are extracted with ``ffmpeg``).
+VIDEO_SUFFIXES: tuple[str, ...] = (
+    ".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mpg", ".mpeg",
+)
 
 
 class MediaError(Exception):
@@ -107,3 +114,45 @@ def downscale_image(
     if not dest.exists():
         raise MediaError(f"ffmpeg produced no file for {src}")
     return dest
+
+
+def extract_frames(
+    video: Path,
+    dest_dir: Path,
+    *,
+    interval: float = 10.0,
+    max_frames: int = 60,
+    max_dim: int = 0,
+    ffmpeg: str | None = None,
+    timeout: float = VIDEO_TIMEOUT,
+) -> list[tuple[int, Path]]:
+    """Extract up to ``max_frames`` PNG frames, one every ``interval`` seconds.
+
+    Returns ``(time_ms, path)`` pairs in order. ``max_dim > 0`` scales the longest
+    side of each frame while extracting (so a 1080p video does not fill the disk).
+    """
+    binary = ffmpeg or shutil.which("ffmpeg")
+    if binary is None:
+        raise MediaError("ffmpeg not found")
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    seconds = interval if interval > 0 else 1.0
+    filters = f"fps=1/{seconds}"
+    if max_dim > 0:
+        filters += f",scale={max_dim}:-1"
+    pattern = dest_dir / "frame_%05d.png"
+    command = [
+        binary, "-y", "-loglevel", "error", "-i", str(video),
+        "-vf", filters, "-frames:v", str(max(1, max_frames)), str(pattern),
+    ]
+    try:
+        proc = subprocess.run(command, capture_output=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise MediaError(f"ffmpeg failed for {video}: {exc}") from exc
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise MediaError(f"ffmpeg exited {proc.returncode}: {detail[:200]}")
+
+    frames = sorted(dest_dir.glob("frame_*.png"))
+    return [(int(round(index * seconds * 1000)), path) for index, path in enumerate(frames)]

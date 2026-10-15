@@ -63,6 +63,9 @@ DEFAULTS: dict[str, Any] = {
         "mmproj": "embeddinggemma-2-mmproj-q8",
         "image_max_dim": 1024,
         "images_per_run": 200,
+        "video": False,
+        "video_frame_interval": 10,
+        "video_max_frames": 60,
     },
     "search": {
         "limit": 20,
@@ -198,6 +201,11 @@ def validate(cfg: dict[str, Any], source: Path | None = None) -> None:
     _check(media["image_max_dim"] >= 0, "media.image_max_dim", "must be >= 0", source)
     _check_type(media, "images_per_run", (int,), source)
     _check(media["images_per_run"] >= 0, "media.images_per_run", "must be >= 0", source)
+    _check_type(media, "video", (bool,), source)
+    _check_type(media, "video_frame_interval", (int, float), source)
+    _check(media["video_frame_interval"] > 0, "media.video_frame_interval", "must be > 0", source)
+    _check_type(media, "video_max_frames", (int,), source)
+    _check(media["video_max_frames"] > 0, "media.video_max_frames", "must be > 0", source)
 
     search = cfg["search"]
     _check_type(search, "limit", (int,), source)
@@ -321,6 +329,12 @@ image_max_dim = 1024
 # Safety cap: at most this many images are embedded per indexing pass
 # (0 = unlimited). The rest are picked up by later passes / backfill.
 images_per_run = 200
+# Index video files by embedding extracted frames (needs ffmpeg + mmproj above).
+video = false
+# One frame every this many seconds.
+video_frame_interval = 10
+# At most this many frames per video (safety cap; embedding is slow).
+video_max_frames = 60
 
 [search]
 limit = 20

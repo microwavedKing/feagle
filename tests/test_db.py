@@ -161,10 +161,45 @@ def test_migration_v1_to_v2_adds_stem_column(tmp_path):
 
     migrated = db.connect(path)
     try:
-        assert db.migrate(migrated) == 2
+        assert db.migrate(migrated) == 3
         rows = migrated.execute(
             "SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ?", ('stem:"книг"',)
         ).fetchall()
         assert [r["chunk_id"] for r in rows] == [1]
+    finally:
+        migrated.close()
+
+
+def test_migration_v2_to_v3_adds_time_ms(tmp_path):
+    path = tmp_path / "v2.sqlite"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE files(
+          id INTEGER PRIMARY KEY, path TEXT UNIQUE, size INTEGER, mtime_ns INTEGER,
+          hash TEXT, state TEXT DEFAULT 'ok', error TEXT, embedded INTEGER DEFAULT 0,
+          updated_at INTEGER);
+        CREATE TABLE chunks(
+          id INTEGER PRIMARY KEY, file_id INTEGER, seq INTEGER, page INTEGER,
+          line INTEGER, body TEXT);
+        CREATE VIRTUAL TABLE chunks_fts USING fts5(
+          body, stem, chunk_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2');
+        INSERT INTO meta(key, value) VALUES('schema_version', '2');
+        INSERT INTO files(id, path, size, mtime_ns, updated_at) VALUES(1, '/v.mp4', 10, 1, 1);
+        INSERT INTO chunks(id, file_id, seq, body) VALUES(1, 1, 0, '');
+        INSERT INTO chunks_fts(body, stem, chunk_id) VALUES('', '', 1);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    migrated = db.connect(path)
+    try:
+        assert db.migrate(migrated) == 3
+        columns = {row["name"] for row in migrated.execute("PRAGMA table_info(chunks)")}
+        assert "time_ms" in columns
+        # idempotent: a second migrate keeps v3
+        assert db.migrate(migrated) == 3
     finally:
         migrated.close()

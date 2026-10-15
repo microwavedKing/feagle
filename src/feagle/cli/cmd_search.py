@@ -95,6 +95,7 @@ def search_in_process(cfg: dict[str, Any], query: str, limit: int, mode: str) ->
                 "path": hit.path,
                 "page": hit.page,
                 "line": hit.line,
+                "time": hit.time_ms / 1000 if hit.time_ms is not None else None,
                 "snippet": hit.snippet,
                 "chunk_id": hit.chunk_id,
             }
@@ -118,12 +119,21 @@ def search_best_effort(
     return result
 
 
+def _format_time(seconds: float) -> str:
+    total = int(seconds)
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
 def _location(result: dict[str, Any]) -> str:
     location = result["path"]
     if result.get("line") is not None:
         location += f":{result['line']}"
     if result.get("page") is not None:
         location += f" (page {result['page']})"
+    if result.get("time") is not None:
+        location += f" @ {_format_time(result['time'])}"
     return location
 
 

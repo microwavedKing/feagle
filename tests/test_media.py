@@ -105,3 +105,33 @@ def test_downscale_without_ffmpeg_raises(tmp_path, monkeypatch):
     src.write_bytes(b"x")
     with pytest.raises(media.MediaError, match="ffmpeg not found"):
         media.downscale_image(src, tmp_path / "out.png", max_dim=1024)
+
+
+# -- video frames ----------------------------------------------------------
+
+
+def test_extract_frames_builds_command_and_times(tmp_path, monkeypatch):
+    monkeypatch.setattr(media.shutil, "which", _which({"ffmpeg"}))
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        for i in range(3):
+            Path(cmd[-1].replace("%05d", f"{i + 1:05d}")).write_bytes(b"PNG")
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    monkeypatch.setattr(media.subprocess, "run", run)
+    frames = media.extract_frames(
+        tmp_path / "v.mp4", tmp_path / "frames", interval=10.0, max_frames=3, max_dim=512
+    )
+    assert [time_ms for time_ms, _ in frames] == [0, 10000, 20000]
+    command = calls[0]
+    assert any("fps=1/10.0" in token for token in command)
+    assert any("scale=512:-1" in token for token in command)
+    assert command[command.index("-frames:v") + 1] == "3"
+
+
+def test_extract_frames_without_ffmpeg_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(media.shutil, "which", _which(set()))
+    with pytest.raises(media.MediaError, match="ffmpeg not found"):
+        media.extract_frames(tmp_path / "v.mp4", tmp_path / "frames")

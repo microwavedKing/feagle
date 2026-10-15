@@ -21,7 +21,7 @@ log = get_logger("db")
 #: Current on-disk schema version. Bump together with a migration step.
 #: The ``chunks_vec`` table is managed separately (see ``ensure_vec_table``)
 #: because its dimension is fixed at CREATE time and depends on the model.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _BASE_SQL = """
 CREATE TABLE IF NOT EXISTS meta(
@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS chunks(
   seq     INTEGER NOT NULL,
   page    INTEGER,
   line    INTEGER,
+  time_ms INTEGER,
   body    TEXT NOT NULL
 );
 
@@ -129,6 +130,15 @@ def get_schema_version(conn: sqlite3.Connection) -> int:
     return int(row["value"]) if row is not None else 0
 
 
+def has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """Whether ``table`` has ``column`` (lets readers tolerate an older schema)."""
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    except sqlite3.OperationalError:
+        return False
+    return any(row["name"] == column for row in rows)
+
+
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute(
         "INSERT INTO meta(key, value) VALUES(?, ?) "
@@ -166,6 +176,15 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
     log.info("migrated schema v1 -> v2 (%d chunks restemmed)", len(rows))
 
 
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    """Add ``chunks.time_ms`` (media timestamps). Idempotent."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(chunks)")}
+    if "time_ms" not in columns:
+        conn.execute("ALTER TABLE chunks ADD COLUMN time_ms INTEGER")
+    set_meta(conn, "schema_version", "3")
+    log.info("migrated schema v2 -> v3 (chunk time_ms)")
+
+
 def migrate(conn: sqlite3.Connection) -> int:
     """Bring the database up to :data:`SCHEMA_VERSION` and return the version.
 
@@ -184,6 +203,10 @@ def migrate(conn: sqlite3.Connection) -> int:
         # v1 -> v2: add the stemmed full-text column.
         _migrate_v1_to_v2(conn)
         version = 2
+    if version < 3:
+        # v2 -> v3: add the chunk timestamp (video frames).
+        _migrate_v2_to_v3(conn)
+        version = 3
     conn.commit()
     return version
 

@@ -102,7 +102,7 @@ def test_status_json(env, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["files"]["total"] == 1
     assert payload["chunks"] == 1
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["vectors"] == 0
 
 
@@ -238,6 +238,28 @@ def test_open_positional_plus_is_a_line_for_text(env, capsys):
 def test_open_missing_file_fails(env, capsys):
     assert main(["open", str(env / "nope.txt")]) == 1
     assert "no such file" in capsys.readouterr().err
+
+
+def test_open_video_with_time_uses_time_placeholder(env, capsys):
+    write_config(
+        env,
+        '[openers]\ndefault = "xdg-open {path}"\nmp4 = "mpv --start={time} {path}"\n',
+    )
+    target = env / "clip.mp4"
+    target.write_bytes(b"x")
+    assert main(["open", str(target), "--time", "12.5", "--dry-run"]) == 0
+    assert capsys.readouterr().out.strip() == f"mpv --start=12.5 {target}"
+
+
+def test_open_video_positional_is_seconds(env, capsys):
+    write_config(
+        env,
+        '[openers]\ndefault = "xdg-open {path}"\nmp4 = "mpv --start={time} {path}"\n',
+    )
+    target = env / "clip.mp4"
+    target.write_bytes(b"x")
+    assert main(["open", str(target), "+30", "--dry-run"]) == 0
+    assert "mpv --start=30" in capsys.readouterr().out
 
 
 # -- search --pick ---------------------------------------------------------

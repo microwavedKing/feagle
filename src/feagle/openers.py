@@ -1,9 +1,10 @@
 """Open a file at a position using the user's configured opener templates.
 
 Templates live under ``[openers]`` in the config. Placeholders are ``{path}``,
-``{line}`` and ``{page}``. When ``line``/``page`` is not given, the placeholder
-*and* a directly preceding flag (``--page {page}``) are dropped, so a template
-like ``zathura --page {page} {path}`` degrades to ``zathura {path}``.
+``{line}``, ``{page}`` and ``{time}`` (seconds, for media). When a position is not
+given, the placeholder *and* a directly preceding flag (``--page {page}``) are
+dropped, so a template like ``zathura --page {page} {path}`` degrades to
+``zathura {path}``.
 
 Commands are split with :func:`shlex.split` and executed without a shell, so
 paths can never be interpreted as shell syntax.
@@ -21,7 +22,7 @@ from .log import get_logger
 
 log = get_logger("openers")
 
-_POSITION_PLACEHOLDERS = ("line", "page")
+_POSITION_PLACEHOLDERS = ("line", "page", "time")
 
 
 class OpenError(Exception):
@@ -41,7 +42,12 @@ def _has_missing(token: str, missing: set[str]) -> bool:
 
 
 def build_command(
-    template: str, *, path: Path, line: int | None = None, page: int | None = None
+    template: str,
+    *,
+    path: Path,
+    line: int | None = None,
+    page: int | None = None,
+    time_ms: int | None = None,
 ) -> list[str]:
     """Expand ``template`` into an argv list, dropping absent positions."""
     values: dict[str, str] = {"path": str(path)}
@@ -49,6 +55,8 @@ def build_command(
         values["line"] = str(line)
     if page is not None:
         values["page"] = str(page)
+    if time_ms is not None:
+        values["time"] = f"{time_ms / 1000:g}"
 
     missing = {p for p in _POSITION_PLACEHOLDERS if p not in values}
 
@@ -81,11 +89,12 @@ def open_result(
     *,
     line: int | None = None,
     page: int | None = None,
+    time_ms: int | None = None,
     spawn: Callable[[list[str]], Any] | None = None,
 ) -> list[str]:
     """Launch the opener for ``path`` and return the argv that was used."""
     template = select_template(openers, path)
-    command = build_command(template, path=path, line=line, page=page)
+    command = build_command(template, path=path, line=line, page=page, time_ms=time_ms)
     if not command:
         raise OpenError(f"opener for {path.name!r} expands to an empty command")
 
