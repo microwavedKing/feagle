@@ -64,6 +64,7 @@
 | `scanner.py` | обход корней и фильтры | `Scanner.iter_files()` → `ScanCandidate`; скрытые, `exclude_dirs`, allowlist расширений, лимиты размера, симлинки не трогаем, `exclude_paths` (данные feagle) |
 | `extract.py` | текст/код/PDF/картинки | `extract()`, `Extracted(pages, kind, encoding)`; **фолбэк кодировок**; PDF через `pdftotext`; картинки — OCR (`kind="image"`) |
 | `ocr.py` | OCR страниц PDF и картинок | `ocr_pdf_page()` (pdftoppm→tesseract), `ocr_image()` (только tesseract), `ocr_pages()` с лимитами |
+| `media.py` | подготовка картинок для эмбеддингов | `image_dimensions()` (ffprobe), `downscale_image()` (ffmpeg, длинная сторона ≤ `image_max_dim`) |
 | `chunker.py` | чанки ~1400 симв. | `chunk_extracted()`; прилипание к границе строки (точный `line`), перекрытие 150, cap 2200, PDF не пересекает страницу, у картинок `line`/`page` = None |
 | `pipeline.py` | инкрементальная синхронизация | `index_roots()`, `index_file()`, `backfill()`, `wipe()`; stat→hash→reindex, prune, `pause_check`, эмбеддинги **вне транзакции**, частичные векторы |
 | `watcher.py` | изменения ФС | обёртка `watchfiles`; источник инжектируется для тестов |
@@ -75,10 +76,10 @@
 |---|---|---|
 | `presets.py` | пресеты моделей | `ModelSpec` с SHA256/размером; `embeddinggemma-2-q4` (дефолт), `-q8`, `-bf16`, mmproj |
 | `prompts.py` | task-префиксы | `format_query/format_doc`, `TASKS` (search/code/qa) |
-| `client.py` | HTTP `/v1/embeddings` | батчи, порядок по `index`, discovery dim, MRL-усечение + L2-перенормировка, `health()` |
+| `client.py` | HTTP `/v1/embeddings` | батчи, порядок по `index`, discovery dim, MRL-усечение + L2-перенормировка, `health()`; `embed_images()` (content-parts, без task-префиксов) |
 | `download.py` | загрузка модели | поток, SHA256/размер, сверка пина с HF tree API |
-| `supervisor.py` | жизненный цикл `llama-server` | port/pid/lock/touch-файлы, `ensure_running()`, idle-stop, обнаружение мёртвого владельца |
-| `service.py` | связка «супервизор + клиент» | `EmbeddingService.start()/ensure()/reset()`, `EmbedderAdapter` (touch на каждый эмбеддинг) |
+| `supervisor.py` | жизненный цикл `llama-server` | port/pid/lock/touch-файлы, `ensure_running()`, idle-stop, обнаружение мёртвого владельца, `--mmproj` при медиа |
+| `service.py` | связка «супервизор + клиент» | `EmbeddingService.start()/ensure()/reset()`, `resolve_mmproj()`, `EmbedderAdapter` (touch на каждый эмбеддинг) |
 
 ### Поиск (`search/`)
 
@@ -162,6 +163,7 @@ chunks_vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[DIM])
 ```
 llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
              --cache-ram 0 --alias feagle -c 8192 -np 4 -b 4096 -ub 4096
+             # [--mmproj MMPROJ] — только при [media].images = true
 ```
 
 `indexerd` обращается к `llama-server` **напрямую** через `EmbeddingService` (HTTP), а
@@ -183,6 +185,7 @@ llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
 `[index]` roots, include_ext, exclude_dirs, use_gitignore, лимиты, `rescan_interval_min`,
 `pause_on_battery`, `pause_on_loadavg`, `embed_batch_size`, `follow_symlinks`,
 `ocr*` (в т.ч. `ocr_images`); `[embeddings]` model, mrl_dim, server_url, idle_timeout_min, threads, extra_args;
+`[media]` images, mmproj, image_max_dim, images_per_run;
 `[search]` limit, mode, candidates, rrf_k, stemming, max_distance, max_per_file;
 `[launcher]` program; `[openers]` (свободная таблица: расширение → шаблон).
 
@@ -194,6 +197,12 @@ stat → сравнение с БД (`size`,`mtime_ns`,`state=ok`) → инач�
 транзакция: удалить старые чанки (+FTS, +vec), вставить новые (+FTS cо стемом, +vec) →
 `embedded` = 1, если векторы есть у всех чанков. Ошибка экстрактора → `state=error`,
 индексация продолжается.
+
+**Медиа-картинки** (`[media].images`): файл = **один чанк и один вектор** (эмбеддинг
+картинки через `--mmproj`, без task-префиксов); тело чанка — OCR-текст (если
+`ocr_images`) или пусто. Картинка уменьшается (`ffmpeg`, `image_max_dim`), за проход
+обрабатывается не более `images_per_run` (остальные добирает `backfill`). Без
+`ffmpeg`/`mmproj` картинка пропускается с предупреждением.
 
 **Поиск**: CLI → (если запущен) `queryd`, иначе в процессе. `auto/hybrid`: эмбеддинг
 запроса + FTS(body) + FTS(stem) + KNN → RRF → отсечение `max_distance` → лимит
@@ -258,6 +267,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 21 | `setup` не копирует юниты, если они уже стоят системно | иначе дубли в `~/.config/systemd/user` поверх пакетных | `units.using_packaged`, `cmd_setup` |
 | 22 | `AGENTS.md`/`RESEARCH.md` — вне git (`.gitignore`) | внутренние документы, не для публики | `.gitignore` |
 | 23 | OCR картинок за отдельным флагом `[index].ocr_images`, только `tesseract` (без `pdftoppm`) | без OCR/эмбеддингов картинки не дают текста; отдельный флаг не навязывает их тем, кому нужен только PDF-OCR, а рендерер для картинок не нужен | `config.DEFAULTS`, `pipeline._build_scanner`, `extract.extract_image` |
+| 24 | Поиск картинок: `[media].images` (opt-in), «1 файл = 1 чанк/вектор», предуменьшение `ffmpeg` (≤ `image_max_dim`), лимит `images_per_run` за проход, `--mmproj` только при включённых медиа | на CPU image-эмбеддинг дорог (десятки секунд на полный размер) и ест RAM; переиспользование `chunks_vec` не требует схемы v3; для текста на картинке дешевле OCR | `config.DEFAULTS`, `pipeline`, `client.embed_images`, `supervisor`, `indexer/media.py` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 

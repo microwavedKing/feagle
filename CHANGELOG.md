@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tesseract` is needed (no renderer); scanned PDF pages still also need
   `pdftoppm`. Recognized text is searchable like any other document, and image
   chunks carry no line/page position.
+- Image search (opt-in): with `[media].images = true`, image files are embedded
+  through the multimodal projector (`mmproj`, preset `embeddinggemma-2-mmproj-q8`)
+  so a text query can find a picture. Images are downscaled (`ffmpeg`) before
+  embedding, at most `[media].images_per_run` are done per indexing pass, and the
+  flag is off by default (it makes the shared server use ~1 GiB of RAM).
 
 ## [0.1.1] - 2026-10-15
 
@@ -165,6 +170,12 @@ on Wayland.
   Достаточно одного `tesseract` (без рендера); страницам сканированных PDF
   по-прежнему нужен ещё `pdftoppm`. Распознанный текст ищется как обычный
   документ; у чанков картинок нет номера строки/страницы.
+- Поиск картинок (опционально): при `[media].images = true` картинки эмбеддятся
+  через мультимодальный проектор (`mmproj`, пресет `embeddinggemma-2-mmproj-q8`),
+  поэтому текстовый запрос может найти изображение. Картинки уменьшаются
+  (`ffmpeg`) перед эмбеддингом, за проход обрабатывается не более
+  `[media].images_per_run`, а флаг по умолчанию выключен (иначе общий сервер
+  занимает ~1 ГиБ RAM).
 
 ## 0.1.1 (по-русски)
 
