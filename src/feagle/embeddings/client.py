@@ -11,7 +11,9 @@ Responsibilities:
 
 from __future__ import annotations
 
+import base64
 import math
+from pathlib import Path
 
 import httpx
 
@@ -19,6 +21,29 @@ from . import prompts
 
 #: Placeholder title used when a document has no name.
 DEFAULT_BATCH_SIZE = 16
+
+#: Images are heavier than text, so they are sent in smaller batches.
+IMAGE_BATCH_SIZE = 4
+
+#: MIME types for the image extensions we index.
+_IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+}
+
+
+def _data_url(path: Path) -> str:
+    """A ``data:`` URL with the base64-encoded image bytes."""
+    mime = _IMAGE_MIME.get(path.suffix.lower(), "application/octet-stream")
+    try:
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    except OSError as exc:
+        raise EmbeddingError(f"cannot read image {path}: {exc}") from exc
+    return f"data:{mime};base64,{encoded}"
 
 
 class EmbeddingError(Exception):
@@ -139,6 +164,50 @@ class EmbeddingClient:
         return self._embed_raw(
             [prompts.format_doc(text, title, self.task) for text, title in items]
         )
+
+    def embed_images(self, paths: list[Path]) -> list[list[float]]:
+        """Embed image files through the multimodal projector.
+
+        Media inputs take **no** task prefix (see RESEARCH §4.2); the server
+        inserts the ``<|image|>`` placeholder itself. The request uses the
+        content-parts form of ``/v1/embeddings``.
+        """
+        if not paths:
+            return []
+        vectors: list[list[float] | None] = [None] * len(paths)
+        batch_size = max(1, min(self.batch_size, IMAGE_BATCH_SIZE))
+        for start in range(0, len(paths), batch_size):
+            batch = paths[start : start + batch_size]
+            inputs = [
+                {"content": [{"type": "image_url", "image_url": {"url": _data_url(path)}}]}
+                for path in batch
+            ]
+            try:
+                response = self._client.post(
+                    f"{self.base_url}/v1/embeddings",
+                    json={"input": inputs, "model": "feagle"},
+                )
+            except httpx.HTTPError as exc:
+                raise ServerUnavailable(f"embeddings request failed: {exc}") from exc
+            if response.status_code != 200:
+                raise EmbeddingError(
+                    f"embeddings HTTP {response.status_code}: {response.text[:200]}"
+                )
+            try:
+                data = response.json()["data"]
+            except (ValueError, KeyError, TypeError) as exc:
+                raise EmbeddingError(f"malformed embeddings response: {exc}") from exc
+            if len(data) != len(batch):
+                raise EmbeddingError(f"expected {len(batch)} embeddings, got {len(data)}")
+            for item in data:
+                index = int(item.get("index", 0))
+                if not 0 <= index < len(batch):
+                    raise EmbeddingError(f"embedding index {index} out of range")
+                vectors[start + index] = list(item["embedding"])
+
+        if any(vector is None for vector in vectors):
+            raise EmbeddingError("server did not return every embedding")
+        return [self._apply_mrl(vector) for vector in vectors]  # type: ignore[arg-type]
 
     def discover_dim(self) -> int:
         """Probe the server once to learn the (possibly MRL-truncated) dimension."""

@@ -22,6 +22,7 @@ pkgbase = feagle
 	optdepends = tesseract: OCR for scanned PDFs
 	optdepends = tesseract-data-eng: English OCR data
 	optdepends = tesseract-data-rus: Russian OCR data
+	optdepends = ffmpeg: image search (downscales images before embedding)
 	optdepends = fuzzel: launcher for "feagle pick"
 	optdepends = wofi: launcher for "feagle pick"
 	optdepends = rofi: launcher for "feagle pick" (Wayland support included since 2.0)

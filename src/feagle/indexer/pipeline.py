@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -27,8 +28,9 @@ from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.service import Embedder
 from ..log import get_logger
-from .chunker import chunk_extracted
+from .chunker import MAX_CHARS, Chunk, chunk_extracted
 from .extract import ExtractionError, UnsupportedFile, extract
+from .media import MediaError, downscale_image
 from .ocr import IMAGE_SUFFIXES
 from .scanner import ScanCandidate, Scanner
 
@@ -179,6 +181,37 @@ def _embed(
     return vectors
 
 
+def _image_chunk(text: str) -> Chunk:
+    """A single chunk for an image: its embedding is one vector per file."""
+    body = " ".join(text.split())[:MAX_CHARS]
+    return Chunk(seq=0, page=None, line=None, body=body)
+
+
+def _embed_image(
+    embedder: Embedder, path: Path, media_cfg: dict[str, Any]
+) -> list[list[float]] | None:
+    """Embed one image file (downscaled first). Returns ``[vector]`` or ``None``."""
+    embed_images = getattr(embedder, "embed_images", None)
+    if embed_images is None:
+        log.warning("embedder cannot embed images; skipping %s", path)
+        return None
+    try:
+        with tempfile.TemporaryDirectory(prefix="feagle-media-") as tmp:
+            prepared = downscale_image(
+                path, Path(tmp) / "image.png", max_dim=int(media_cfg["image_max_dim"])
+            )
+            return embed_images([prepared])
+    except MediaError as exc:
+        log.warning("cannot prepare image %s: %s", path, exc)
+        return None
+    except ServerUnavailable as exc:
+        log.warning("embeddings server unavailable: %s", exc)
+        return None
+    except EmbeddingError as exc:
+        log.warning("image embedding failed for %s: %s", path, exc)
+        return None
+
+
 def index_file(
     conn: sqlite3.Connection,
     candidate: ScanCandidate,
@@ -186,6 +219,7 @@ def index_file(
     *,
     force: bool = False,
     embedder: Embedder | None = None,
+    allow_image: bool = True,
 ) -> tuple[str, int, int]:
     """Index a single candidate.
 
@@ -221,6 +255,10 @@ def index_file(
             )
         return "touched", 0, 0
 
+    media_cfg = cfg.get("media") or {}
+    media_images = bool(media_cfg.get("images"))
+    is_image = candidate.path.suffix.lower() in IMAGE_SUFFIXES
+
     limit = (
         index_cfg["max_pdf_file_size_mb"] if candidate.path.suffix.lower() == ".pdf"
         else index_cfg["max_file_size_mb"]
@@ -232,12 +270,18 @@ def index_file(
             max_bytes=limit,
             ocr=index_cfg["ocr"],
             ocr_images=index_cfg["ocr_images"],
+            media_images=media_images,
             ocr_langs=index_cfg["ocr_langs"],
             ocr_dpi=index_cfg["ocr_dpi"],
             ocr_min_chars=index_cfg["ocr_min_chars"],
             ocr_max_pages=index_cfg["ocr_max_pages"],
         )
-        chunks = chunk_extracted(extracted)[: index_cfg["max_chunks_per_file"]]
+        if is_image and media_images:
+            # One image = one chunk/vector, whatever the OCR text length is.
+            text = extracted.pages[0] if extracted.pages else ""
+            chunks = [_image_chunk(text)]
+        else:
+            chunks = chunk_extracted(extracted)[: index_cfg["max_chunks_per_file"]]
     except UnsupportedFile as exc:
         with conn:
             _upsert_file(conn, path, candidate, digest, state="unsupported", error=str(exc))
@@ -251,7 +295,11 @@ def index_file(
     # Embed before touching the database: never hold the write lock during I/O.
     vectors: list[list[float]] | None = None
     if embedder is not None and chunks:
-        vectors = _embed(embedder, [(chunk.body, candidate.path.stem) for chunk in chunks])
+        if is_image and media_images:
+            if allow_image:
+                vectors = _embed_image(embedder, candidate.path, media_cfg)
+        else:
+            vectors = _embed(embedder, [(chunk.body, candidate.path.stem) for chunk in chunks])
 
     if embedder is not None:
         db.ensure_vec_table(conn, embedder.dim, model_id=cfg["embeddings"]["model"])
@@ -310,9 +358,14 @@ def backfill(
                 conn.execute("UPDATE files SET embedded = 1 WHERE id = ?", (row["id"],))
             continue
 
-        vectors = _embed(
-            embedder, [(chunk["body"], Path(row["path"]).stem) for chunk in chunks]
-        )
+        media_cfg = cfg.get("media") or {}
+        is_image = Path(row["path"]).suffix.lower() in IMAGE_SUFFIXES
+        if is_image and media_cfg.get("images"):
+            vectors = _embed_image(embedder, Path(row["path"]), media_cfg)
+        else:
+            vectors = _embed(
+                embedder, [(chunk["body"], Path(row["path"]).stem) for chunk in chunks]
+            )
         if vectors is None:
             break  # server unavailable: stop rather than spin
 
@@ -342,10 +395,10 @@ def backfill(
 
 def _build_scanner(cfg: dict[str, Any]) -> Scanner:
     index_cfg = cfg["index"]
+    media_images = bool((cfg.get("media") or {}).get("images"))
     include_ext = list(index_cfg["include_ext"])
-    if index_cfg["ocr_images"]:
-        # Images are only worth indexing when OCR is on: without a text layer
-        # (and without image embeddings, yet) they yield nothing.
+    if index_cfg["ocr_images"] or media_images:
+        # Images are only worth indexing when OCR or image embeddings are on.
         include_ext += [ext for ext in IMAGE_SUFFIXES if ext not in include_ext]
     return Scanner(
         include_ext=include_ext,
@@ -418,6 +471,10 @@ def index_roots(
     scanner = _build_scanner(cfg)
     seen: set[str] = set()
 
+    media_images = bool((cfg.get("media") or {}).get("images"))
+    image_budget = int((cfg.get("media") or {}).get("images_per_run", 0))
+    limit_images = media_images and image_budget > 0
+
     for candidate in scanner.iter_files(active):
         if pause_check is not None:
             reason = pause_check()
@@ -427,9 +484,13 @@ def index_roots(
                 break
         stats.scanned += 1
         seen.add(_canonical(candidate.path))
+        is_image = candidate.path.suffix.lower() in IMAGE_SUFFIXES
+        allow_image = (not is_image) or (not limit_images) or image_budget > 0
         outcome, written, inserted = index_file(
-            conn, candidate, cfg, force=full, embedder=embedder
+            conn, candidate, cfg, force=full, embedder=embedder, allow_image=allow_image
         )
+        if is_image and limit_images and outcome == "reindexed" and inserted > 0:
+            image_budget -= 1
         if outcome == "unchanged":
             stats.unchanged += 1
         elif outcome == "touched":

@@ -58,6 +58,12 @@ DEFAULTS: dict[str, Any] = {
         "threads": 0,
         "extra_args": [],
     },
+    "media": {
+        "images": False,
+        "mmproj": "embeddinggemma-2-mmproj-q8",
+        "image_max_dim": 1024,
+        "images_per_run": 200,
+    },
     "search": {
         "limit": 20,
         "mode": "auto",
@@ -184,6 +190,15 @@ def validate(cfg: dict[str, Any], source: Path | None = None) -> None:
     _check(all(isinstance(a, str) for a in emb["extra_args"]), "embeddings.extra_args",
            "all entries must be strings", source)
 
+    media = cfg["media"]
+    _check_type(media, "images", (bool,), source)
+    _check_type(media, "mmproj", (str,), source)
+    _check(bool(media["mmproj"].strip()), "media.mmproj", "must not be empty", source)
+    _check_type(media, "image_max_dim", (int,), source)
+    _check(media["image_max_dim"] >= 0, "media.image_max_dim", "must be >= 0", source)
+    _check_type(media, "images_per_run", (int,), source)
+    _check(media["images_per_run"] >= 0, "media.images_per_run", "must be >= 0", source)
+
     search = cfg["search"]
     _check_type(search, "limit", (int,), source)
     _check(search["limit"] > 0, "search.limit", "must be > 0", source)
@@ -292,6 +307,20 @@ server_url = ""
 idle_timeout_min = 10
 threads = 0
 extra_args = []
+
+[media]
+# Index images (png/jpg/jpeg/webp/tiff) as embeddings so text queries can find
+# them ("search by picture"). Needs the multimodal projector below, ffmpeg for
+# downscaling, and is CPU-heavy (tens of seconds per large image). Off by default.
+images = false
+# mmproj preset name from embeddings/presets.py, or an absolute path to a GGUF.
+mmproj = "embeddinggemma-2-mmproj-q8"
+# Downscale an image so its longest side is at most this many pixels before
+# embedding (smaller = faster and less RAM; 0 disables downscaling).
+image_max_dim = 1024
+# Safety cap: at most this many images are embedded per indexing pass
+# (0 = unlimited). The rest are picked up by later passes / backfill.
+images_per_run = 200
 
 [search]
 limit = 20

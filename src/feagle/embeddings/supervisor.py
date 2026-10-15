@@ -37,6 +37,9 @@ class SupervisorConfig:
     server_url: str = ""
     idle_timeout_min: float = 10.0
     threads: int = 0
+    #: Optional multimodal projector (``--mmproj``) for image embeddings. Only
+    #: set when media image indexing is enabled in the config.
+    mmproj_path: Path | None = None
     #: Total context and parallel slots. Each slot gets context/slots tokens,
     #: and an embeddings input must fit in one slot (see RESEARCH §4.1), so keep
     #: the per-slot size comfortably above the largest chunk (~2200 chars).
@@ -72,6 +75,8 @@ def build_llama_command(cfg: SupervisorConfig, port: int) -> list[str]:
     ]
     if cfg.threads > 0:
         command += ["-t", str(cfg.threads)]
+    if cfg.mmproj_path is not None:
+        command += ["--mmproj", str(cfg.mmproj_path)]
     # NOTE: never pass --pooling; mean pooling is baked into the GGUF (§12.2).
     command += list(cfg.extra_args)
     return command

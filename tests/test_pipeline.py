@@ -232,6 +232,104 @@ def test_images_are_indexed_and_searchable(root, conn, monkeypatch):
     assert row["line"] is None and row["page"] is None
 
 
+# -- media image embeddings ------------------------------------------------
+
+
+class FakeImageEmbedder:
+    dim = 4
+
+    def __init__(self):
+        self.seen: list = []
+
+    def embed_documents(self, items):
+        return [[1.0] * self.dim for _ in items]
+
+    def embed_queries(self, texts):
+        return [[0.0] * self.dim for _ in texts]
+
+    def embed_images(self, paths):
+        self.seen.extend(paths)
+        return [[2.0] * self.dim for _ in paths]
+
+
+def enable_media(cfg, **overrides):
+    cfg["media"].update({"images": True, "image_max_dim": 1024, "images_per_run": 0})
+    cfg["media"].update(overrides)
+    return cfg
+
+
+def test_scanner_allowlist_gains_images_with_media_images(root):
+    cfg = make_cfg(root)
+    cfg["media"]["images"] = True
+    assert ".png" in pipeline._build_scanner(cfg).include_ext
+
+
+def test_media_images_are_indexed_as_one_vector(root, conn, monkeypatch):
+    (root / "shot.png").write_bytes(b"PNG")
+    monkeypatch.setattr(pipeline, "downscale_image", lambda src, dest, *, max_dim: src)
+    embedder = FakeImageEmbedder()
+
+    stats = pipeline.index_roots(conn, enable_media(make_cfg(root)), embedder=embedder)
+
+    assert stats.reindexed == 1
+    assert [p.name for p in embedder.seen] == ["shot.png"]
+    assert conn.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"] == 1
+    assert conn.execute("SELECT COUNT(*) AS n FROM chunks_vec").fetchone()["n"] == 1
+    assert conn.execute("SELECT body FROM chunks").fetchone()["body"] == ""  # no OCR
+
+
+def test_media_images_respect_the_per_run_budget(root, conn, monkeypatch):
+    for i in range(3):
+        (root / f"{i}.png").write_bytes(b"PNG")
+    monkeypatch.setattr(pipeline, "downscale_image", lambda src, dest, *, max_dim: src)
+    embedder = FakeImageEmbedder()
+
+    stats = pipeline.index_roots(
+        conn, enable_media(make_cfg(root), images_per_run=1), embedder=embedder
+    )
+
+    assert stats.reindexed == 3
+    assert len(embedder.seen) == 1  # only the first image fit the budget
+    assert conn.execute("SELECT COUNT(*) AS n FROM files WHERE embedded=1").fetchone()["n"] == 1
+
+
+def test_media_image_uses_ocr_text_as_body(root, conn, monkeypatch):
+    (root / "shot.png").write_bytes(b"PNG")
+    monkeypatch.setattr(extract, "image_ocr_available", lambda: True)
+    monkeypatch.setattr(extract, "ocr_image", lambda p, **kw: "charlie text")
+    monkeypatch.setattr(pipeline, "downscale_image", lambda src, dest, *, max_dim: src)
+
+    cfg = enable_media(make_cfg(root, ocr_images=True))
+    pipeline.index_roots(conn, cfg, embedder=FakeImageEmbedder())
+
+    assert conn.execute("SELECT body FROM chunks").fetchone()["body"] == "charlie text"
+
+
+def test_media_image_degrades_without_ffmpeg(root, conn, monkeypatch):
+    from feagle.indexer.media import MediaError
+
+    (root / "shot.png").write_bytes(b"PNG")
+
+    def boom(*args, **kwargs):
+        raise MediaError("ffmpeg not found")
+
+    monkeypatch.setattr(pipeline, "downscale_image", boom)
+    stats = pipeline.index_roots(conn, enable_media(make_cfg(root)), embedder=FakeImageEmbedder())
+
+    assert stats.errors == 0
+    assert conn.execute("SELECT embedded FROM files").fetchone()["embedded"] == 0
+
+
+def test_backfill_embeds_media_images(root, conn, monkeypatch):
+    (root / "shot.png").write_bytes(b"PNG")
+    monkeypatch.setattr(pipeline, "downscale_image", lambda src, dest, *, max_dim: src)
+    cfg = enable_media(make_cfg(root))
+    pipeline.index_roots(conn, cfg)  # no embedder -> embedded=0
+
+    assert pipeline.backfill(conn, cfg, FakeImageEmbedder()) == 1
+    assert conn.execute("SELECT COUNT(*) AS n FROM chunks_vec").fetchone()["n"] == 1
+
+
 def test_pause_check_stops_the_run(root, conn):
     for i in range(5):
         (root / f"f{i}.txt").write_text(f"content {i}", encoding="utf-8")

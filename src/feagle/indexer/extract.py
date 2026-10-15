@@ -85,6 +85,7 @@ def extract(
     max_bytes: int | None = None,
     ocr: bool = False,
     ocr_images: bool = False,
+    media_images: bool = False,
     ocr_langs: str = DEFAULT_LANGS,
     ocr_dpi: int = DEFAULT_DPI,
     ocr_min_chars: int = 20,
@@ -104,7 +105,8 @@ def extract(
     if suffix in IMAGE_SUFFIXES:
         return extract_image(
             path,
-            enabled=ocr_images,
+            enabled=ocr_images or media_images,
+            ocr=ocr_images,
             ocr_langs=ocr_langs,
         )
     return extract_text(path, max_bytes=max_bytes)
@@ -162,26 +164,31 @@ def extract_image(
     path: Path,
     *,
     enabled: bool = False,
+    ocr: bool = False,
     ocr_langs: str = DEFAULT_LANGS,
     timeout: float = OCR_TIMEOUT,
 ) -> Extracted:
-    """OCR an image file directly with ``tesseract``.
+    """Prepare an image for indexing.
 
-    Images need only ``tesseract`` (there is nothing to render), unlike scanned
-    PDF pages which also need ``pdftoppm``. When image OCR is disabled in the
-    config, or ``tesseract`` is missing, the file is skipped with a clear
-    message instead of failing the run.
+    With ``ocr`` the image is recognized with ``tesseract`` (which needs only
+    ``tesseract``, unlike scanned PDF pages that also need ``pdftoppm``). Without
+    it the image is indexed for its embedding only and the text is empty. When
+    images are disabled in the config, or ``tesseract`` is missing for OCR, the
+    file is skipped with a clear message instead of failing the run.
     """
     if not enabled:
         raise UnsupportedFile(f"{IMAGE_DISABLED_HINT}: {path}")
-    if not image_ocr_available():
-        raise UnsupportedFile(f"{IMAGE_NO_TESSERACT_HINT}: {path}")
-    try:
-        text = ocr_image(path, langs=ocr_langs, timeout=timeout)
-    except OcrError as exc:
-        raise ExtractionError(str(exc)) from exc
-    if not text.strip():
-        log.info("no text recognized in %s", path)
+    if ocr:
+        if not image_ocr_available():
+            raise UnsupportedFile(f"{IMAGE_NO_TESSERACT_HINT}: {path}")
+        try:
+            text = ocr_image(path, langs=ocr_langs, timeout=timeout)
+        except OcrError as exc:
+            raise ExtractionError(str(exc)) from exc
+        if not text.strip():
+            log.info("no text recognized in %s", path)
+    else:
+        text = ""  # image-embedding only; no OCR text layer
     return Extracted(pages=(text,), kind="image")
 
 

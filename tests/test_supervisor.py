@@ -93,6 +93,16 @@ def test_command_appends_extra_args():
     assert "--flash-attn" in build_llama_command(cfg, 1)
 
 
+def test_command_includes_mmproj_when_set():
+    cfg = SupervisorConfig(model_path=Path("/m"), mmproj_path=Path("/mm.gguf"))
+    cmd = build_llama_command(cfg, 1)
+    assert cmd[cmd.index("--mmproj") + 1] == "/mm.gguf"
+
+
+def test_command_has_no_mmproj_by_default():
+    assert "--mmproj" not in build_llama_command(SupervisorConfig(model_path=Path("/m")), 1)
+
+
 # -- lifecycle -------------------------------------------------------------
 
 
