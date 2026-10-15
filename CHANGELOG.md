@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a text query can find a picture. Images are downscaled (`ffmpeg`) before
   embedding, at most `[media].images_per_run` are done per indexing pass, and the
   flag is off by default (it makes the shared server use ~1 GiB of RAM).
+- Video search (opt-in): with `[media].video = true`, `ffmpeg` extracts frames
+  (`video_frame_interval`, up to `video_max_frames`) and they are embedded like
+  images, so a text query finds the right moment. Frame timestamps are stored in
+  the schema-v3 `chunks.time_ms`; results carry a timestamp and `feagle open
+  clip.mp4 +30` treats `+30` as seconds. The `{time}` opener placeholder expands
+  to seconds (for example `mp4 = "mpv --start={time} {path}"`).
 
 ## [0.1.1] - 2026-10-15
 
@@ -176,6 +182,13 @@ on Wayland.
   (`ffmpeg`) перед эмбеддингом, за проход обрабатывается не более
   `[media].images_per_run`, а флаг по умолчанию выключен (иначе общий сервер
   занимает ~1 ГиБ RAM).
+- Поиск видео (опционально): при `[media].video = true` `ffmpeg` извлекает кадры
+  (`video_frame_interval`, не более `video_max_frames`) и они эмбеддятся как
+  картинки, поэтому текстовый запрос находит нужный момент. Таймкоды кадров
+  хранятся в `chunks.time_ms` (схема v3); у результата есть таймкод, а
+  `feagle open clip.mp4 +30` трактует `+30` как секунды. Плейсхолдер `{time}` в
+  `[openers]` раскрывается в секунды (например,
+  `mp4 = "mpv --start={time} {path}"`).
 
 ## 0.1.1 (по-русски)
 

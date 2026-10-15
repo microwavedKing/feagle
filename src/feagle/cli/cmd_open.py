@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ..indexer.media import VIDEO_SUFFIXES
 from ..openers import OpenError, build_command, open_result, select_template
 
 
@@ -30,21 +31,32 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
 
     line = args.line
     page = args.page
+    time_ms = None
+    if getattr(args, "time", None) is not None:
+        time_ms = int(round(args.time * 1000))
     if args.position is not None:
-        if path.suffix.lower() == ".pdf":
+        suffix = path.suffix.lower()
+        if suffix == ".pdf":
             page = page if page is not None else args.position
+        elif suffix in VIDEO_SUFFIXES:
+            if time_ms is None:
+                time_ms = args.position * 1000
         else:
             line = line if line is not None else args.position
 
     if args.dry_run:
         command = build_command(
-            select_template(cfg["openers"], path), path=path, line=line, page=page
+            select_template(cfg["openers"], path),
+            path=path,
+            line=line,
+            page=page,
+            time_ms=time_ms,
         )
         print(" ".join(command))
         return 0
 
     try:
-        open_result(cfg["openers"], path, line=line, page=page)
+        open_result(cfg["openers"], path, line=line, page=page, time_ms=time_ms)
     except OpenError as exc:
         print(f"feagle: {exc}", file=sys.stderr)
         return 1

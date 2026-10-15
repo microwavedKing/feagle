@@ -79,3 +79,15 @@ def test_open_result_missing_binary_raises():
 def test_empty_template_raises():
     with pytest.raises(openers.OpenError, match="empty command"):
         openers.open_result({"default": "   "}, Path("/a/b.txt"), spawn=lambda cmd: None)
+
+
+def test_time_placeholder_is_seconds():
+    command = openers.build_command(
+        "mpv --start={time} {path}", path=Path("/a/b.mp4"), time_ms=90000
+    )
+    assert command == ["mpv", "--start=90", "/a/b.mp4"]
+
+
+def test_absent_time_drops_flag_and_placeholder():
+    command = openers.build_command("mpv --start {time} {path}", path=Path("/a/b.mp4"))
+    assert command == ["mpv", "/a/b.mp4"]

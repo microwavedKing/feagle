@@ -30,7 +30,14 @@ from ..embeddings.service import Embedder
 from ..log import get_logger
 from .chunker import MAX_CHARS, Chunk, chunk_extracted
 from .extract import ExtractionError, UnsupportedFile, extract
-from .media import MediaError, downscale_image
+from .media import (
+    VIDEO_SUFFIXES,
+    MediaError,
+    downscale_image,
+    extract_frames,
+    ffmpeg_available,
+    ffprobe_available,
+)
 from .ocr import IMAGE_SUFFIXES
 from .scanner import ScanCandidate, Scanner
 
@@ -134,8 +141,8 @@ def _write_chunks(conn: sqlite3.Connection, file_id: int, chunks: list[Any]) -> 
     ids: list[int] = []
     for chunk in chunks:
         cur = conn.execute(
-            "INSERT INTO chunks(file_id, seq, page, line, body) VALUES(?,?,?,?,?)",
-            (file_id, chunk.seq, chunk.page, chunk.line, chunk.body),
+            "INSERT INTO chunks(file_id, seq, page, line, time_ms, body) VALUES(?,?,?,?,?,?)",
+            (file_id, chunk.seq, chunk.page, chunk.line, chunk.time_ms, chunk.body),
         )
         chunk_id = int(cur.lastrowid or 0)
         conn.execute(
@@ -187,29 +194,61 @@ def _image_chunk(text: str) -> Chunk:
     return Chunk(seq=0, page=None, line=None, body=body)
 
 
+def _embed_prepared(embedder: Embedder, paths: list[Path]) -> list[list[float]] | None:
+    """Embed already-prepared images (no downscaling here). ``None`` on failure."""
+    embed_images = getattr(embedder, "embed_images", None)
+    if embed_images is None:
+        log.warning("embedder cannot embed images; skipping %d file(s)", len(paths))
+        return None
+    try:
+        return embed_images(paths)
+    except ServerUnavailable as exc:
+        log.warning("embeddings server unavailable: %s", exc)
+        return None
+    except EmbeddingError as exc:
+        log.warning("image embedding failed: %s", exc)
+        return None
+
+
 def _embed_image(
     embedder: Embedder, path: Path, media_cfg: dict[str, Any]
 ) -> list[list[float]] | None:
     """Embed one image file (downscaled first). Returns ``[vector]`` or ``None``."""
-    embed_images = getattr(embedder, "embed_images", None)
-    if embed_images is None:
-        log.warning("embedder cannot embed images; skipping %s", path)
-        return None
     try:
         with tempfile.TemporaryDirectory(prefix="feagle-media-") as tmp:
             prepared = downscale_image(
                 path, Path(tmp) / "image.png", max_dim=int(media_cfg["image_max_dim"])
             )
-            return embed_images([prepared])
+            return _embed_prepared(embedder, [prepared])
     except MediaError as exc:
         log.warning("cannot prepare image %s: %s", path, exc)
         return None
-    except ServerUnavailable as exc:
-        log.warning("embeddings server unavailable: %s", exc)
-        return None
-    except EmbeddingError as exc:
-        log.warning("image embedding failed for %s: %s", path, exc)
-        return None
+
+
+def _index_video_frames(
+    path: Path,
+    media_cfg: dict[str, Any],
+    embedder: Embedder | None,
+    *,
+    allow_image: bool,
+) -> tuple[list[Chunk], list[list[float]] | None]:
+    """Extract frames and build one chunk per frame (with its timestamp)."""
+    with tempfile.TemporaryDirectory(prefix="feagle-video-") as tmp:
+        frames = extract_frames(
+            path,
+            Path(tmp),
+            interval=float(media_cfg["video_frame_interval"]),
+            max_frames=int(media_cfg["video_max_frames"]),
+            max_dim=int(media_cfg["image_max_dim"]),
+        )
+        chunks = [
+            Chunk(seq=index, page=None, line=None, body="", time_ms=time_ms)
+            for index, (time_ms, _frame) in enumerate(frames)
+        ]
+        vectors: list[list[float]] | None = None
+        if embedder is not None and chunks and allow_image:
+            vectors = _embed_prepared(embedder, [frame for _time, frame in frames])
+        return chunks, vectors
 
 
 def index_file(
@@ -257,31 +296,54 @@ def index_file(
 
     media_cfg = cfg.get("media") or {}
     media_images = bool(media_cfg.get("images"))
-    is_image = candidate.path.suffix.lower() in IMAGE_SUFFIXES
+    media_video = bool(media_cfg.get("video"))
+    suffix = candidate.path.suffix.lower()
+    is_image = suffix in IMAGE_SUFFIXES
+    is_video = suffix in VIDEO_SUFFIXES
 
     limit = (
         index_cfg["max_pdf_file_size_mb"] if candidate.path.suffix.lower() == ".pdf"
         else index_cfg["max_file_size_mb"]
     ) * 1024 * 1024
 
+    chunks: list[Chunk] = []
+    vectors: list[list[float]] | None = None
     try:
-        extracted = extract(
-            candidate.path,
-            max_bytes=limit,
-            ocr=index_cfg["ocr"],
-            ocr_images=index_cfg["ocr_images"],
-            media_images=media_images,
-            ocr_langs=index_cfg["ocr_langs"],
-            ocr_dpi=index_cfg["ocr_dpi"],
-            ocr_min_chars=index_cfg["ocr_min_chars"],
-            ocr_max_pages=index_cfg["ocr_max_pages"],
-        )
-        if is_image and media_images:
-            # One image = one chunk/vector, whatever the OCR text length is.
-            text = extracted.pages[0] if extracted.pages else ""
-            chunks = [_image_chunk(text)]
+        if is_video and media_video:
+            if not (ffmpeg_available() and ffprobe_available()):
+                raise UnsupportedFile(f"video indexing needs ffmpeg: {candidate.path}")
+            chunks, vectors = _index_video_frames(
+                candidate.path, media_cfg, embedder, allow_image=allow_image
+            )
+            if not chunks:
+                raise UnsupportedFile(f"no frames extracted: {candidate.path}")
         else:
-            chunks = chunk_extracted(extracted)[: index_cfg["max_chunks_per_file"]]
+            extracted = extract(
+                candidate.path,
+                max_bytes=limit,
+                ocr=index_cfg["ocr"],
+                ocr_images=index_cfg["ocr_images"],
+                media_images=media_images,
+                ocr_langs=index_cfg["ocr_langs"],
+                ocr_dpi=index_cfg["ocr_dpi"],
+                ocr_min_chars=index_cfg["ocr_min_chars"],
+                ocr_max_pages=index_cfg["ocr_max_pages"],
+            )
+            if is_image and media_images:
+                # One image = one chunk/vector, whatever the OCR text length is.
+                text = extracted.pages[0] if extracted.pages else ""
+                chunks = [_image_chunk(text)]
+            else:
+                chunks = chunk_extracted(extracted)[: index_cfg["max_chunks_per_file"]]
+            # Embed before touching the database: never hold the write lock during I/O.
+            if embedder is not None and chunks:
+                if is_image and media_images:
+                    if allow_image:
+                        vectors = _embed_image(embedder, candidate.path, media_cfg)
+                else:
+                    vectors = _embed(
+                        embedder, [(chunk.body, candidate.path.stem) for chunk in chunks]
+                    )
     except UnsupportedFile as exc:
         with conn:
             _upsert_file(conn, path, candidate, digest, state="unsupported", error=str(exc))
@@ -291,15 +353,11 @@ def index_file(
         with conn:
             _upsert_file(conn, path, candidate, digest, state="error", error=str(exc))
         return "error", 0, 0
-
-    # Embed before touching the database: never hold the write lock during I/O.
-    vectors: list[list[float]] | None = None
-    if embedder is not None and chunks:
-        if is_image and media_images:
-            if allow_image:
-                vectors = _embed_image(embedder, candidate.path, media_cfg)
-        else:
-            vectors = _embed(embedder, [(chunk.body, candidate.path.stem) for chunk in chunks])
+    except MediaError as exc:
+        log.warning("media extraction failed for %s: %s", candidate.path, exc)
+        with conn:
+            _upsert_file(conn, path, candidate, digest, state="error", error=str(exc))
+        return "error", 0, 0
 
     if embedder is not None:
         db.ensure_vec_table(conn, embedder.dim, model_id=cfg["embeddings"]["model"])
@@ -359,8 +417,15 @@ def backfill(
             continue
 
         media_cfg = cfg.get("media") or {}
-        is_image = Path(row["path"]).suffix.lower() in IMAGE_SUFFIXES
-        if is_image and media_cfg.get("images"):
+        suffix = Path(row["path"]).suffix.lower()
+        if suffix in VIDEO_SUFFIXES and media_cfg.get("video"):
+            _frame_chunks, vectors = _index_video_frames(
+                Path(row["path"]), media_cfg, embedder, allow_image=True
+            )
+            if vectors is None or len(vectors) != len(chunks):
+                log.warning("cannot backfill video %s", row["path"])
+                break
+        elif suffix in IMAGE_SUFFIXES and media_cfg.get("images"):
             vectors = _embed_image(embedder, Path(row["path"]), media_cfg)
         else:
             vectors = _embed(
@@ -395,11 +460,15 @@ def backfill(
 
 def _build_scanner(cfg: dict[str, Any]) -> Scanner:
     index_cfg = cfg["index"]
-    media_images = bool((cfg.get("media") or {}).get("images"))
+    media_cfg = cfg.get("media") or {}
+    media_images = bool(media_cfg.get("images"))
+    media_video = bool(media_cfg.get("video"))
     include_ext = list(index_cfg["include_ext"])
     if index_cfg["ocr_images"] or media_images:
         # Images are only worth indexing when OCR or image embeddings are on.
         include_ext += [ext for ext in IMAGE_SUFFIXES if ext not in include_ext]
+    if media_video:
+        include_ext += [ext for ext in VIDEO_SUFFIXES if ext not in include_ext]
     return Scanner(
         include_ext=include_ext,
         exclude_dirs=index_cfg["exclude_dirs"],
@@ -471,9 +540,11 @@ def index_roots(
     scanner = _build_scanner(cfg)
     seen: set[str] = set()
 
-    media_images = bool((cfg.get("media") or {}).get("images"))
-    image_budget = int((cfg.get("media") or {}).get("images_per_run", 0))
-    limit_images = media_images and image_budget > 0
+    media_cfg = cfg.get("media") or {}
+    media_images = bool(media_cfg.get("images"))
+    media_video = bool(media_cfg.get("video"))
+    image_budget = int(media_cfg.get("images_per_run", 0))
+    limit_media = (media_images or media_video) and image_budget > 0
 
     for candidate in scanner.iter_files(active):
         if pause_check is not None:
@@ -484,12 +555,15 @@ def index_roots(
                 break
         stats.scanned += 1
         seen.add(_canonical(candidate.path))
-        is_image = candidate.path.suffix.lower() in IMAGE_SUFFIXES
-        allow_image = (not is_image) or (not limit_images) or image_budget > 0
+        suffix = candidate.path.suffix.lower()
+        is_media = (suffix in IMAGE_SUFFIXES and media_images) or (
+            suffix in VIDEO_SUFFIXES and media_video
+        )
+        allow_image = (not is_media) or (not limit_media) or image_budget > 0
         outcome, written, inserted = index_file(
             conn, candidate, cfg, force=full, embedder=embedder, allow_image=allow_image
         )
-        if is_image and limit_images and outcome == "reindexed" and inserted > 0:
+        if is_media and limit_media and outcome == "reindexed" and inserted > 0:
             image_budget -= 1
         if outcome == "unchanged":
             stats.unchanged += 1

@@ -15,7 +15,7 @@ from typing import Any
 
 from .. import db, paths
 from ..picker import app_items, hit_key, run_pick
-from .cmd_search import search_best_effort
+from .cmd_search import _location, search_best_effort
 
 SNIPPET_CHARS = 120
 
@@ -44,12 +44,7 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
             for index, item in enumerate(result["results"]):
                 key = hit_key(item, index)
                 hits_by_key[key] = item
-                location = item["path"]
-                if item.get("line"):
-                    location += f":{item['line']}"
-                if item.get("page"):
-                    location += f" (page {item['page']})"
-                items.append((key, f"{location}  {item['snippet']}"))
+                items.append((key, f"{_location(item)}  {item['snippet']}"))
     elif not args.no_files:
         if not paths.db_path().exists():
             print(

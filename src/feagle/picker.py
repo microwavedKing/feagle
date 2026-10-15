@@ -71,12 +71,16 @@ def run_pick(
     path = Path(hit["path"]) if hit is not None else Path(choice)
     if not path.exists():
         return 0
+    time_ms = None
+    if hit is not None and hit.get("time") is not None:
+        time_ms = int(round(hit["time"] * 1000))
     try:
         open_result(
             cfg["openers"],
             path,
             line=None if hit is None else hit.get("line"),
             page=None if hit is None else hit.get("page"),
+            time_ms=time_ms,
         )
     except OpenError as exc:
         log.error("%s", exc)

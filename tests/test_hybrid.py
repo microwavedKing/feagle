@@ -20,7 +20,7 @@ def conn(tmp_path):
     connection.close()
 
 
-def add(conn, path, body, vector, *, page=None, line=None):
+def add(conn, path, body, vector, *, page=None, line=None, time_ms=None):
     now = int(time.time())
     cur = conn.execute(
         "INSERT INTO files(path, size, mtime_ns, state, updated_at) VALUES(?,?,?,'ok',?)",
@@ -28,8 +28,8 @@ def add(conn, path, body, vector, *, page=None, line=None):
     )
     file_id = cur.lastrowid
     cur = conn.execute(
-        "INSERT INTO chunks(file_id, seq, page, line, body) VALUES(?,?,?,?,?)",
-        (file_id, 0, page, line, body),
+        "INSERT INTO chunks(file_id, seq, page, line, time_ms, body) VALUES(?,?,?,?,?,?)",
+        (file_id, 0, page, line, time_ms, body),
     )
     chunk_id = cur.lastrowid
     conn.execute(
@@ -174,3 +174,9 @@ def test_hybrid_matches_russian_word_forms(conn):
         conn, "книги", query_vector=[1.0, 0.0, 0.0], limit=5, candidates=10
     )
     assert target in [h.chunk_id for h in hits]
+
+
+def test_hybrid_hit_carries_time_ms(conn):
+    add(conn, "/d/clip.mp4", "", [1.0, 0.0, 0.0], time_ms=42000)
+    hits = hybrid.search_hybrid(conn, "zzz", query_vector=[1.0, 0.0, 0.0], limit=5, candidates=5)
+    assert hits[0].time_ms == 42000

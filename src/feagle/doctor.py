@@ -308,8 +308,8 @@ def check_media(cfg: dict[str, Any]) -> Check:
     from .indexer import media
 
     media_cfg = cfg.get("media") or {}
-    if not media_cfg.get("images"):
-        return Check("media", "info", "image embeddings disabled")
+    if not (media_cfg.get("images") or media_cfg.get("video")):
+        return Check("media", "info", "image/video embeddings disabled")
     mmproj = resolve_mmproj(cfg)
     if mmproj is None or not mmproj.exists():
         return Check(
@@ -318,10 +318,18 @@ def check_media(cfg: dict[str, Any]) -> Check:
         )
     if not media.ffmpeg_available():
         return Check(
-            "media", "warn", "images on, but ffmpeg is missing (no downscaling)",
+            "media", "warn", "media on, but ffmpeg is missing (no frames/downscaling)",
             "sudo pacman -S ffmpeg",
         )
-    return Check("media", "ok", f"images on; mmproj={mmproj.name}")
+    kinds = "+".join(
+        name
+        for name, on in (
+            ("images", media_cfg.get("images")),
+            ("video", media_cfg.get("video")),
+        )
+        if on
+    )
+    return Check("media", "ok", f"{kinds} on; mmproj={mmproj.name}")
 
 
 def check_launcher(cfg: dict[str, Any]) -> Check:

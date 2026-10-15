@@ -24,6 +24,7 @@ SELECT c.id AS chunk_id,
        f.path AS path,
        c.page AS page,
        c.line AS line,
+       c.time_ms AS time_ms,
        c.body AS body
 FROM chunks_fts
 JOIN chunks c ON c.id = chunks_fts.chunk_id
@@ -32,6 +33,9 @@ WHERE chunks_fts MATCH ?
 ORDER BY score ASC
 LIMIT ?
 """
+
+#: Same query without ``time_ms`` (an index not yet migrated to schema v3).
+_SELECT_LEGACY = _SELECT.replace("c.time_ms AS time_ms", "NULL AS time_ms")
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,7 @@ class SearchHit:
     page: int | None
     line: int | None
     snippet: str
+    time_ms: int | None = None
 
 
 def fts_terms(query: str) -> list[str]:
@@ -63,6 +68,7 @@ def _rows_to_hits(rows: list[sqlite3.Row]) -> list[SearchHit]:
             page=row["page"],
             line=row["line"],
             snippet=_snippet(row["body"]),
+            time_ms=row["time_ms"],
         )
         for row in rows
     ]
@@ -73,12 +79,19 @@ def _snippet(body: str, limit: int = SNIPPET_CHARS) -> str:
     return flat[:limit]
 
 
+def _select_sql(conn: sqlite3.Connection) -> str:
+    from .. import db
+
+    return _SELECT if db.has_column(conn, "chunks", "time_ms") else _SELECT_LEGACY
+
+
 def _query(
     conn: sqlite3.Connection, terms: list[str], *, column: str, limit: int, fallback_or: bool
 ) -> list[sqlite3.Row]:
-    rows = conn.execute(_SELECT, (_match_expression(terms, "AND", column), limit)).fetchall()
+    select = _select_sql(conn)
+    rows = conn.execute(select, (_match_expression(terms, "AND", column), limit)).fetchall()
     if not rows and fallback_or and len(terms) > 1:
-        rows = conn.execute(_SELECT, (_match_expression(terms, "OR", column), limit)).fetchall()
+        rows = conn.execute(select, (_match_expression(terms, "OR", column), limit)).fetchall()
     return rows
 
 

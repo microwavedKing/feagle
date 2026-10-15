@@ -83,9 +83,9 @@ def resolve_model(cfg: dict[str, Any]) -> tuple[Path, ModelSpec | None]:
 
 
 def resolve_mmproj(cfg: dict[str, Any]) -> Path | None:
-    """Return the multimodal projector path when image indexing is enabled."""
+    """Return the multimodal projector path when image/video indexing is enabled."""
     media = cfg.get("media") or {}
-    if not media.get("images"):
+    if not (media.get("images") or media.get("video")):
         return None
     name = media.get("mmproj") or "embeddinggemma-2-mmproj-q8"
     spec = MMPROJ_PRESETS.get(name)

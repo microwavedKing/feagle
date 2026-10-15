@@ -163,6 +163,7 @@ class QueryEngine:
                     "path": hit.path,
                     "page": hit.page,
                     "line": hit.line,
+                    "time": hit.time_ms / 1000 if hit.time_ms is not None else None,
                     "snippet": hit.snippet,
                     "chunk_id": hit.chunk_id,
                 }

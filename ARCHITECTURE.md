@@ -64,7 +64,7 @@
 | `scanner.py` | обход корней и фильтры | `Scanner.iter_files()` → `ScanCandidate`; скрытые, `exclude_dirs`, allowlist расширений, лимиты размера, симлинки не трогаем, `exclude_paths` (данные feagle) |
 | `extract.py` | текст/код/PDF/картинки | `extract()`, `Extracted(pages, kind, encoding)`; **фолбэк кодировок**; PDF через `pdftotext`; картинки — OCR (`kind="image"`) |
 | `ocr.py` | OCR страниц PDF и картинок | `ocr_pdf_page()` (pdftoppm→tesseract), `ocr_image()` (только tesseract), `ocr_pages()` с лимитами |
-| `media.py` | подготовка картинок для эмбеддингов | `image_dimensions()` (ffprobe), `downscale_image()` (ffmpeg, длинная сторона ≤ `image_max_dim`) |
+| `media.py` | подготовка картинок и видео | `image_dimensions()`/`downscale_image()` (ffprobe/ffmpeg), `extract_frames()` (кадр каждые N с, ≤ `video_max_frames`), `VIDEO_SUFFIXES` |
 | `chunker.py` | чанки ~1400 симв. | `chunk_extracted()`; прилипание к границе строки (точный `line`), перекрытие 150, cap 2200, PDF не пересекает страницу, у картинок `line`/`page` = None |
 | `pipeline.py` | инкрементальная синхронизация | `index_roots()`, `index_file()`, `backfill()`, `wipe()`; stat→hash→reindex, prune, `pause_check`, эмбеддинги **вне транзакции**, частичные векторы |
 | `watcher.py` | изменения ФС | обёртка `watchfiles`; источник инжектируется для тестов |
@@ -97,7 +97,7 @@
 | `apps.py` | XDG `.desktop` | `discover_apps()`, `parse_desktop_file()`, `launch()` (gtk-launch→gio→Exec) |
 | `launchers.py` | dmenu-адаптеры | fuzzel/wofi/rofi/tofi/walker/stdout; формат `key\tdisplay`; fuzzel с `--with-nth/--accept-nth` |
 | `picker.py` | общий выбор | `app_items()`, `run_pick()` (приложения → запуск, файлы → `open_result`) |
-| `openers.py` | открытие на позиции | шаблоны `{path}/{line}/{page}`, `shlex` без shell, `--dry-run` |
+| `openers.py` | открытие на позиции | шаблоны `{path}/{line}/{page}/{time}`, `shlex` без shell, `--dry-run` |
 
 ### CLI (`cli/`)
 
@@ -109,7 +109,7 @@
 `units.py` (шаблоны юнитов + установка, `using_packaged()`), `doctor.py` (проверки),
 `setup.py` (TOML-рендер, бэкап, план), `bench/` (тонкие CLI-обёртки над `feagle.bench`).
 
-## 3. Модель данных (SQLite, схема v2)
+## 3. Модель данных (SQLite, схема v3)
 
 ```sql
 meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)
@@ -119,8 +119,9 @@ files(id, path UNIQUE, size, mtime_ns, hash, state, error, embedded, updated_at)
 -- state: ok | error | unsupported ; embedded: 1 = векторы у всех чанков
 -- path — realpath (дедуп между корнями)
 
-chunks(id, file_id→files ON DELETE CASCADE, seq, page, line, body)
--- UNIQUE(file_id, seq) ; page 1-based для PDF, line 1-based для текста
+chunks(id, file_id→files ON DELETE CASCADE, seq, page, line, time_ms, body)
+-- UNIQUE(file_id, seq) ; page 1-based для PDF, line 1-based для текста,
+-- time_ms — таймкод кадра видео (мс), у остальных NULL
 
 chunks_fts USING fts5(body, stem, chunk_id UNINDEXED, tokenize='unicode61 remove_diacritics 2')
 -- body — точный текст; stem — только кириллические стемы (иначе пусто)
@@ -135,6 +136,8 @@ chunks_vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[DIM])
 Миграции: `migrate()` по `meta.schema_version`.
 **v1 → v2** — пересоздание `chunks_fts` с колонкой `stem` и пересчёт стемов **из уже
 сохранённых чанков** (файлы не перечитываются).
+**v2 → v3** — `ALTER TABLE chunks ADD COLUMN time_ms` (таймкоды медиа; идемпотентно,
+проверяется по `PRAGMA table_info`).
 
 ## 4. Протоколы и файлы взаимодействия
 
@@ -204,6 +207,11 @@ stat → сравнение с БД (`size`,`mtime_ns`,`state=ok`) → инач�
 обрабатывается не более `images_per_run` (остальные добирает `backfill`). Без
 `ffmpeg`/`mmproj` картинка пропускается с предупреждением.
 
+**Видео** (`[media].video`): `ffmpeg` извлекает кадры (`video_frame_interval`,
+≤ `video_max_frames`), каждый кадр = чанк с `time_ms` и вектор (image-эмбеддинг);
+тела чанков пусты (полнотекстового поиска по видео нет). Результат несёт таймкод,
+`open` подставляет `{time}`.
+
 **Поиск**: CLI → (если запущен) `queryd`, иначе в процессе. `auto/hybrid`: эмбеддинг
 запроса + FTS(body) + FTS(stem) + KNN → RRF → отсечение `max_distance` → лимит
 `max_per_file` → топ-N. `fts`: FTS(body, с OR-фолбэком) + FTS(stem) → RRF.
@@ -230,7 +238,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 
 ## 7. Тесты
 
-- 37 файлов в `tests/`, ~391 тестов. Запуск: `.venv/bin/pytest -q`.
+- 38 файлов в `tests/`, ~469 тестов. Запуск: `.venv/bin/pytest -q`.
 - **Гейты `skipif`**: тесты, требующие `llama-server`/модели (`FEAGLE_RUN_MODEL_TESTS=1`),
   `pdftotext`, `tesseract`, `ocr_available()` — скипаются, поэтому CI проходит на
   чистом Ubuntu (без poppler/tesseract/llama).
@@ -268,6 +276,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 22 | `AGENTS.md`/`RESEARCH.md` — вне git (`.gitignore`) | внутренние документы, не для публики | `.gitignore` |
 | 23 | OCR картинок за отдельным флагом `[index].ocr_images`, только `tesseract` (без `pdftoppm`) | без OCR/эмбеддингов картинки не дают текста; отдельный флаг не навязывает их тем, кому нужен только PDF-OCR, а рендерер для картинок не нужен | `config.DEFAULTS`, `pipeline._build_scanner`, `extract.extract_image` |
 | 24 | Поиск картинок: `[media].images` (opt-in), «1 файл = 1 чанк/вектор», предуменьшение `ffmpeg` (≤ `image_max_dim`), лимит `images_per_run` за проход, `--mmproj` только при включённых медиа | на CPU image-эмбеддинг дорог (десятки секунд на полный размер) и ест RAM; переиспользование `chunks_vec` не требует схемы v3; для текста на картинке дешевле OCR | `config.DEFAULTS`, `pipeline`, `client.embed_images`, `supervisor`, `indexer/media.py` |
+| 25 | Видео: `[media].video`, кадры `ffmpeg` → чанк с `time_ms` (схема v3) + image-вектор; `{time}` в `[openers]`, `open +N` = секунды для видео | таймкод нужен для перехода к моменту; отдельная колонка чище, чем переиспользовать `page`/`line`; текста в видео нет, поэтому только семантика | `db` (v3), `indexer/media.extract_frames`, `pipeline`, `openers`, `cmd_open` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 

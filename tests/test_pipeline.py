@@ -330,6 +330,46 @@ def test_backfill_embeds_media_images(root, conn, monkeypatch):
     assert conn.execute("SELECT COUNT(*) AS n FROM chunks_vec").fetchone()["n"] == 1
 
 
+# -- video -----------------------------------------------------------------
+
+
+def test_video_is_indexed_as_frames_with_timestamps(root, conn, monkeypatch):
+    (root / "clip.mp4").write_bytes(b"MP4")
+    monkeypatch.setattr(pipeline, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(pipeline, "ffprobe_available", lambda: True)
+
+    def fake_frames(path, dest, *, interval, max_frames, max_dim):
+        dest = Path(dest)
+        frames = []
+        for i in range(3):
+            frame = dest / f"frame_{i:05d}.png"
+            frame.write_bytes(b"PNG")
+            frames.append((i * 10000, frame))
+        return frames
+
+    monkeypatch.setattr(pipeline, "extract_frames", fake_frames)
+    embedder = FakeImageEmbedder()
+
+    stats = pipeline.index_roots(
+        conn, enable_media(make_cfg(root), video=True), embedder=embedder
+    )
+
+    assert stats.reindexed == 1
+    times = [row["time_ms"] for row in conn.execute("SELECT time_ms FROM chunks ORDER BY seq")]
+    assert times == [0, 10000, 20000]
+    assert conn.execute("SELECT COUNT(*) AS n FROM chunks_vec").fetchone()["n"] == 3
+    assert len(embedder.seen) == 3
+
+
+def test_video_without_ffmpeg_is_unsupported(root, conn, monkeypatch):
+    (root / "clip.mp4").write_bytes(b"MP4")
+    monkeypatch.setattr(pipeline, "ffmpeg_available", lambda: False)
+    stats = pipeline.index_roots(conn, enable_media(make_cfg(root), video=True))
+
+    assert stats.unsupported == 1
+    assert conn.execute("SELECT state FROM files").fetchone()["state"] == "unsupported"
+
+
 def test_pause_check_stops_the_run(root, conn):
     for i in range(5):
         (root / f"f{i}.txt").write_text(f"content {i}", encoding="utf-8")

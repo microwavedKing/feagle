@@ -66,6 +66,7 @@ def test_custom_opener_extensions_do_not_warn(tmp_path, caplog):
         ("[index]\nocr_images = 'yes'\n", "ocr_images"),
         ("[media]\nimages = 'yes'\n", "images"),
         ("[media]\nimage_max_dim = -1\n", "media.image_max_dim"),
+        ("[media]\nvideo_max_frames = 0\n", "media.video_max_frames"),
     ],
 )
 def test_invalid_values_raise(tmp_path, snippet, expected_key):

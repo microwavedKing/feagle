@@ -27,6 +27,7 @@ class Chunk:
     page: int | None
     line: int | None
     body: str
+    time_ms: int | None = None
 
 
 def _find_break(text: str, start: int, end: int, target: int) -> int:
