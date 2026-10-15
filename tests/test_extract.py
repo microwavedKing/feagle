@@ -157,6 +157,18 @@ def test_image_extensions_are_recognized(tmp_path, monkeypatch):
         assert extract(path, ocr_images=True).kind == "image"
 
 
+def test_image_media_only_has_empty_text(tmp_path, monkeypatch):
+    path = tmp_path / "shot.png"
+    path.write_bytes(b"PNG")
+    monkeypatch.setattr(
+        "feagle.indexer.extract.ocr_image",
+        lambda *a, **k: pytest.fail("media-only images must not be OCR'd"),
+    )
+    result = extract(path, media_images=True)
+    assert result.kind == "image"
+    assert result.pages == ("",)
+
+
 def test_pdf_without_poppler_is_unsupported(tmp_path, monkeypatch):
     path = tmp_path / "doc.pdf"
     path.write_bytes(b"%PDF-1.7")

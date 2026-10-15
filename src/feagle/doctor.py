@@ -303,6 +303,27 @@ def check_ocr(cfg: dict[str, Any]) -> Check:
     return Check("ocr", "ok", f"{detail}; languages: {', '.join(wanted)}")
 
 
+def check_media(cfg: dict[str, Any]) -> Check:
+    from .embeddings.service import resolve_mmproj
+    from .indexer import media
+
+    media_cfg = cfg.get("media") or {}
+    if not media_cfg.get("images"):
+        return Check("media", "info", "image embeddings disabled")
+    mmproj = resolve_mmproj(cfg)
+    if mmproj is None or not mmproj.exists():
+        return Check(
+            "media", "warn", f"mmproj not found: {mmproj}",
+            "download the mmproj file or set [media].mmproj",
+        )
+    if not media.ffmpeg_available():
+        return Check(
+            "media", "warn", "images on, but ffmpeg is missing (no downscaling)",
+            "sudo pacman -S ffmpeg",
+        )
+    return Check("media", "ok", f"images on; mmproj={mmproj.name}")
+
+
 def check_launcher(cfg: dict[str, Any]) -> Check:
     program = cfg["launcher"]["program"]
     candidates = ("fuzzel", "wofi", "rofi", "tofi", "walker")
@@ -395,6 +416,7 @@ def run_checks(cfg: dict[str, Any], *, verify_model_hash: bool = True) -> list[C
         check_embedding_dim(cfg),
         check_pdftotext(),
         check_ocr(cfg),
+        check_media(cfg),
         check_launcher(cfg),
         check_power(),
         check_inotify(),

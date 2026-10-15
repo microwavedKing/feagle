@@ -144,3 +144,44 @@ def test_non_200_raises_embedding_error():
 def test_discover_dim():
     client = make_client(echo_handler(dim=7))
     assert client.discover_dim() == 7
+
+
+# -- images (multimodal) ---------------------------------------------------
+
+
+def test_embed_images_uses_content_parts(tmp_path):
+    seen = []
+    client = make_client(echo_handler(dim=3, seen=seen))
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"PNG")
+
+    vectors = client.embed_images([image])
+    assert vectors == [[1.0, 1.0, 1.0]]
+    part = seen[0][0]
+    assert part["content"][0]["type"] == "image_url"
+    assert part["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_embed_images_batches_are_capped(tmp_path):
+    seen = []
+    client = make_client(echo_handler(seen=seen), batch_size=16)
+    images = []
+    for i in range(6):
+        path = tmp_path / f"{i}.jpg"
+        path.write_bytes(b"J")
+        images.append(path)
+
+    vectors = client.embed_images(images)
+    assert len(vectors) == 6
+    assert [len(batch) for batch in seen] == [4, 2]  # IMAGE_BATCH_SIZE = 4
+
+
+def test_embed_images_empty_list():
+    assert make_client(echo_handler()).embed_images([]) == []
+
+
+def test_embed_images_applies_mrl(tmp_path):
+    client = make_client(echo_handler(dim=4), mrl_dim=2)
+    image = tmp_path / "shot.webp"
+    image.write_bytes(b"W")
+    assert len(client.embed_images([image])[0]) == 2

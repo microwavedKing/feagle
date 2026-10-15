@@ -10,8 +10,9 @@ telemetry.
 
 > **Status:** early development (`0.1.1`). Full-text and semantic search work,
 > Russian word forms are matched through stemming, scanned PDFs and images can be
-> OCR'd, results open at a line/page, `feagle pick` drives a launcher, and there
-> are systemd user units, `feagle setup`, `feagle doctor`, benchmarks and
+> OCR'd, images can be found by a text description (opt-in multimodal
+> embeddings), results open at a line/page, `feagle pick` drives a launcher, and
+> there are systemd user units, `feagle setup`, `feagle doctor`, benchmarks and
 > packaging (`PKGBUILD` + CI). `llama-server` is optional — without it `feagle`
 > degrades gracefully to full-text search.
 
@@ -28,6 +29,8 @@ telemetry.
 - Optional, for OCR of scanned PDFs and images: `tesseract` plus the language
   data you need (`tesseract-data-eng`, `tesseract-data-rus`, ...); scanned PDF
   pages also need `pdftoppm` from `poppler`
+- Optional, for image search: the `mmproj` multimodal projector (preset
+  `embeddinggemma-2-mmproj-q8`, ~530 MiB) and `ffmpeg` (downscaling)
 - Optional: a dmenu-compatible launcher (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
 
 ## Install
@@ -239,6 +242,26 @@ so a word on a screenshot becomes searchable. On the reference laptop a
 page about 1.25 s. Without `tesseract` (or with the flag off) image files are
 skipped, not indexed as binary garbage.
 
+**Image search (semantic).** With `[media].images = true`, `feagle` also embeds
+the image itself through the multimodal projector, so a *text* query can find a
+picture ("a chart with a rising line", "screenshot of a terminal"). It shares the
+text vector space, so it needs the `mmproj` file and `ffmpeg`:
+
+```toml
+[media]
+images = true
+mmproj = "embeddinggemma-2-mmproj-q8"
+image_max_dim = 1024   # downscale the longest side before embedding
+images_per_run = 200   # cap per indexing pass (0 = unlimited)
+```
+
+Image embeddings are **expensive** on CPU: a full-size page takes tens of
+seconds, so images are downscaled first (a 384 px image encodes in about a
+second) and only a limited number are done per pass. It also makes the shared
+`llama-server` heavier (about 1 GiB of RAM). For text *inside* images, OCR
+(`ocr_images`) is far cheaper and gives exact word matches — enable both to get
+both.
+
 ## Launcher and hotkeys
 
 `feagle pick` opens one launcher window containing **applications first and then
@@ -420,6 +443,9 @@ corpus (**3.9× faster**, `stem_text` 7.8×, only 285 real stemmer calls). Searc
 - OCR is opt-in and slow: about a second per PDF page and ~0.65 s per image on
   the reference laptop. It needs `tesseract` plus language data; scanned PDF
   pages also need `pdftoppm` from `poppler`.
+- Image search is opt-in and CPU-heavy: it needs the `mmproj` file and `ffmpeg`,
+  images are downscaled before embedding, and the embeddings server then uses
+  about 1 GiB of RAM.
 - `sqlite-vec` is pre-1.0; deletions from `vec0` do not shrink the file until
   `feagle index --rebuild`.
 - Upgrading from an older index version migrates the schema automatically on the
@@ -446,10 +472,12 @@ their own license — see [NOTICE](NOTICE).
 и телеметрии.
 
 > **Статус:** ранняя разработка (`0.1.1`). Работают полнотекстовый и семантический
-> поиск, русские словоформы (стемминг), OCR сканированных PDF и картинок, открытие
-> на строке/странице, `feagle pick` в лаунчере, есть systemd-юниты, `feagle setup`,
-> `feagle doctor`, бенчмарки и упаковка (`PKGBUILD` + CI). `llama-server` —
-> опционален: без него `feagle` деградирует до полнотекстового поиска.
+> поиск, русские словоформы (стемминг), OCR сканированных PDF и картинок, поиск
+> картинок по текстовому описанию (опциональные мультимодальные эмбеддинги),
+> открытие на строке/странице, `feagle pick` в лаунчере, есть systemd-юниты,
+> `feagle setup`, `feagle doctor`, бенчмарки и упаковка (`PKGBUILD` + CI).
+> `llama-server` — опционален: без него `feagle` деградирует до полнотекстового
+> поиска.
 
 Пошаговое руководство (установка, настройка, хоткеи, решение проблем) —
 [`docs/INSTALL.ru.md`](docs/INSTALL.ru.md).
@@ -464,8 +492,11 @@ their own license — see [NOTICE](NOTICE).
     `llama.cpp-git` следит за master.
   - модель GGUF `embeddinggemma-2-q4` (по умолчанию) либо `embeddinggemma-2-q8`
 - `poppler` (`pdftotext`) — для индексации PDF
-- Для OCR сканированных PDF (опционально): `tesseract` и нужные языковые данные
-  (`tesseract-data-eng`, `tesseract-data-rus`, …)
+- Для OCR сканированных PDF и картинок (опционально): `tesseract` и нужные языковые
+  данные (`tesseract-data-eng`, `tesseract-data-rus`, …); страницам PDF нужен ещё
+  `pdftoppm` из `poppler`
+- Для поиска картинок (опционально): мультимодальный проектор `mmproj` (пресет
+  `embeddinggemma-2-mmproj-q8`, ~530 МиБ) и `ffmpeg` (уменьшение картинок)
 - Опционально: dmenu-совместимый лаунчер (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
 
 ## Установка
@@ -666,6 +697,26 @@ OCR картинок по умолчанию выключен. Распозна�
 `tesseract` (или при выключенном флаге) картинки пропускаются, а не индексируются
 как бинарный мусор.
 
+**Поиск картинок (семантический).** При `[media].images = true` `feagle` ещё и
+эмбеддит саму картинку через мультимодальный проектор, поэтому *текстовый* запрос
+находит изображение («график с растущей линией», «скриншот терминала»). Это то же
+векторное пространство, что и у текста, но нужны файл `mmproj` и `ffmpeg`:
+
+```toml
+[media]
+images = true
+mmproj = "embeddinggemma-2-mmproj-q8"
+image_max_dim = 1024   # уменьшить длинную сторону перед эмбеддингом
+images_per_run = 200   # лимит на проход индексации (0 = без лимита)
+```
+
+Эмбеддинги картинок на CPU **дорогие**: страница в полном размере считается
+десятки секунд, поэтому картинки сначала уменьшаются (384 px — примерно секунда),
+а за проход обрабатывается лишь ограниченное число. Общий `llama-server` при этом
+тяжелее (около 1 ГиБ RAM). Для текста *на* картинке OCR (`ocr_images`) намного
+дешевле и даёт точные совпадения слов — включайте оба флага, чтобы получить и то,
+и другое.
+
 ## Лаунчер и хоткеи
 
 `feagle pick` открывает одно окно лаунчера, в котором **сначала приложения, затем
@@ -846,6 +897,9 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 - OCR включается вручную, тяжёлый (примерно секунда на страницу PDF и ~0.65 с на
   картинку на эталонном ноутбуке) и требует `tesseract` с языковыми данными; для
   страниц сканированных PDF нужен ещё `pdftoppm` из poppler.
+- Поиск картинок включается вручную и тяжёл на CPU: нужны файл `mmproj` и `ffmpeg`,
+  картинки уменьшаются перед эмбеддингом, а сервер эмбеддингов начинает занимать
+  около 1 ГиБ RAM.
 - `sqlite-vec` — pre-1.0: удаления из `vec0` не уменьшают файл без
   `feagle index --rebuild`, а новая векторная таблица резервирует группу на 1024
   строки.

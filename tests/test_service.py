@@ -138,3 +138,57 @@ def test_build_supervisor_can_isolate_its_runtime_files(env, tmp_path):
     assert sup.pid_file == tmp_path / "llama.pid"
     assert sup.lock_file == tmp_path / "llama.lock"
     assert sup.touch_file == tmp_path / "llama.touch"
+
+
+# -- media / mmproj --------------------------------------------------------
+
+
+def test_resolve_mmproj_none_when_images_disabled(env):
+    assert service.resolve_mmproj(cfg_with()) is None
+
+
+def test_resolve_mmproj_preset(env):
+    cfg = cfg_with()
+    cfg["media"]["images"] = True
+    assert service.resolve_mmproj(cfg) == paths.models_dir() / "mmproj-embeddinggemma-2-Q8_0.gguf"
+
+
+def test_resolve_mmproj_explicit_path(env):
+    cfg = cfg_with()
+    cfg["media"].update(images=True, mmproj="~/some/mm.gguf")
+    assert service.resolve_mmproj(cfg) == Path("~/some/mm.gguf").expanduser()
+
+
+def test_build_supervisor_carries_mmproj_only_when_present(env):
+    cfg = cfg_with(model="embeddinggemma-2-q8")
+    cfg["media"]["images"] = True
+    assert service.build_supervisor(cfg).cfg.mmproj_path is None  # file is missing
+    target = paths.models_dir() / "mmproj-embeddinggemma-2-Q8_0.gguf"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"x")
+    assert service.build_supervisor(cfg).cfg.mmproj_path == target
+
+
+def test_start_requires_mmproj_when_images_enabled(env):
+    cfg = cfg_with(model="embeddinggemma-2-q8")
+    cfg["media"]["images"] = True
+    model = paths.models_dir() / "embeddinggemma-2-Q8_0.gguf"
+    model.parent.mkdir(parents=True, exist_ok=True)
+    model.write_bytes(b"x")
+    with pytest.raises(service.ModelMissingError, match="multimodal projector"):
+        service.EmbeddingService(cfg).start()
+
+
+def test_embedder_adapter_embeds_images(env, tmp_path):
+    touched = []
+    svc = service.EmbeddingService(
+        cfg_with(model="embeddinggemma-2-q8", server_url="http://127.0.0.1:9"),
+        transport=echo_transport(dim=5),
+    )
+    embedder = svc.start()
+    embedder.touch = lambda: touched.append(1)
+    image = tmp_path / "a.png"
+    image.write_bytes(b"PNG")
+    assert len(embedder.embed_images([image])[0]) == 5
+    assert touched == [1]
+    svc.close()

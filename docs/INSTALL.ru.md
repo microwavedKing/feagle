@@ -16,6 +16,7 @@
 | `llama-server` + модель | нет | семантический поиск «по смыслу» |
 | `poppler` (`pdftotext`) | нет | индексация PDF |
 | `tesseract` + языковые данные | нет | распознавание сканов PDF и картинок |
+| `ffmpeg` + `mmproj` | нет | поиск картинок по описанию (семантические эмбеддинги) |
 | лаунчер (`fuzzel`/`wofi`/`rofi`/`tofi`/`walker`) | нет | попап по хоткею |
 
 Без опциональных компонентов `feagle` не ломается: он просто работает на FTS и
@@ -216,6 +217,12 @@ model = "embeddinggemma-2-q4"  # пресет или абсолютный пут
 mrl_dim = 768                  # 768|512|256|128 (меньше — компактнее БД)
 idle_timeout_min = 10          # через сколько выгружать модель простоя
 
+[media]
+images = false                 # поиск картинок по описанию (нужны mmproj + ffmpeg)
+mmproj = "embeddinggemma-2-mmproj-q8"  # пресет или путь к mmproj .gguf
+image_max_dim = 1024           # уменьшить длинную сторону перед эмбеддингом
+images_per_run = 200           # лимит картинок на проход индексации (0 = без)
+
 [search]
 limit = 20
 mode = "auto"                  # auto | hybrid | fts
@@ -260,6 +267,7 @@ journalctl --user -u feagle-queryd -n 50                 # последние с
 | PDF не находятся | нет `pdftotext` | `sudo pacman -S poppler` |
 | Сканы не находятся | у PDF нет текстового слоя, OCR выключен | `[index].ocr = true` + `tesseract`, `pdftoppm` и `tesseract-data-rus/eng`, затем `feagle index` |
 | Текст с картинки/скриншота не находится | картинки не индексируются, OCR выключен | `[index].ocr_images = true` + `tesseract` и языковые данные, затем `feagle index` |
+| Картинка не находится по описанию | `[media].images` выключен, нет `mmproj`/`ffmpeg` | `[media].images = true`, положить `mmproj` (пресет `embeddinggemma-2-mmproj-q8`), поставить `ffmpeg`, затем `feagle index` |
 | Все результаты в режиме `fts` | нет `llama-server` или модели | `feagle doctor`; поставить AUR `llama.cpp-git`, модель — через `feagle setup` |
 | Первый запрос после простоя медленный (~1.5 с) | модель выгрузилась по простою | это нормально; уменьшить `idle_timeout_min` не нужно — выгрузка экономит память |
 | Русские словоформы не совпадают | стемминг выключен | `[search].stemming = "auto"` (по умолчанию) |

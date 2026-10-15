@@ -16,7 +16,7 @@ from typing import Any, Protocol
 from .. import paths
 from ..log import get_logger
 from .client import EmbeddingClient, EmbeddingError, ServerUnavailable
-from .presets import ModelSpec, spec_for
+from .presets import MMPROJ_PRESETS, ModelSpec, spec_for
 from .supervisor import LlamaSupervisor, SupervisorConfig
 
 log = get_logger("embeddings.service")
@@ -38,6 +38,8 @@ class Embedder(Protocol):
     def embed_documents(self, items: list[tuple[str, str | None]]) -> list[list[float]]: ...
 
     def embed_queries(self, texts: list[str]) -> list[list[float]]: ...
+
+    def embed_images(self, paths: list[Path]) -> list[list[float]]: ...
 
 
 @dataclass
@@ -64,6 +66,12 @@ class EmbedderAdapter:
             self.touch()
         return vectors
 
+    def embed_images(self, paths: list[Path]) -> list[list[float]]:
+        vectors = self.client.embed_images(paths)
+        if self.touch is not None:
+            self.touch()
+        return vectors
+
 
 def resolve_model(cfg: dict[str, Any]) -> tuple[Path, ModelSpec | None]:
     """Return the local model path and its preset (if the config names one)."""
@@ -72,6 +80,18 @@ def resolve_model(cfg: dict[str, Any]) -> tuple[Path, ModelSpec | None]:
     if spec is not None:
         return paths.models_dir() / spec.filename, spec
     return Path(name).expanduser(), None
+
+
+def resolve_mmproj(cfg: dict[str, Any]) -> Path | None:
+    """Return the multimodal projector path when image indexing is enabled."""
+    media = cfg.get("media") or {}
+    if not media.get("images"):
+        return None
+    name = media.get("mmproj") or "embeddinggemma-2-mmproj-q8"
+    spec = MMPROJ_PRESETS.get(name)
+    if spec is not None:
+        return paths.models_dir() / spec.filename
+    return Path(name).expanduser()
 
 
 def build_supervisor(
@@ -83,11 +103,13 @@ def build_supervisor(
 ) -> LlamaSupervisor:
     embeddings = cfg["embeddings"]
     model_path, _spec = resolve_model(cfg)
+    mmproj = resolve_mmproj(cfg)
     supervisor_cfg = SupervisorConfig(
         model_path=model_path,
         server_url=embeddings["server_url"],
         idle_timeout_min=embeddings["idle_timeout_min"],
         threads=embeddings["threads"],
+        mmproj_path=mmproj if (mmproj is not None and mmproj.exists()) else None,
         extra_args=list(embeddings["extra_args"]),
     )
     files: dict[str, Path] = {}
@@ -138,6 +160,13 @@ class EmbeddingService:
                 "run 'feagle setup' to download it, or set [embeddings].model "
                 "to an existing GGUF path"
             )
+        if not embeddings["server_url"]:
+            mmproj = resolve_mmproj(self.cfg)
+            if mmproj is not None and not mmproj.exists():
+                raise ModelMissingError(
+                    f"multimodal projector not found: {mmproj}\n"
+                    "download it or set [media].mmproj to an existing GGUF path"
+                )
 
         base_url = self.supervisor.ensure_running()
         self._client = self._make_client(base_url)

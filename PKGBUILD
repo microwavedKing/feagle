@@ -28,6 +28,7 @@ optdepends=(
   'tesseract: OCR for scanned PDFs'
   'tesseract-data-eng: English OCR data'
   'tesseract-data-rus: Russian OCR data'
+  'ffmpeg: image search (downscales images before embedding)'
   'fuzzel: launcher for "feagle pick"'
   'wofi: launcher for "feagle pick"'
   'rofi: launcher for "feagle pick" (Wayland support included since 2.0)'

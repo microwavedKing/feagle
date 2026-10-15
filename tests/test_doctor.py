@@ -112,7 +112,7 @@ def test_run_checks_returns_all_sections(env):
     names = [c.name for c in checks]
     for expected in ("python", "config", "xdg", "fts5", "sqlite-vec", "database",
                      "units", "queryd", "llama-server", "model", "pdftotext", "ocr",
-                     "launcher", "battery", "inotify", "cgroup", "disk"):
+                     "media", "launcher", "battery", "inotify", "cgroup", "disk"):
         assert expected in names
     assert all(c.status in ("ok", "warn", "fail", "info") for c in checks)
 
@@ -180,3 +180,32 @@ def test_check_ocr_missing_languages(monkeypatch):
     check = doctor.check_ocr(cfg)
     assert check.status == "warn"
     assert "missing languages" in check.message
+
+
+def test_check_media_disabled():
+    check = doctor.check_media(config.default_config())
+    assert check.status == "info"
+    assert "disabled" in check.message
+
+
+def test_check_media_missing_mmproj(env):
+    cfg = config.default_config()
+    cfg["media"]["images"] = True
+    check = doctor.check_media(cfg)
+    assert check.status == "warn"
+    assert "mmproj" in check.message
+
+
+def test_check_media_ok(env, monkeypatch):
+    from feagle import paths
+    from feagle.indexer import media
+
+    cfg = config.default_config()
+    cfg["media"]["images"] = True
+    target = paths.models_dir() / "mmproj-embeddinggemma-2-Q8_0.gguf"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"x")
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+    check = doctor.check_media(cfg)
+    assert check.status == "ok"
+    assert "mmproj" in check.message
