@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the schema-v3 `chunks.time_ms`; results carry a timestamp and `feagle open
   clip.mp4 +30` treats `+30` as seconds. The `{time}` opener placeholder expands
   to seconds (for example `mp4 = "mpv --start={time} {path}"`).
+- Audio search (opt-in): with `[media].audio = true`, audio is converted with
+  `ffmpeg` and transcribed with `whisper.cpp` (`whisper-cli`), and the transcript
+  is indexed as text (full-text and semantic) with per-segment timestamps. Audio
+  needs no `mmproj`, and full-text search works without `llama-server`.
 
 ## [0.1.1] - 2026-10-15
 
@@ -189,6 +193,10 @@ on Wayland.
   `feagle open clip.mp4 +30` трактует `+30` как секунды. Плейсхолдер `{time}` в
   `[openers]` раскрывается в секунды (например,
   `mp4 = "mpv --start={time} {path}"`).
+- Поиск по аудио (опционально): при `[media].audio = true` аудио конвертируется
+  через `ffmpeg` и транскрибируется `whisper.cpp` (`whisper-cli`), а транскрипт
+  индексируется как текст (полнотекстово и семантически) с таймкодами сегментов.
+  Аудио не требует `mmproj`, а полнотекстовый поиск работает и без `llama-server`.
 
 ## 0.1.1 (по-русски)
 

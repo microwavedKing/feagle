@@ -65,6 +65,7 @@
 | `extract.py` | текст/код/PDF/картинки | `extract()`, `Extracted(pages, kind, encoding)`; **фолбэк кодировок**; PDF через `pdftotext`; картинки — OCR (`kind="image"`) |
 | `ocr.py` | OCR страниц PDF и картинок | `ocr_pdf_page()` (pdftoppm→tesseract), `ocr_image()` (только tesseract), `ocr_pages()` с лимитами |
 | `media.py` | подготовка картинок и видео | `image_dimensions()`/`downscale_image()` (ffprobe/ffmpeg), `extract_frames()` (кадр каждые N с, ≤ `video_max_frames`), `VIDEO_SUFFIXES` |
+| `asr.py` | транскрипция аудио (whisper.cpp) | `transcribe()` (ffmpeg → 16 кГц WAV → `whisper-cli -oj`), `Segment(start_ms,end_ms,text)`, `AUDIO_SUFFIXES` |
 | `chunker.py` | чанки ~1400 симв. | `chunk_extracted()`; прилипание к границе строки (точный `line`), перекрытие 150, cap 2200, PDF не пересекает страницу, у картинок `line`/`page` = None |
 | `pipeline.py` | инкрементальная синхронизация | `index_roots()`, `index_file()`, `backfill()`, `wipe()`; stat→hash→reindex, prune, `pause_check`, эмбеддинги **вне транзакции**, частичные векторы |
 | `watcher.py` | изменения ФС | обёртка `watchfiles`; источник инжектируется для тестов |
@@ -188,7 +189,7 @@ llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
 `[index]` roots, include_ext, exclude_dirs, use_gitignore, лимиты, `rescan_interval_min`,
 `pause_on_battery`, `pause_on_loadavg`, `embed_batch_size`, `follow_symlinks`,
 `ocr*` (в т.ч. `ocr_images`); `[embeddings]` model, mrl_dim, server_url, idle_timeout_min, threads, extra_args;
-`[media]` images, mmproj, image_max_dim, images_per_run;
+`[media]` images, mmproj, image_max_dim, images_per_run, video, video_frame_interval, video_max_frames, audio, whisper_binary, whisper_model, audio_language;
 `[search]` limit, mode, candidates, rrf_k, stemming, max_distance, max_per_file;
 `[launcher]` program; `[openers]` (свободная таблица: расширение → шаблон).
 
@@ -211,6 +212,11 @@ stat → сравнение с БД (`size`,`mtime_ns`,`state=ok`) → инач�
 ≤ `video_max_frames`), каждый кадр = чанк с `time_ms` и вектор (image-эмбеддинг);
 тела чанков пусты (полнотекстового поиска по видео нет). Результат несёт таймкод,
 `open` подставляет `{time}`.
+
+**Аудио** (`[media].audio`): `ffmpeg` → 16 кГц моно WAV → `whisper-cli -oj`; каждый
+сегмент = чанк с `time_ms` и телом-транскриптом, эмбеддинги **текстовые**
+(`mmproj` не нужен, FTS работает даже без сервера). Без `whisper-cli`/`ffmpeg`
+файл пропускается.
 
 **Поиск**: CLI → (если запущен) `queryd`, иначе в процессе. `auto/hybrid`: эмбеддинг
 запроса + FTS(body) + FTS(stem) + KNN → RRF → отсечение `max_distance` → лимит
@@ -238,7 +244,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 
 ## 7. Тесты
 
-- 38 файлов в `tests/`, ~469 тестов. Запуск: `.venv/bin/pytest -q`.
+- 39 файлов в `tests/`, ~480 тестов. Запуск: `.venv/bin/pytest -q`.
 - **Гейты `skipif`**: тесты, требующие `llama-server`/модели (`FEAGLE_RUN_MODEL_TESTS=1`),
   `pdftotext`, `tesseract`, `ocr_available()` — скипаются, поэтому CI проходит на
   чистом Ubuntu (без poppler/tesseract/llama).
@@ -277,6 +283,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 23 | OCR картинок за отдельным флагом `[index].ocr_images`, только `tesseract` (без `pdftoppm`) | без OCR/эмбеддингов картинки не дают текста; отдельный флаг не навязывает их тем, кому нужен только PDF-OCR, а рендерер для картинок не нужен | `config.DEFAULTS`, `pipeline._build_scanner`, `extract.extract_image` |
 | 24 | Поиск картинок: `[media].images` (opt-in), «1 файл = 1 чанк/вектор», предуменьшение `ffmpeg` (≤ `image_max_dim`), лимит `images_per_run` за проход, `--mmproj` только при включённых медиа | на CPU image-эмбеддинг дорог (десятки секунд на полный размер) и ест RAM; переиспользование `chunks_vec` не требует схемы v3; для текста на картинке дешевле OCR | `config.DEFAULTS`, `pipeline`, `client.embed_images`, `supervisor`, `indexer/media.py` |
 | 25 | Видео: `[media].video`, кадры `ffmpeg` → чанк с `time_ms` (схема v3) + image-вектор; `{time}` в `[openers]`, `open +N` = секунды для видео | таймкод нужен для перехода к моменту; отдельная колонка чище, чем переиспользовать `page`/`line`; текста в видео нет, поэтому только семантика | `db` (v3), `indexer/media.extract_frames`, `pipeline`, `openers`, `cmd_open` |
+| 26 | Аудио: `[media].audio`, `ffmpeg` → 16 кГц WAV → `whisper-cli -oj`; сегмент = чанк с `time_ms` и текстом, **текстовые** эмбеддинги; `whisper_binary`/`whisper_model`/`audio_language` | ASR даёт текст с таймкодами → обычный FTS + семантика (не нужен `mmproj`); полнотекстовый поиск работает без `llama-server` | `indexer/asr.py`, `pipeline`, `config`, `doctor` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 
