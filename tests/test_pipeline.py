@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from feagle import config, db
-from feagle.indexer import extract, pipeline
+from feagle.indexer import asr, extract, pipeline
 from feagle.indexer.extract import ExtractionError
 from feagle.search.fts import search_fts
 
@@ -365,6 +365,45 @@ def test_video_without_ffmpeg_is_unsupported(root, conn, monkeypatch):
     (root / "clip.mp4").write_bytes(b"MP4")
     monkeypatch.setattr(pipeline, "ffmpeg_available", lambda: False)
     stats = pipeline.index_roots(conn, enable_media(make_cfg(root), video=True))
+
+    assert stats.unsupported == 1
+    assert conn.execute("SELECT state FROM files").fetchone()["state"] == "unsupported"
+
+
+# -- audio (ASR) -----------------------------------------------------------
+
+
+def test_audio_is_transcribed_into_timed_chunks(root, conn, monkeypatch):
+    (root / "talk.mp3").write_bytes(b"MP3")
+    monkeypatch.setattr(asr, "asr_available", lambda binary=None: True)
+    monkeypatch.setattr(
+        asr, "transcribe",
+        lambda path, **kwargs: [
+            asr.Segment(0, 2000, "Hello there"),
+            asr.Segment(2000, 4000, "General Kenobi"),
+        ],
+    )
+
+    stats = pipeline.index_roots(
+        conn, enable_media(make_cfg(root), audio=True), embedder=FakeImageEmbedder()
+    )
+
+    assert stats.reindexed == 1
+    rows = conn.execute("SELECT time_ms, body FROM chunks ORDER BY seq").fetchall()
+    assert [(r["time_ms"], r["body"]) for r in rows] == [
+        (0, "Hello there"),
+        (2000, "General Kenobi"),
+    ]
+    assert conn.execute("SELECT COUNT(*) AS n FROM chunks_vec").fetchone()["n"] == 2
+    hits = search_fts(conn, "kenobi")
+    assert hits and hits[0].path.endswith("talk.mp3")
+    assert hits[0].time_ms == 2000
+
+
+def test_audio_without_whisper_is_unsupported(root, conn, monkeypatch):
+    (root / "talk.mp3").write_bytes(b"MP3")
+    monkeypatch.setattr(asr, "asr_available", lambda binary=None: False)
+    stats = pipeline.index_roots(conn, enable_media(make_cfg(root), audio=True))
 
     assert stats.unsupported == 1
     assert conn.execute("SELECT state FROM files").fetchone()["state"] == "unsupported"

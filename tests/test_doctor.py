@@ -208,4 +208,16 @@ def test_check_media_ok(env, monkeypatch):
     monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
     check = doctor.check_media(cfg)
     assert check.status == "ok"
-    assert "mmproj" in check.message
+    assert "images" in check.message
+
+
+def test_check_media_audio_missing_whisper(env, monkeypatch):
+    from feagle.indexer import asr, media
+
+    cfg = config.default_config()
+    cfg["media"]["audio"] = True
+    monkeypatch.setattr(asr, "whisper_available", lambda binary=None: False)
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+    check = doctor.check_media(cfg)
+    assert check.status == "warn"
+    assert "whisper-cli" in check.message

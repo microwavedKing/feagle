@@ -28,6 +28,7 @@ from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.service import Embedder
 from ..log import get_logger
+from . import asr
 from .chunker import MAX_CHARS, Chunk, chunk_extracted
 from .extract import ExtractionError, UnsupportedFile, extract
 from .media import (
@@ -251,6 +252,20 @@ def _index_video_frames(
         return chunks, vectors
 
 
+def _audio_chunks(path: Path, media_cfg: dict[str, Any], max_chunks: int) -> list[Chunk]:
+    """Transcribe ``path`` and build one chunk per spoken segment."""
+    segments = asr.transcribe(
+        path,
+        model=asr.resolve_model(media_cfg["whisper_model"]),
+        whisper=media_cfg.get("whisper_binary"),
+        language=str(media_cfg.get("audio_language", "auto")),
+    )
+    return [
+        Chunk(seq=index, page=None, line=None, body=segment.text, time_ms=segment.start_ms)
+        for index, segment in enumerate(segments[:max_chunks])
+    ]
+
+
 def index_file(
     conn: sqlite3.Connection,
     candidate: ScanCandidate,
@@ -297,9 +312,11 @@ def index_file(
     media_cfg = cfg.get("media") or {}
     media_images = bool(media_cfg.get("images"))
     media_video = bool(media_cfg.get("video"))
+    media_audio = bool(media_cfg.get("audio"))
     suffix = candidate.path.suffix.lower()
     is_image = suffix in IMAGE_SUFFIXES
     is_video = suffix in VIDEO_SUFFIXES
+    is_audio = suffix in asr.AUDIO_SUFFIXES
 
     limit = (
         index_cfg["max_pdf_file_size_mb"] if candidate.path.suffix.lower() == ".pdf"
@@ -317,6 +334,20 @@ def index_file(
             )
             if not chunks:
                 raise UnsupportedFile(f"no frames extracted: {candidate.path}")
+        elif is_audio and media_audio:
+            if not asr.asr_available(media_cfg.get("whisper_binary")):
+                raise UnsupportedFile(
+                    f"audio transcription needs whisper.cpp (whisper-cli) and ffmpeg: "
+                    f"{candidate.path}"
+                )
+            chunks = _audio_chunks(
+                candidate.path, media_cfg, index_cfg["max_chunks_per_file"]
+            )
+            # Spoken text is normal text: embed it like any document.
+            if embedder is not None and chunks:
+                vectors = _embed(
+                    embedder, [(chunk.body, candidate.path.stem) for chunk in chunks]
+                )
         else:
             extracted = extract(
                 candidate.path,
@@ -355,6 +386,11 @@ def index_file(
         return "error", 0, 0
     except MediaError as exc:
         log.warning("media extraction failed for %s: %s", candidate.path, exc)
+        with conn:
+            _upsert_file(conn, path, candidate, digest, state="error", error=str(exc))
+        return "error", 0, 0
+    except asr.AsrError as exc:
+        log.warning("transcription failed for %s: %s", candidate.path, exc)
         with conn:
             _upsert_file(conn, path, candidate, digest, state="error", error=str(exc))
         return "error", 0, 0
@@ -463,12 +499,15 @@ def _build_scanner(cfg: dict[str, Any]) -> Scanner:
     media_cfg = cfg.get("media") or {}
     media_images = bool(media_cfg.get("images"))
     media_video = bool(media_cfg.get("video"))
+    media_audio = bool(media_cfg.get("audio"))
     include_ext = list(index_cfg["include_ext"])
     if index_cfg["ocr_images"] or media_images:
         # Images are only worth indexing when OCR or image embeddings are on.
         include_ext += [ext for ext in IMAGE_SUFFIXES if ext not in include_ext]
     if media_video:
         include_ext += [ext for ext in VIDEO_SUFFIXES if ext not in include_ext]
+    if media_audio:
+        include_ext += [ext for ext in asr.AUDIO_SUFFIXES if ext not in include_ext]
     return Scanner(
         include_ext=include_ext,
         exclude_dirs=index_cfg["exclude_dirs"],

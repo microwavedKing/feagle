@@ -262,6 +262,17 @@ def test_open_video_positional_is_seconds(env, capsys):
     assert "mpv --start=30" in capsys.readouterr().out
 
 
+def test_open_audio_positional_is_seconds(env, capsys):
+    write_config(
+        env,
+        '[openers]\ndefault = "xdg-open {path}"\nwav = "mpv --start={time} {path}"\n',
+    )
+    target = env / "talk.wav"
+    target.write_bytes(b"x")
+    assert main(["open", str(target), "+10", "--dry-run"]) == 0
+    assert "mpv --start=10" in capsys.readouterr().out
+
+
 # -- search --pick ---------------------------------------------------------
 
 
