@@ -162,11 +162,42 @@ def test_resolve_mmproj_explicit_path(env):
 def test_build_supervisor_carries_mmproj_only_when_present(env):
     cfg = cfg_with(model="embeddinggemma-2-q8")
     cfg["media"]["images"] = True
-    assert service.build_supervisor(cfg).cfg.mmproj_path is None  # file is missing
+    # without the media role the projector is not used at all
+    assert service.build_supervisor(cfg).cfg.mmproj_path is None
+    assert service.build_supervisor(cfg).cfg.media is False
+    # with the media role it is carried when the file exists
+    assert service.build_supervisor(cfg, media=True).cfg.mmproj_path is None  # missing
     target = paths.models_dir() / "mmproj-embeddinggemma-2-Q8_0.gguf"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"x")
-    assert service.build_supervisor(cfg).cfg.mmproj_path == target
+    media_sup = service.build_supervisor(cfg, media=True)
+    assert media_sup.cfg.mmproj_path == target
+    assert media_sup.cfg.media is True
+
+
+def test_media_server_uses_separate_runtime_files(env):
+    cfg = cfg_with(model="embeddinggemma-2-q8")
+    text = service.build_supervisor(cfg).cfg.media
+    assert text is False
+    media = service.build_supervisor(cfg, media=True)
+    assert media.port_file.name == "llama-media.port"
+    assert media.touch_file.name == "llama-media.touch"
+    assert media.pid_file.name == "llama-media.pid"
+
+
+def test_media_enabled():
+    from feagle import config
+
+    cfg = config.default_config()
+    assert service.media_enabled(cfg) is False
+    cfg["media"]["images"] = True
+    assert service.media_enabled(cfg) is True
+    cfg["media"]["images"] = False
+    cfg["media"]["video"] = True
+    assert service.media_enabled(cfg) is True
+    cfg["media"]["video"] = False
+    cfg["media"]["audio"] = True  # audio uses whisper, not the media server
+    assert service.media_enabled(cfg) is False
 
 
 def test_start_requires_mmproj_when_images_enabled(env):
@@ -176,7 +207,17 @@ def test_start_requires_mmproj_when_images_enabled(env):
     model.parent.mkdir(parents=True, exist_ok=True)
     model.write_bytes(b"x")
     with pytest.raises(service.ModelMissingError, match="multimodal projector"):
-        service.EmbeddingService(cfg).start()
+        service.EmbeddingService(cfg, media=True).start()
+
+
+def test_text_service_does_not_require_mmproj(env):
+    # A text-only service must not demand the projector even when images are on.
+    cfg = cfg_with(model="embeddinggemma-2-q8", server_url="http://127.0.0.1:9")
+    cfg["media"]["images"] = True
+    svc = service.EmbeddingService(cfg, transport=echo_transport(dim=5))
+    assert svc.start().dim == 5
+    assert svc.supervisor.cfg.mmproj_path is None
+    svc.close()
 
 
 def test_embedder_adapter_embeds_images(env, tmp_path):

@@ -18,7 +18,12 @@ from .. import config, db, paths, setup, units
 from ..embeddings import presets
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.download import DownloadError, ensure_model, verify_pin
-from ..embeddings.service import EmbeddingService, ModelMissingError, resolve_model
+from ..embeddings.service import (
+    EmbeddingService,
+    ModelMissingError,
+    media_enabled,
+    resolve_model,
+)
 from ..indexer import pipeline
 
 _DEGRADE_ERRORS = (ModelMissingError, ServerUnavailable, EmbeddingError, OSError)
@@ -165,7 +170,7 @@ def _enable_units() -> bool:
 
 
 def _first_index(cfg: dict[str, Any]) -> None:
-    service = EmbeddingService(cfg)
+    service = EmbeddingService(cfg, media=media_enabled(cfg))
     embedder = None
     try:
         embedder = service.start()

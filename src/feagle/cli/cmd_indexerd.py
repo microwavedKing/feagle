@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..embeddings.client import EmbeddingError, ServerUnavailable
-from ..embeddings.service import EmbeddingService, ModelMissingError
+from ..embeddings.service import EmbeddingService, ModelMissingError, media_enabled
 from ..indexer.daemon import IndexerDaemon
 from ..indexer.watcher import Watcher
 
@@ -31,7 +31,7 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         )
         return 1
 
-    service = EmbeddingService(cfg)
+    service = EmbeddingService(cfg, media=media_enabled(cfg))
     try:
         service.start()
     except _DEGRADE_ERRORS as exc:

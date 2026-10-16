@@ -489,8 +489,9 @@ def test_indexerd_wires_reconnect_reset_and_idle_hook(env, tmp_path, monkeypatch
             captured["idle"] = True
 
     class FakeService:
-        def __init__(self, cfg):
+        def __init__(self, cfg, **kwargs):
             self.cfg = cfg
+            captured["service_kwargs"] = kwargs
             self.supervisor = FakeSupervisor()
 
         def start(self):
@@ -528,3 +529,49 @@ def test_indexerd_wires_reconnect_reset_and_idle_hook(env, tmp_path, monkeypatch
     kwargs["idle_hook"]()
     assert captured["idle"] is True
     assert captured["reset"] is True  # startup failure drops the broken embedder
+    assert captured["service_kwargs"].get("media") is False  # media off by default
+
+
+def test_indexerd_uses_the_media_server_when_images_are_on(env, tmp_path, monkeypatch):
+    import argparse
+
+    from feagle.cli import cmd_indexerd
+
+    captured = {}
+
+    class FakeSupervisor:
+        def stop_if_idle(self):
+            return False
+
+    class FakeService:
+        def __init__(self, cfg, **kwargs):
+            captured.update(kwargs)
+            self.supervisor = FakeSupervisor()
+
+        def start(self):
+            raise ServerUnavailable("down")
+
+        def ensure(self):
+            return "embedder"
+
+        def reset(self):
+            return None
+
+        def close(self, **kwargs):
+            return None
+
+    class FakeDaemon:
+        def __init__(self, cfg, **kwargs):
+            pass
+
+        def run_once(self):
+            return pipeline.IndexStats()
+
+    monkeypatch.setattr(cmd_indexerd, "EmbeddingService", FakeService)
+    monkeypatch.setattr(cmd_indexerd, "IndexerDaemon", FakeDaemon)
+
+    cfg = config.default_config()
+    cfg["media"]["images"] = True
+    args = argparse.Namespace(root=[str(tmp_path / "missing")], poll=False, once=True)
+    assert cmd_indexerd.run(args, cfg) == 0
+    assert captured.get("media") is True

@@ -173,9 +173,11 @@ llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
              # [--mmproj MMPROJ] — только при [media].images = true
 ```
 
-`indexerd` обращается к `llama-server` **напрямую** через `EmbeddingService` (HTTP), а
-не через сокет `queryd`: сервер общий для обоих демонов, а метка `llama.touch`
-координирует их простой.
+`indexerd` обращается к `llama-server` **напрямую** через `EmbeddingService` (HTTP),
+а не через сокет `queryd`. При включённых медиа это **отдельный медиа-сервер**
+(`--mmproj`, файлы `llama-media.*`), который индексатор поднимает и выгружает по
+простою; `queryd` держит лёгкий текстовый сервер (текстовым запросам проектор не
+нужен — векторы картинок уже в БД). Метка активности своя для каждой роли.
 
 ### Файлы координации в `$XDG_RUNTIME_DIR/feagle/`
 
@@ -185,6 +187,7 @@ llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
 | `llama.pid` | pid сервера (проверка «жив ли владелец», в т.ч. зомби) |
 | `llama.lock` | `flock` вокруг решения «переиспользовать или запускать» |
 | `llama.touch` | **общая метка активности**: любой процесс обновляет её на каждом эмбеддинге, владелец выгружает сервер только если её давно никто не трогал |
+| `llama-media.{port,pid,lock,touch}` | те же файлы для **медиа-сервера** (`--mmproj`), отдельно от текстового: `queryd` держит лёгкий текстовый сервер, а медиа-сервер поднимает/выгружает индексатор |
 | `queryd.sock` | сокет демона запросов (0600) |
 
 ### Конфиг (`~/.config/feagle/config.toml`)
@@ -288,6 +291,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 25 | Видео: `[media].video`, кадры `ffmpeg` → чанк с `time_ms` (схема v3) + image-вектор; `{time}` в `[openers]`, `open +N` = секунды для видео | таймкод нужен для перехода к моменту; отдельная колонка чище, чем переиспользовать `page`/`line`; текста в видео нет, поэтому только семантика | `db` (v3), `indexer/media.extract_frames`, `pipeline`, `openers`, `cmd_open` |
 | 26 | Аудио: `[media].audio`, `ffmpeg` → 16 кГц WAV → `whisper-cli -oj`; сегмент = чанк с `time_ms` и текстом, **текстовые** эмбеддинги; `whisper_binary`/`whisper_model`/`audio_language` | ASR даёт текст с таймкодами → обычный FTS + семантика (не нужен `mmproj`); полнотекстовый поиск работает без `llama-server` | `indexer/asr.py`, `pipeline`, `config`, `doctor` |
 | 27 | Лаунчер: `queryd` отдаёт `warmup` (фон) и `launcher` (готовый список, приложения первыми); двухфазный поиск на стороне клиента (`fts` сразу, `hybrid` после debounce); кэш `.desktop` в `QueryEngine` | холодный старт `llama-server` не должен блокировать ввод; тонкий QML — логика скоринга в Python; лаунчеры (wofi/rofi) не сообщают запрос | `search/queryd.py`, `apps.match_apps`, `quickshell/` |
+| 28 | Разделение серверов: медиа-сервер (`--mmproj`, файлы `llama-media.*`) поднимает только индексатор (`EmbeddingService(media=True)`), `queryd` — текстовый (`media=False`) | текстовым запросам проектор не нужен (векторы картинок уже в БД), а держать `--mmproj` (~1 ГиБ) ради текстового поиска нельзя; медиа-сервер выгружается по простою | `supervisor.SupervisorConfig.media`, `service.media_enabled`, `cmd_index/indexerd/setup` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 

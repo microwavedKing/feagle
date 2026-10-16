@@ -265,6 +265,12 @@ second) and only a limited number are done per pass. It also makes the shared
 (`ocr_images`) is far cheaper and gives exact word matches — enable both to get
 both.
 
+**Server split.** The projector is only needed while *indexing* images/video, so
+`feagle` runs a **separate media server** (`--mmproj`, its own `llama-media.*`
+coordination files) that the indexer owns and unloads when idle. `queryd` keeps a
+light **text-only** server (~0.5 GiB) for search, because text queries never need
+the projector — the image vectors are already in the database.
+
 **Video (semantic).** With `[media].video = true`, `feagle` extracts frames with
 `ffmpeg` (one every `video_frame_interval` seconds, up to `video_max_frames`) and
 embeds them like images, so a text query finds the right *moment*. Each result
@@ -774,6 +780,12 @@ images_per_run = 200   # лимит на проход индексации (0 = 
 тяжелее (около 1 ГиБ RAM). Для текста *на* картинке OCR (`ocr_images`) намного
 дешевле и даёт точные совпадения слов — включайте оба флага, чтобы получить и то,
 и другое.
+
+**Разделение серверов.** Проектор нужен только во время *индексации*
+картинок/видео, поэтому `feagle` поднимает **отдельный медиа-сервер** (`--mmproj`,
+свои файлы координации `llama-media.*`), которым владеет индексатор и выгружает по
+простою. `queryd` держит лёгкий **текстовый** сервер (~0.5 ГиБ) для поиска:
+текстовым запросам проектор не нужен — векторы картинок уже лежат в БД.
 
 **Видео (семантический поиск).** При `[media].video = true` `feagle` извлекает
 кадры через `ffmpeg` (по одному каждые `video_frame_interval` секунд, не более
