@@ -17,6 +17,10 @@ Terminal=false
 """
 
 
+def _app(name: str) -> apps.App:
+    return apps.App(f"{name}.desktop", name, name, False, Path(f"/x/{name}.desktop"))
+
+
 def write(tmp_path: Path, name: str, body: str) -> Path:
     path = tmp_path / name
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,3 +133,26 @@ def test_launch_without_command_raises(monkeypatch):
     app = apps.App("x.desktop", "X", "%U", False, Path("/x.desktop"))
     with pytest.raises(OSError):
         apps.launch(app, spawn=lambda cmd: None)
+
+
+# -- launcher scoring ------------------------------------------------------
+
+
+def test_score_app_prefers_exact_then_prefix_then_substring():
+    assert apps.score_app("Firefox", "firefox") == 100.0
+    assert apps.score_app("Firefox", "fire") == 50.0
+    assert apps.score_app("Visual Studio Code", "code") == 25.0
+    assert apps.score_app("Firefox", "zzz") == 0.0
+    assert apps.score_app("Firefox", "") == 1.0  # empty query lists everything
+
+
+def test_score_app_fuzzy_subsequence():
+    assert apps.score_app("Visual Studio Code", "vscode") == 10.0
+
+
+def test_match_apps_orders_and_limits():
+    fakes = [_app(name) for name in ("Firefox", "File Manager", "Files")]
+    matched = apps.match_apps(fakes, "file", limit=2)
+    assert [app.name for _, app in matched] == ["File Manager", "Files"]
+    assert len(matched) == 2
+    assert apps.match_apps(fakes, "zzz") == []

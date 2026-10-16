@@ -155,3 +155,34 @@ def launch(app: App, *, spawn: Any = None) -> list[str]:
     (spawn or subprocess.Popen)(command)
     log.info("launched application %s", app.id)
     return command
+
+
+def _is_subsequence(needle: str, haystack: str) -> bool:
+    """Whether ``needle``'s characters appear in order inside ``haystack``."""
+    iterator = iter(haystack)
+    return all(char in iterator for char in needle)
+
+
+def score_app(name: str, query: str) -> float:
+    """A simple launcher score: exact > prefix > substring > fuzzy subsequence."""
+    candidate = name.casefold()
+    needle = query.casefold().strip()
+    if not needle:
+        return 1.0
+    if candidate == needle:
+        return 100.0
+    if candidate.startswith(needle):
+        return 50.0
+    if needle in candidate:
+        return 25.0
+    if _is_subsequence(needle, candidate):
+        return 10.0
+    return 0.0
+
+
+def match_apps(apps: list[App], query: str, *, limit: int = 10) -> list[tuple[float, App]]:
+    """``(score, app)`` pairs that match ``query``, best first."""
+    scored = [(score_app(app.name, query), app) for app in apps]
+    matched = [(score, app) for score, app in scored if score > 0.0]
+    matched.sort(key=lambda item: (-item[0], item[1].name.casefold()))
+    return matched[:limit]
