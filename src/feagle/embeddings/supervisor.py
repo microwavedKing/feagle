@@ -40,6 +40,10 @@ class SupervisorConfig:
     #: Optional multimodal projector (``--mmproj``) for image embeddings. Only
     #: set when media image indexing is enabled in the config.
     mmproj_path: Path | None = None
+    #: ``True`` for the media server (image/video embeddings, ``--mmproj``).
+    #: Media and text servers use separate coordination files so the query daemon
+    #: can keep a light text-only server while the indexer runs the media one.
+    media: bool = False
     #: Total context and parallel slots. Each slot gets context/slots tokens,
     #: and an embeddings input must fit in one slot (see RESEARCH §4.1), so keep
     #: the per-slot size comfortably above the largest chunk (~2200 chars).
@@ -125,14 +129,18 @@ class LlamaSupervisor:
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.cfg = cfg
-        self.port_file = port_file or (paths.runtime_subdir() / "llama.port")
-        self.pid_file = pid_file or (paths.runtime_subdir() / "llama.pid")
-        self.lock_file = lock_file or (paths.runtime_subdir() / "llama.lock")
+        # Media and text servers must not share coordination files: the media
+        # server carries ``--mmproj`` (heavy) and is only needed while indexing,
+        # while the query daemon wants a light text-only server.
+        stem = "llama-media" if cfg.media else "llama"
+        self.port_file = port_file or (paths.runtime_subdir() / f"{stem}.port")
+        self.pid_file = pid_file or (paths.runtime_subdir() / f"{stem}.pid")
+        self.lock_file = lock_file or (paths.runtime_subdir() / f"{stem}.lock")
         #: Shared last-activity stamp: the server is shared between daemons, so
         #: *every* user updates this file and the owner only unloads the server
         #: once nobody has touched it for the idle timeout.
-        self.touch_file = touch_file or (paths.runtime_subdir() / "llama.touch")
-        self.log_file = log_file or (paths.state_dir() / "llama.log")
+        self.touch_file = touch_file or (paths.runtime_subdir() / f"{stem}.touch")
+        self.log_file = log_file or (paths.state_dir() / f"{stem}.log")
         self._spawn = spawn or self._default_spawn
         self._health = health or _default_health
         self._clock = clock

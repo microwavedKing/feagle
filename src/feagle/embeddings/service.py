@@ -94,22 +94,30 @@ def resolve_mmproj(cfg: dict[str, Any]) -> Path | None:
     return Path(name).expanduser()
 
 
+def media_enabled(cfg: dict[str, Any]) -> bool:
+    """Whether the indexer needs a multimodal server (images/video, not audio)."""
+    media = cfg.get("media") or {}
+    return bool(media.get("images") or media.get("video"))
+
+
 def build_supervisor(
     cfg: dict[str, Any],
     *,
+    media: bool = False,
     health: Callable[[str], bool] | None = None,
     spawn: Callable[[list[str]], Any] | None = None,
     runtime_dir: Path | None = None,
 ) -> LlamaSupervisor:
     embeddings = cfg["embeddings"]
     model_path, _spec = resolve_model(cfg)
-    mmproj = resolve_mmproj(cfg)
+    mmproj = resolve_mmproj(cfg) if media else None
     supervisor_cfg = SupervisorConfig(
         model_path=model_path,
         server_url=embeddings["server_url"],
         idle_timeout_min=embeddings["idle_timeout_min"],
         threads=embeddings["threads"],
         mmproj_path=mmproj if (mmproj is not None and mmproj.exists()) else None,
+        media=media,
         extra_args=list(embeddings["extra_args"]),
     )
     files: dict[str, Path] = {}
@@ -133,14 +141,16 @@ class EmbeddingService:
         self,
         cfg: dict[str, Any],
         *,
+        media: bool = False,
         health: Callable[[str], bool] | None = None,
         spawn: Callable[[list[str]], Any] | None = None,
         transport: Any | None = None,
         runtime_dir: Path | None = None,
     ) -> None:
         self.cfg = cfg
+        self._media = media
         self.supervisor = build_supervisor(
-            cfg, health=health, spawn=spawn, runtime_dir=runtime_dir
+            cfg, media=media, health=health, spawn=spawn, runtime_dir=runtime_dir
         )
         self._transport = transport
         self._client: EmbeddingClient | None = None
@@ -160,9 +170,9 @@ class EmbeddingService:
                 "run 'feagle setup' to download it, or set [embeddings].model "
                 "to an existing GGUF path"
             )
-        if not embeddings["server_url"]:
+        if self._media and not embeddings["server_url"]:
             mmproj = resolve_mmproj(self.cfg)
-            if mmproj is not None and not mmproj.exists():
+            if mmproj is None or not mmproj.exists():
                 raise ModelMissingError(
                     f"multimodal projector not found: {mmproj}\n"
                     "download it or set [media].mmproj to an existing GGUF path"

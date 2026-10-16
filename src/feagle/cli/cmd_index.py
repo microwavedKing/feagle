@@ -8,14 +8,14 @@ from typing import Any
 
 from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
-from ..embeddings.service import EmbeddingService, ModelMissingError
+from ..embeddings.service import EmbeddingService, ModelMissingError, media_enabled
 from ..indexer import pipeline
 
 _DEGRADE_ERRORS = (ModelMissingError, ServerUnavailable, EmbeddingError, OSError)
 
 
 def _start_embedder(cfg: dict[str, Any]) -> tuple[EmbeddingService | None, Any]:
-    service = EmbeddingService(cfg)
+    service = EmbeddingService(cfg, media=media_enabled(cfg))
     try:
         return service, service.start()
     except _DEGRADE_ERRORS as exc:
