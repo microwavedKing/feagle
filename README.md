@@ -281,13 +281,17 @@ carries a timestamp, and `feagle open clip.mp4 +30` treats `+30` as seconds:
 video = true
 video_frame_interval = 10
 video_max_frames = 60
+video_ocr = true        # also OCR each frame (needs tesseract)
 
 [openers]
 mp4 = "mpv --start={time} {path}"
 ```
 
 Video is the heaviest media: it is `video_max_frames` image embeddings per file,
-so keep the frame interval and cap modest on CPU.
+so keep the frame interval and cap modest on CPU. With `video_ocr = true` each
+frame is also run through `tesseract`, so text *shown* in the video becomes
+searchable (with its timestamp) in addition to the semantic frame embeddings —
+at the cost of one OCR pass per frame.
 
 **Audio (transcription).** With `[media].audio = true`, `feagle` transcribes audio
 with `whisper.cpp` (`whisper-cli`) — the audio is converted to 16 kHz mono WAV
@@ -798,13 +802,17 @@ images_per_run = 200   # лимит на проход индексации (0 = 
 video = true
 video_frame_interval = 10
 video_max_frames = 60
+video_ocr = true        # ещё и OCR каждого кадра (нужен tesseract)
 
 [openers]
 mp4 = "mpv --start={time} {path}"
 ```
 
 Видео — самый тяжёлый медиа-формат: это `video_max_frames` эмбеддингов картинок на
-файл, поэтому на CPU держите интервал и лимит скромными.
+файл, поэтому на CPU держите интервал и лимит скромными. При `video_ocr = true`
+каждый кадр ещё и прогоняется через `tesseract`, поэтому текст, *показанный* в
+видео, становится находимым (со своим таймкодом) вдобавок к семантике кадров — ценой
+одного прохода OCR на кадр.
 
 **Аудио (транскрипция).** При `[media].audio = true` `feagle` транскрибирует аудио
 через `whisper.cpp` (`whisper-cli`) — аудио сначала конвертируется в 16 кГц моно WAV
