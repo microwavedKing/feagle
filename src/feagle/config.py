@@ -336,6 +336,8 @@ mrl_dim = 768
 server_url = ""
 idle_timeout_min = 10
 threads = 0
+# Extra llama-server flags, applied to both the text and the media server.
+# GPU offload example: extra_args = ["-ngl", "99"] (Vulkan/CUDA builds).
 extra_args = []
 
 [media]

@@ -85,6 +85,7 @@ A non-interactive equivalent:
 
 ```sh
 feagle setup                 # first-run configuration (interactive)
+feagle setup --media-images --media-audio   # also download mmproj + whisper model
 feagle doctor                # environment check with fix hints
 
 feagle index                 # scan configured roots (semantic when available)
@@ -270,6 +271,20 @@ both.
 coordination files) that the indexer owns and unloads when idle. `queryd` keeps a
 light **text-only** server (~0.5 GiB) for search, because text queries never need
 the projector — the image vectors are already in the database.
+
+**GPU offload.** feagle does not hardcode a backend: `llama-server` uses whatever
+Vulkan/CUDA/ROCm support it was built with (`llama-server --list-devices` lists
+the devices; `feagle doctor` reports them too). To offload the model, pass the
+usual llama.cpp flags through `[embeddings].extra_args` — they are applied to
+**both** the text and the media server:
+
+```toml
+[embeddings]
+extra_args = ["-ngl", "99"]   # all layers on the GPU; 0 keeps it on the CPU
+```
+
+On a CPU-only machine leave it empty (the default). Only use flags your build
+knows — check `llama-server --help`.
 
 **Video (semantic).** With `[media].video = true`, `feagle` extracts frames with
 `ffmpeg` (one every `video_frame_interval` seconds, up to `video_max_frames`) and
@@ -610,6 +625,7 @@ feagle setup --yes --root ~/Documents --model embeddinggemma-2-q4
 
 ```sh
 feagle setup                 # первичная настройка (интерактивно)
+feagle setup --media-images --media-audio   # сразу скачать mmproj и модель whisper
 feagle doctor                # проверка окружения с подсказками, что исправить
 
 feagle index                 # обход корней (семантика — если доступна)
@@ -790,6 +806,20 @@ images_per_run = 200   # лимит на проход индексации (0 = 
 свои файлы координации `llama-media.*`), которым владеет индексатор и выгружает по
 простою. `queryd` держит лёгкий **текстовый** сервер (~0.5 ГиБ) для поиска:
 текстовым запросам проектор не нужен — векторы картинок уже лежат в БД.
+
+**Выгрузка на GPU.** `feagle` не привязывается к бэкенду: `llama-server`
+использует ту поддержку Vulkan/CUDA/ROCm, с которой собран (`llama-server
+--list-devices` покажет устройства, `feagle doctor` тоже их печатает). Чтобы
+выгрузить модель на GPU, передай обычные флаги llama.cpp через
+`[embeddings].extra_args` — они применяются и к текстовому, и к медиа-серверу:
+
+```toml
+[embeddings]
+extra_args = ["-ngl", "99"]   # все слои на GPU; 0 — только CPU
+```
+
+На машине без GPU оставь пустым (значение по умолчанию). Используй только те
+флаги, что есть в твоей сборке — сверься с `llama-server --help`.
 
 **Видео (семантический поиск).** При `[media].video = true` `feagle` извлекает
 кадры через `ffmpeg` (по одному каждые `video_frame_interval` секунд, не более

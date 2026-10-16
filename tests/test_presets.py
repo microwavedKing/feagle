@@ -54,3 +54,13 @@ def test_q4_preset_is_pinned_to_the_mirror():
 def test_preset_filenames_are_unique():
     filenames = [spec.filename for spec in presets.PRESETS.values()]
     assert len(filenames) == len(set(filenames))
+
+
+def test_whisper_preset_is_pinned():
+    spec = presets.whisper_spec("ggml-base.bin")
+    assert spec is not None
+    assert spec.filename == "ggml-base.bin"
+    assert spec.size == 147_951_465
+    assert spec.sha256 == "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
+    assert spec.url.endswith("/ggml-base.bin")
+    assert presets.whisper_spec("/abs/path.bin") is None
