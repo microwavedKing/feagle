@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scored by name (`apps.match_apps`) and discovered once, then cached in memory.
   An example Quickshell popup that uses it lives in `quickshell/`.
 
+### Changed
+
+- Media indexing now uses its own `llama-server` with `--mmproj` (coordination
+  files `llama-media.*`), owned by the indexer and unloaded when idle. `queryd`
+  keeps a light text-only server, so enabling images/video no longer makes the
+  query daemon hold the projector (~1 GiB) for text searches.
+
 ## [0.1.1] - 2026-10-15
 
 Bug-fix release.
@@ -207,6 +214,13 @@ on Wayland.
   со сниппетом и позицией). Приложения скорингятся по имени (`apps.match_apps`) и
   разбираются один раз, затем кэшируются в памяти. Пример попапа на Quickshell —
   в `quickshell/`.
+
+### Изменено
+
+- Индексация медиа теперь использует свой `llama-server` с `--mmproj` (файлы
+  координации `llama-media.*`), которым владеет индексатор и выгружает по простою.
+  `queryd` держит лёгкий текстовый сервер, поэтому включение картинок/видео больше
+  не заставляет демон запросов держать проектор (~1 ГиБ) ради текстового поиска.
 
 ## 0.1.1 (по-русски)
 
