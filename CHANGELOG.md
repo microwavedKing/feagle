@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applications first, then file hits with snippet and position). Applications are
   scored by name (`apps.match_apps`) and discovered once, then cached in memory.
   An example Quickshell popup that uses it lives in `quickshell/`.
+- `feagle setup` can enable and provision the media features: the new flags
+  `--media-images`, `--media-video` and `--media-audio` (or the interactive
+  prompts) turn on the matching `[media]` options and download the required
+  models — the multimodal projector for images/video and a `whisper.cpp` model
+  (`ggml-base.bin`, pinned) for audio. Both downloads verify their SHA256.
+- `feagle doctor` reports the devices `llama-server` can offload to
+  (`--list-devices`), so GPU offload availability is visible before tuning
+  `[embeddings].extra_args`.
 
 ### Changed
 

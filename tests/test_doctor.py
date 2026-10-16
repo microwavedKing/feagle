@@ -238,3 +238,39 @@ def test_check_media_video_ocr_missing_tesseract(env, monkeypatch):
     check = doctor.check_media(cfg)
     assert check.status == "warn"
     assert "tesseract" in check.message
+
+
+class _Proc:
+    def __init__(self, stdout: str = "", stderr: str = "") -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_llama_devices_cpu_only(monkeypatch):
+    monkeypatch.setattr(doctor, "_which", lambda name: "/usr/bin/llama-server")
+    monkeypatch.setattr(
+        doctor.subprocess, "run",
+        lambda *a, **k: _Proc(stdout="Available devices:\n  (none)\n"),
+    )
+    check = doctor.check_llama_devices()
+    assert check.status == "info"
+    assert "CPU only" in check.message
+
+
+def test_llama_devices_reports_gpu_and_hint(monkeypatch):
+    monkeypatch.setattr(doctor, "_which", lambda name: "/usr/bin/llama-server")
+    monkeypatch.setattr(
+        doctor.subprocess, "run",
+        lambda *a, **k: _Proc(stdout="Available devices:\n  Vulkan0: AMD Radeon (1234 MiB)\n"),
+    )
+    check = doctor.check_llama_devices()
+    assert check.status == "ok"
+    assert "Vulkan0" in check.message
+    assert "-ngl" in check.message
+
+
+def test_llama_devices_without_binary(monkeypatch):
+    monkeypatch.setattr(doctor, "_which", lambda name: None)
+    check = doctor.check_llama_devices()
+    assert check.status == "info"
+    assert "not installed" in check.message

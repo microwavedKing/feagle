@@ -93,6 +93,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     setup_cmd.add_argument("--no-index", action="store_true", help="skip the first index")
     setup_cmd.add_argument("--no-backup", action="store_true", help="do not back up the config")
+    setup_cmd.add_argument(
+        "--media-images", action="store_true",
+        help="enable image search (downloads the mmproj model, ~530 MiB)",
+    )
+    setup_cmd.add_argument(
+        "--media-video", action="store_true", help="enable video frame indexing"
+    )
+    setup_cmd.add_argument(
+        "--media-audio", action="store_true",
+        help="enable audio transcription (downloads a whisper model, ~148 MiB)",
+    )
     setup_cmd.set_defaults(func=cmd_setup.run)
 
     open_cmd = subparsers.add_parser("open", help="open a file at a line or page")

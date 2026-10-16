@@ -29,6 +29,9 @@ class SetupPlan:
     model: str | None = None
     mrl_dim: int | None = None
     launcher: str | None = None
+    media_images: bool = False
+    media_video: bool = False
+    media_audio: bool = False
     download: bool = True
     install_units: bool = True
     enable_units: bool = True
@@ -99,4 +102,10 @@ def apply_plan(cfg: dict[str, Any], plan: SetupPlan) -> dict[str, Any]:
         result["embeddings"]["mrl_dim"] = plan.mrl_dim
     if plan.launcher:
         result["launcher"]["program"] = plan.launcher
+    if plan.media_images:
+        result["media"]["images"] = True
+    if plan.media_video:
+        result["media"]["video"] = True
+    if plan.media_audio:
+        result["media"]["audio"] = True
     return result

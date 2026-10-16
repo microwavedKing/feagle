@@ -128,6 +128,66 @@ def test_setup_without_roots_fails(env, capsys, monkeypatch):
     assert "no directories to index" in capsys.readouterr().err
 
 
+# -- media models ----------------------------------------------------------
+
+
+def test_apply_plan_enables_media():
+    cfg = config.default_config()
+    updated = setup.apply_plan(cfg, setup.SetupPlan(media_images=True, media_audio=True))
+    assert updated["media"]["images"] is True
+    assert updated["media"]["audio"] is True
+    assert updated["media"]["video"] is False
+    assert cfg["media"]["images"] is False  # original untouched
+
+
+def test_gather_plan_takes_media_flags(monkeypatch):
+    import argparse
+
+    from feagle.cli import cmd_setup
+
+    cfg = config.default_config()
+    cfg["index"]["roots"] = ["/docs"]
+    args = argparse.Namespace(
+        root=None, model=None, mrl_dim=None, launcher=None,
+        media_images=True, media_video=False, media_audio=True,
+        no_download=True, no_units=True, no_enable=True, no_index=True,
+        no_backup=True, yes=True,
+    )
+    plan = cmd_setup._gather_plan(args, cfg)
+    assert plan.media_images is True
+    assert plan.media_video is False
+    assert plan.media_audio is True
+
+
+def test_download_media_models_dispatches_presets(monkeypatch):
+    from feagle.cli import cmd_setup
+
+    cfg = config.default_config()
+    cfg["media"]["images"] = True
+    cfg["media"]["audio"] = True
+    called = []
+    monkeypatch.setattr(
+        cmd_setup, "_ensure_spec", lambda spec, label: called.append(label) or True
+    )
+    cmd_setup._download_media_models(cfg, setup.SetupPlan(media_images=True, media_audio=True))
+    assert called == ["mmproj", "whisper model"]
+
+
+def test_setup_non_interactive_enables_media(env, capsys):
+    docs = env / "docs"
+    docs.mkdir()
+    rc = main([
+        "setup", "--yes", "--root", str(docs), "--launcher", "stdout",
+        "--no-download", "--no-units", "--no-index",
+        "--media-images", "--media-audio",
+    ])
+    assert rc == 0
+    cfg = config.load_config()
+    assert cfg["media"]["images"] is True
+    assert cfg["media"]["audio"] is True
+    assert cfg["media"]["video"] is False
+
+
 def test_setup_installs_units_when_asked(env, capsys):
     docs = env / "docs"
     docs.mkdir()

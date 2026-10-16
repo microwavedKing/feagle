@@ -91,6 +91,29 @@ MMPROJ_PRESETS: dict[str, ModelSpec] = {
 #: Matryoshka dimensions supported by EmbeddingGemma 2.
 MRL_DIMS: tuple[int, ...] = (128, 256, 512, 768)
 
+#: whisper.cpp speech-to-text models for audio transcription (not embeddings).
+#: Keyed by filename so it matches ``[media].whisper_model`` (which is a
+#: filename or an absolute path).
+WHISPER_BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+WHISPER_PRESETS: dict[str, ModelSpec] = {
+    "ggml-base.bin": ModelSpec(
+        name="ggml-base.bin",
+        filename="ggml-base.bin",
+        url=f"{WHISPER_BASE_URL}/ggml-base.bin",
+        sha256="60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+        size=147_951_465,
+        dim=0,
+        context=0,
+        repo="ggerganov/whisper.cpp",
+        note="multilingual whisper.cpp base model (~148 MB) for audio transcription.",
+    ),
+}
+
+
+def whisper_spec(name_or_path: str) -> ModelSpec | None:
+    """The whisper preset for ``name_or_path`` (a filename), or ``None``."""
+    return WHISPER_PRESETS.get(name_or_path)
+
 
 def get_preset(name: str) -> ModelSpec:
     """Return the preset by name, or raise :class:`KeyError` listing options."""

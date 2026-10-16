@@ -12,6 +12,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from .. import config, db, paths, setup, units
@@ -22,6 +23,7 @@ from ..embeddings.service import (
     EmbeddingService,
     ModelMissingError,
     media_enabled,
+    resolve_mmproj,
     resolve_model,
 )
 from ..indexer import pipeline
@@ -62,6 +64,9 @@ def _gather_plan(args: argparse.Namespace, cfg: dict[str, Any]) -> setup.SetupPl
         model=args.model,
         mrl_dim=args.mrl_dim,
         launcher=args.launcher,
+        media_images=bool(getattr(args, "media_images", False)),
+        media_video=bool(getattr(args, "media_video", False)),
+        media_audio=bool(getattr(args, "media_audio", False)),
         download=not args.no_download,
         install_units=not args.no_units,
         enable_units=not args.no_units and not args.no_enable,
@@ -93,6 +98,15 @@ def _gather_plan(args: argparse.Namespace, cfg: dict[str, Any]) -> setup.SetupPl
     if plan.mrl_dim is None:
         plan.mrl_dim = int(_prompt(f"Vector size {presets.MRL_DIMS}", "768"))
 
+    if not (plan.media_images or plan.media_video or plan.media_audio):
+        plan.media_images = _prompt_yes_no(
+            "Search images by meaning (downloads the mmproj model, ~530 MiB)", False
+        )
+        plan.media_video = _prompt_yes_no("Also index video frames", False)
+        plan.media_audio = _prompt_yes_no(
+            "Transcribe audio with whisper.cpp (downloads a model, ~148 MiB)", False
+        )
+
     plan.download = plan.download and _prompt_yes_no(
         "Download the model now", True
     )
@@ -104,6 +118,35 @@ def _gather_plan(args: argparse.Namespace, cfg: dict[str, Any]) -> setup.SetupPl
     return plan
 
 
+def _progress():
+    last = {"mb": -1}
+
+    def report(done: int, total: int | None) -> None:
+        mb = done // (1024 * 1024)
+        if mb >= last["mb"] + 50:
+            last["mb"] = mb
+            pct = f"{done * 100 // total:3d}%" if total else "?"
+            print(f"  {mb:5d} MiB {pct}", flush=True)
+
+    return report
+
+
+def _ensure_spec(spec: presets.ModelSpec, label: str) -> bool:
+    """Download and verify one preset into the models directory."""
+    paths.ensure_data_dirs()
+    try:
+        verify_pin(spec)
+    except DownloadError as exc:
+        print(f"feagle: warning: could not verify the pin ({exc})", file=sys.stderr)
+    try:
+        path = ensure_model(spec, paths.models_dir(), progress=_progress())
+    except DownloadError as exc:
+        print(f"feagle: {label} download failed: {exc}", file=sys.stderr)
+        return False
+    print(f"{label} ready: {path}")
+    return True
+
+
 def _download_model(cfg: dict[str, Any]) -> bool:
     model, spec = resolve_model(cfg)
     if spec is None:
@@ -112,29 +155,33 @@ def _download_model(cfg: dict[str, Any]) -> bool:
             return True
         print(f"feagle: model file not found: {model}", file=sys.stderr)
         return False
+    return _ensure_spec(spec, "model")
 
-    paths.ensure_data_dirs()
-    try:
-        verify_pin(spec)
-    except DownloadError as exc:
-        print(f"feagle: warning: could not verify the pin ({exc})", file=sys.stderr)
 
-    last = {"mb": -1}
-
-    def progress(done: int, total: int | None) -> None:
-        mb = done // (1024 * 1024)
-        if mb >= last["mb"] + 50:
-            last["mb"] = mb
-            pct = f"{done * 100 // total:3d}%" if total else "?"
-            print(f"  {mb:5d} MiB {pct}", flush=True)
-
-    try:
-        path = ensure_model(spec, paths.models_dir(), progress=progress)
-    except DownloadError as exc:
-        print(f"feagle: model download failed: {exc}", file=sys.stderr)
-        return False
-    print(f"model ready: {path}")
-    return True
+def _download_media_models(cfg: dict[str, Any], plan: setup.SetupPlan) -> None:
+    """Download the projector / whisper model for the enabled media kinds."""
+    media = cfg["media"]
+    if plan.media_images or plan.media_video:
+        spec = presets.MMPROJ_PRESETS.get(media["mmproj"])
+        if spec is not None:
+            _ensure_spec(spec, "mmproj")
+        else:
+            mmproj = resolve_mmproj(cfg)
+            if mmproj is not None and mmproj.exists():
+                print(f"using existing mmproj: {mmproj}")
+            else:
+                print(f"feagle: mmproj not found: {mmproj}", file=sys.stderr)
+    if plan.media_audio:
+        name = media["whisper_model"]
+        spec = presets.whisper_spec(name)
+        if spec is not None:
+            _ensure_spec(spec, "whisper model")
+        else:
+            path = Path(name).expanduser()
+            if path.exists():
+                print(f"using existing whisper model: {path}")
+            else:
+                print(f"feagle: whisper model not found: {path}", file=sys.stderr)
 
 
 def _install_units() -> None:
@@ -208,6 +255,8 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
 
     if plan.download and not updated["embeddings"]["server_url"]:
         _download_model(updated)
+        if plan.media_images or plan.media_video or plan.media_audio:
+            _download_media_models(updated, plan)
 
     if plan.install_units:
         _install_units()

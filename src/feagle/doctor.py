@@ -191,6 +191,36 @@ def check_llama_server() -> Check:
     )
 
 
+def check_llama_devices(binary: str | None = None) -> Check:
+    """Report the devices llama.cpp can offload to (GPU offload availability).
+
+    ``llama-server --list-devices`` prints the backends the build was compiled
+    with, so this tells the user whether a Vulkan/CUDA/ROCm offload is even
+    possible before they tune ``[embeddings].extra_args``.
+    """
+    binary = binary or _which("llama-server")
+    if binary is None:
+        return Check("llama devices", "info", "llama-server not installed")
+    try:
+        proc = subprocess.run(
+            [binary, "--list-devices"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return Check("llama devices", "info", f"cannot list devices: {exc}")
+    lines = [
+        line.strip()
+        for line in (proc.stdout + proc.stderr).splitlines()
+        if line.strip() and not line.strip().startswith("Available devices")
+    ]
+    if not lines or lines == ["(none)"]:
+        return Check("llama devices", "info", "CPU only (no GPU backend in this build)")
+    return Check(
+        "llama devices", "ok",
+        ", ".join(lines) + ' (offload with [embeddings].extra_args = ["-ngl", "99"])',
+    )
+
+
 def _build_number(text: str) -> int:
     import re
 
@@ -427,6 +457,7 @@ def run_checks(cfg: dict[str, Any], *, verify_model_hash: bool = True) -> list[C
         check_systemd_units(),
         check_queryd(),
         check_llama_server(),
+        check_llama_devices(),
         check_model(cfg, verify_hash=verify_model_hash),
         check_server_health(cfg),
         check_embedding_dim(cfg),
