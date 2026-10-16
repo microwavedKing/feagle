@@ -66,6 +66,10 @@ DEFAULTS: dict[str, Any] = {
         "video": False,
         "video_frame_interval": 10,
         "video_max_frames": 60,
+        "audio": False,
+        "whisper_binary": "whisper-cli",
+        "whisper_model": "ggml-base.bin",
+        "audio_language": "auto",
     },
     "search": {
         "limit": 20,
@@ -206,6 +210,22 @@ def validate(cfg: dict[str, Any], source: Path | None = None) -> None:
     _check(media["video_frame_interval"] > 0, "media.video_frame_interval", "must be > 0", source)
     _check_type(media, "video_max_frames", (int,), source)
     _check(media["video_max_frames"] > 0, "media.video_max_frames", "must be > 0", source)
+    _check_type(media, "audio", (bool,), source)
+    _check_type(media, "whisper_binary", (str,), source)
+    _check(
+        bool(media["whisper_binary"].strip()),
+        "media.whisper_binary", "must not be empty", source,
+    )
+    _check_type(media, "whisper_model", (str,), source)
+    _check(
+        bool(media["whisper_model"].strip()),
+        "media.whisper_model", "must not be empty", source,
+    )
+    _check_type(media, "audio_language", (str,), source)
+    _check(
+        bool(media["audio_language"].strip()),
+        "media.audio_language", "must not be empty", source,
+    )
 
     search = cfg["search"]
     _check_type(search, "limit", (int,), source)
@@ -335,6 +355,14 @@ video = false
 video_frame_interval = 10
 # At most this many frames per video (safety cap; embedding is slow).
 video_max_frames = 60
+# Transcribe audio files with whisper.cpp so spoken words become searchable.
+audio = false
+# whisper-cli binary (name on PATH or an absolute path).
+whisper_binary = "whisper-cli"
+# GGML whisper model: a filename under the models dir, or an absolute path.
+whisper_model = "ggml-base.bin"
+# Spoken language: "auto" (detect) or a code like "en" / "ru".
+audio_language = "auto"
 
 [search]
 limit = 20

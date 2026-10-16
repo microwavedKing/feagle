@@ -11,10 +11,11 @@ telemetry.
 > **Status:** early development (`0.1.1`). Full-text and semantic search work,
 > Russian word forms are matched through stemming, scanned PDFs and images can be
 > OCR'd, images and videos can be found by a text description (opt-in multimodal
-> embeddings), results open at a line/page/timestamp, `feagle pick` drives a
-> launcher, and there are systemd user units, `feagle setup`, `feagle doctor`,
-> benchmarks and packaging (`PKGBUILD` + CI). `llama-server` is optional —
-> without it `feagle` degrades gracefully to full-text search.
+> embeddings), audio can be transcribed (opt-in, whisper.cpp), results open at a
+> line/page/timestamp, `feagle pick` drives a launcher, and there are systemd user
+> units, `feagle setup`, `feagle doctor`, benchmarks and packaging (`PKGBUILD` +
+> CI). `llama-server` is optional — without it `feagle` degrades gracefully to
+> full-text search.
 
 ## Requirements
 
@@ -31,6 +32,8 @@ telemetry.
   pages also need `pdftoppm` from `poppler`
 - Optional, for image search: the `mmproj` multimodal projector (preset
   `embeddinggemma-2-mmproj-q8`, ~530 MiB) and `ffmpeg` (downscaling)
+- Optional, for audio search: `whisper.cpp` (`whisper-cli`) and a GGML model
+  (for example `ggml-base.bin`); `ffmpeg` converts the audio
 - Optional: a dmenu-compatible launcher (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
 
 ## Install
@@ -280,6 +283,26 @@ mp4 = "mpv --start={time} {path}"
 Video is the heaviest media: it is `video_max_frames` image embeddings per file,
 so keep the frame interval and cap modest on CPU.
 
+**Audio (transcription).** With `[media].audio = true`, `feagle` transcribes audio
+with `whisper.cpp` (`whisper-cli`) — the audio is converted to 16 kHz mono WAV
+with `ffmpeg` first — and indexes the transcript as normal text, so spoken words
+are searchable (full-text and semantic) and every segment keeps its time:
+
+```toml
+[media]
+audio = true
+whisper_binary = "whisper-cli"     # name on PATH, or an absolute path
+whisper_model = "ggml-base.bin"    # a filename in the models dir, or absolute
+audio_language = "auto"            # or "en" / "ru"
+
+[openers]
+mp3 = "mpv --start={time} {path}"
+```
+
+Audio needs only `whisper.cpp` and `ffmpeg` — **not** the `mmproj` file — so it
+works even without the multimodal projector, and full-text search works without
+`llama-server`. `feagle open talk.mp3 +90` treats `+90` as seconds.
+
 ## Launcher and hotkeys
 
 `feagle pick` opens one launcher window containing **applications first and then
@@ -467,6 +490,9 @@ corpus (**3.9× faster**, `stem_text` 7.8×, only 285 real stemmer calls). Searc
 - Video search is the heaviest media: it embeds one frame per
   `video_frame_interval` seconds (up to `video_max_frames`), so a long clip takes
   a while to index on CPU.
+- Audio is transcribed with `whisper.cpp` and indexed as text; a base model runs
+  several times faster than real time on the reference laptop, but long files
+  still take a while. Audio does not need the `mmproj` file.
 - `sqlite-vec` is pre-1.0; deletions from `vec0` do not shrink the file until
   `feagle index --rebuild`.
 - Upgrading from an older index version migrates the schema automatically on the
@@ -495,10 +521,11 @@ their own license — see [NOTICE](NOTICE).
 > **Статус:** ранняя разработка (`0.1.1`). Работают полнотекстовый и семантический
 > поиск, русские словоформы (стемминг), OCR сканированных PDF и картинок, поиск
 > картинок и видео по текстовому описанию (опциональные мультимодальные
-> эмбеддинги), открытие на строке/странице/таймкоде, `feagle pick` в лаунчере,
-> есть systemd-юниты, `feagle setup`, `feagle doctor`, бенчмарки и упаковка
-> (`PKGBUILD` + CI). `llama-server` — опционален: без него `feagle` деградирует до
-> полнотекстового поиска.
+> эмбеддинги), транскрипция аудио (опционально, whisper.cpp), открытие на
+> строке/странице/таймкоде, `feagle pick` в лаунчере, есть systemd-юниты,
+> `feagle setup`, `feagle doctor`, бенчмарки и упаковка (`PKGBUILD` + CI).
+> `llama-server` — опционален: без него `feagle` деградирует до полнотекстового
+> поиска.
 
 Пошаговое руководство (установка, настройка, хоткеи, решение проблем) —
 [`docs/INSTALL.ru.md`](docs/INSTALL.ru.md).
@@ -518,6 +545,8 @@ their own license — see [NOTICE](NOTICE).
   `pdftoppm` из `poppler`
 - Для поиска картинок (опционально): мультимодальный проектор `mmproj` (пресет
   `embeddinggemma-2-mmproj-q8`, ~530 МиБ) и `ffmpeg` (уменьшение картинок)
+- Для поиска аудио (опционально): `whisper.cpp` (`whisper-cli`) и GGML-модель
+  (например `ggml-base.bin`); `ffmpeg` конвертирует аудио
 - Опционально: dmenu-совместимый лаунчер (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
 
 ## Установка
@@ -757,6 +786,26 @@ mp4 = "mpv --start={time} {path}"
 Видео — самый тяжёлый медиа-формат: это `video_max_frames` эмбеддингов картинок на
 файл, поэтому на CPU держите интервал и лимит скромными.
 
+**Аудио (транскрипция).** При `[media].audio = true` `feagle` транскрибирует аудио
+через `whisper.cpp` (`whisper-cli`) — аудио сначала конвертируется в 16 кГц моно WAV
+через `ffmpeg` — и индексирует транскрипт как обычный текст, поэтому произнесённые
+слова ищутся (полнотекстово и семантически), а у каждого сегмента есть таймкод:
+
+```toml
+[media]
+audio = true
+whisper_binary = "whisper-cli"     # имя в PATH или абсолютный путь
+whisper_model = "ggml-base.bin"    # имя в каталоге моделей или абсолютный путь
+audio_language = "auto"            # либо "en" / "ru"
+
+[openers]
+mp3 = "mpv --start={time} {path}"
+```
+
+Аудио требует только `whisper.cpp` и `ffmpeg` — **без** `mmproj` — поэтому работает
+даже без мультимодального проектора, а полнотекстовый поиск работает и без
+`llama-server`. `feagle open talk.mp3 +90` трактует `+90` как секунды.
+
 ## Лаунчер и хоткеи
 
 `feagle pick` открывает одно окно лаунчера, в котором **сначала приложения, затем
@@ -943,6 +992,9 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 - Поиск видео — самый тяжёлый: эмбеддится один кадр каждые `video_frame_interval`
   секунд (не более `video_max_frames`), поэтому длинный клип на CPU индексируется
   долго.
+- Аудио транскрибируется через `whisper.cpp` и индексируется как текст; базовая
+  модель на эталонном ноутбуке быстрее реального времени в несколько раз, но
+  длинные файлы всё равно обрабатываются не мгновенно. `mmproj` для аудио не нужен.
 - `sqlite-vec` — pre-1.0: удаления из `vec0` не уменьшают файл без
   `feagle index --rebuild`, а новая векторная таблица резервирует группу на 1024
   строки.

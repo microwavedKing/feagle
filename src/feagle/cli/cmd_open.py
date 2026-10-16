@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ..indexer.asr import AUDIO_SUFFIXES
 from ..indexer.media import VIDEO_SUFFIXES
 from ..openers import OpenError, build_command, open_result, select_template
 
@@ -38,7 +39,7 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         suffix = path.suffix.lower()
         if suffix == ".pdf":
             page = page if page is not None else args.position
-        elif suffix in VIDEO_SUFFIXES:
+        elif suffix in VIDEO_SUFFIXES or suffix in AUDIO_SUFFIXES:
             if time_ms is None:
                 time_ms = args.position * 1000
         else:

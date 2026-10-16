@@ -305,31 +305,37 @@ def check_ocr(cfg: dict[str, Any]) -> Check:
 
 def check_media(cfg: dict[str, Any]) -> Check:
     from .embeddings.service import resolve_mmproj
-    from .indexer import media
+    from .indexer import asr, media
 
     media_cfg = cfg.get("media") or {}
-    if not (media_cfg.get("images") or media_cfg.get("video")):
-        return Check("media", "info", "image/video embeddings disabled")
-    mmproj = resolve_mmproj(cfg)
-    if mmproj is None or not mmproj.exists():
+    images = bool(media_cfg.get("images"))
+    video = bool(media_cfg.get("video"))
+    audio = bool(media_cfg.get("audio"))
+    if not (images or video or audio):
+        return Check("media", "info", "image/video/audio indexing disabled")
+
+    problems: list[str] = []
+    if images or video:
+        mmproj = resolve_mmproj(cfg)
+        if mmproj is None or not mmproj.exists():
+            problems.append(f"mmproj not found: {mmproj}")
+    if audio:
+        if not asr.whisper_available(media_cfg.get("whisper_binary")):
+            problems.append("whisper-cli not found")
+        model = asr.resolve_model(str(media_cfg.get("whisper_model", "")))
+        if not model.exists():
+            problems.append(f"whisper model not found: {model}")
+    if (images or video or audio) and not media.ffmpeg_available():
+        problems.append("ffmpeg missing")
+    if problems:
         return Check(
-            "media", "warn", f"mmproj not found: {mmproj}",
-            "download the mmproj file or set [media].mmproj",
-        )
-    if not media.ffmpeg_available():
-        return Check(
-            "media", "warn", "media on, but ffmpeg is missing (no frames/downscaling)",
-            "sudo pacman -S ffmpeg",
+            "media", "warn", "; ".join(problems),
+            "see [media] in the config and the README (mmproj / whisper.cpp / ffmpeg)",
         )
     kinds = "+".join(
-        name
-        for name, on in (
-            ("images", media_cfg.get("images")),
-            ("video", media_cfg.get("video")),
-        )
-        if on
+        name for name, on in (("images", images), ("video", video), ("audio", audio)) if on
     )
-    return Check("media", "ok", f"{kinds} on; mmproj={mmproj.name}")
+    return Check("media", "ok", f"{kinds} on")
 
 
 def check_launcher(cfg: dict[str, Any]) -> Check:
