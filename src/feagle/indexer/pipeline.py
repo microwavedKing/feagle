@@ -39,7 +39,7 @@ from .media import (
     ffmpeg_available,
     ffprobe_available,
 )
-from .ocr import IMAGE_SUFFIXES
+from .ocr import IMAGE_SUFFIXES, OcrError, image_ocr_available, ocr_image
 from .scanner import ScanCandidate, Scanner
 
 log = get_logger("indexer.pipeline")
@@ -226,14 +226,40 @@ def _embed_image(
         return None
 
 
+def _ocr_frames(
+    frames: list[tuple[int, Path]], *, ocr: bool, ocr_langs: str
+) -> list[str]:
+    """OCR each frame to text (empty strings when OCR is off or unavailable)."""
+    if not ocr:
+        return [""] * len(frames)
+    if not image_ocr_available():
+        log.warning("video OCR requested but tesseract is missing; frames have no text")
+        return [""] * len(frames)
+    texts: list[str] = []
+    for _time_ms, frame in frames:
+        try:
+            text = ocr_image(frame, langs=ocr_langs)
+        except OcrError as exc:
+            log.warning("OCR failed for frame %s: %s", frame, exc)
+            text = ""
+        texts.append(" ".join(text.split()))
+    return texts
+
+
 def _index_video_frames(
     path: Path,
     media_cfg: dict[str, Any],
     embedder: Embedder | None,
     *,
     allow_image: bool,
+    ocr: bool = False,
+    ocr_langs: str = "rus+eng",
 ) -> tuple[list[Chunk], list[list[float]] | None]:
-    """Extract frames and build one chunk per frame (with its timestamp)."""
+    """Extract frames and build one chunk per frame (with its timestamp).
+
+    With ``ocr`` each frame's text becomes the chunk body (so it is searchable
+    with full text), while the frame vector stays an image embedding.
+    """
     with tempfile.TemporaryDirectory(prefix="feagle-video-") as tmp:
         frames = extract_frames(
             path,
@@ -242,8 +268,9 @@ def _index_video_frames(
             max_frames=int(media_cfg["video_max_frames"]),
             max_dim=int(media_cfg["image_max_dim"]),
         )
+        bodies = _ocr_frames(frames, ocr=ocr, ocr_langs=ocr_langs)
         chunks = [
-            Chunk(seq=index, page=None, line=None, body="", time_ms=time_ms)
+            Chunk(seq=index, page=None, line=None, body=bodies[index], time_ms=time_ms)
             for index, (time_ms, _frame) in enumerate(frames)
         ]
         vectors: list[list[float]] | None = None
@@ -330,7 +357,12 @@ def index_file(
             if not (ffmpeg_available() and ffprobe_available()):
                 raise UnsupportedFile(f"video indexing needs ffmpeg: {candidate.path}")
             chunks, vectors = _index_video_frames(
-                candidate.path, media_cfg, embedder, allow_image=allow_image
+                candidate.path,
+                media_cfg,
+                embedder,
+                allow_image=allow_image,
+                ocr=bool(media_cfg.get("video_ocr")),
+                ocr_langs=index_cfg["ocr_langs"],
             )
             if not chunks:
                 raise UnsupportedFile(f"no frames extracted: {candidate.path}")
@@ -456,7 +488,7 @@ def backfill(
         suffix = Path(row["path"]).suffix.lower()
         if suffix in VIDEO_SUFFIXES and media_cfg.get("video"):
             _frame_chunks, vectors = _index_video_frames(
-                Path(row["path"]), media_cfg, embedder, allow_image=True
+                Path(row["path"]), media_cfg, embedder, allow_image=True, ocr=False
             )
             if vectors is None or len(vectors) != len(chunks):
                 log.warning("cannot backfill video %s", row["path"])

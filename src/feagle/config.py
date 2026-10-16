@@ -66,6 +66,7 @@ DEFAULTS: dict[str, Any] = {
         "video": False,
         "video_frame_interval": 10,
         "video_max_frames": 60,
+        "video_ocr": False,
         "audio": False,
         "whisper_binary": "whisper-cli",
         "whisper_model": "ggml-base.bin",
@@ -210,6 +211,7 @@ def validate(cfg: dict[str, Any], source: Path | None = None) -> None:
     _check(media["video_frame_interval"] > 0, "media.video_frame_interval", "must be > 0", source)
     _check_type(media, "video_max_frames", (int,), source)
     _check(media["video_max_frames"] > 0, "media.video_max_frames", "must be > 0", source)
+    _check_type(media, "video_ocr", (bool,), source)
     _check_type(media, "audio", (bool,), source)
     _check_type(media, "whisper_binary", (str,), source)
     _check(
@@ -355,6 +357,8 @@ video = false
 video_frame_interval = 10
 # At most this many frames per video (safety cap; embedding is slow).
 video_max_frames = 60
+# Also OCR each frame (tesseract) so text shown in the video is searchable.
+video_ocr = false
 # Transcribe audio files with whisper.cpp so spoken words become searchable.
 audio = false
 # whisper-cli binary (name on PATH or an absolute path).

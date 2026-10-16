@@ -370,6 +370,73 @@ def test_video_without_ffmpeg_is_unsupported(root, conn, monkeypatch):
     assert conn.execute("SELECT state FROM files").fetchone()["state"] == "unsupported"
 
 
+# -- video OCR -------------------------------------------------------------
+
+
+def make_frame_extractor(count=2, step_ms=1000):
+    def fake_frames(path, dest, *, interval, max_frames, max_dim):
+        dest = Path(dest)
+        frames = []
+        for i in range(count):
+            frame = dest / f"frame_{i:05d}.png"
+            frame.write_bytes(b"PNG")
+            frames.append((i * step_ms, frame))
+        return frames
+
+    return fake_frames
+
+
+def _enable_video_ocr(cfg, **overrides):
+    return enable_media(cfg, video=True, video_ocr=True, **overrides)
+
+
+def test_video_frames_are_ocrd_when_enabled(root, conn, monkeypatch):
+    (root / "clip.mp4").write_bytes(b"MP4")
+    monkeypatch.setattr(pipeline, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(pipeline, "ffprobe_available", lambda: True)
+    monkeypatch.setattr(pipeline, "extract_frames", make_frame_extractor())
+    monkeypatch.setattr(pipeline, "image_ocr_available", lambda: True)
+    monkeypatch.setattr(pipeline, "ocr_image", lambda frame, **kw: "SIGN " + frame.stem)
+
+    pipeline.index_roots(conn, _enable_video_ocr(make_cfg(root)), embedder=FakeImageEmbedder())
+
+    rows = conn.execute("SELECT body FROM chunks ORDER BY seq").fetchall()
+    assert [r["body"] for r in rows] == ["SIGN frame_00000", "SIGN frame_00001"]
+    assert len(search_fts(conn, "sign")) == 2  # text shown in the video is searchable
+
+
+def test_video_frames_have_no_text_without_ocr(root, conn, monkeypatch):
+    (root / "clip.mp4").write_bytes(b"MP4")
+    monkeypatch.setattr(pipeline, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(pipeline, "ffprobe_available", lambda: True)
+    monkeypatch.setattr(pipeline, "extract_frames", make_frame_extractor())
+
+    pipeline.index_roots(
+        conn, enable_media(make_cfg(root), video=True), embedder=FakeImageEmbedder()
+    )
+
+    assert all(r["body"] == "" for r in conn.execute("SELECT body FROM chunks"))
+
+
+def test_video_ocr_missing_tesseract_degrades(root, conn, monkeypatch):
+    (root / "clip.mp4").write_bytes(b"MP4")
+    monkeypatch.setattr(pipeline, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(pipeline, "ffprobe_available", lambda: True)
+    monkeypatch.setattr(pipeline, "extract_frames", make_frame_extractor())
+    monkeypatch.setattr(pipeline, "image_ocr_available", lambda: False)
+    monkeypatch.setattr(
+        pipeline, "ocr_image", lambda *a, **k: pytest.fail("must not OCR without tesseract")
+    )
+
+    stats = pipeline.index_roots(
+        conn, _enable_video_ocr(make_cfg(root)), embedder=FakeImageEmbedder()
+    )
+
+    assert stats.errors == 0
+    assert all(r["body"] == "" for r in conn.execute("SELECT body FROM chunks"))
+    assert conn.execute("SELECT COUNT(*) AS n FROM chunks_vec").fetchone()["n"] == 2
+
+
 # -- audio (ASR) -----------------------------------------------------------
 
 

@@ -67,6 +67,7 @@ def test_custom_opener_extensions_do_not_warn(tmp_path, caplog):
         ("[media]\nimages = 'yes'\n", "images"),
         ("[media]\nimage_max_dim = -1\n", "media.image_max_dim"),
         ("[media]\nvideo_max_frames = 0\n", "media.video_max_frames"),
+        ("[media]\nvideo_ocr = 'yes'\n", "video_ocr"),
         ("[media]\naudio = 'yes'\n", "audio"),
     ],
 )

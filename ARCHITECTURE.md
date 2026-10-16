@@ -195,7 +195,7 @@ llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
 `[index]` roots, include_ext, exclude_dirs, use_gitignore, лимиты, `rescan_interval_min`,
 `pause_on_battery`, `pause_on_loadavg`, `embed_batch_size`, `follow_symlinks`,
 `ocr*` (в т.ч. `ocr_images`); `[embeddings]` model, mrl_dim, server_url, idle_timeout_min, threads, extra_args;
-`[media]` images, mmproj, image_max_dim, images_per_run, video, video_frame_interval, video_max_frames, audio, whisper_binary, whisper_model, audio_language;
+`[media]` images, mmproj, image_max_dim, images_per_run, video, video_frame_interval, video_max_frames, video_ocr, audio, whisper_binary, whisper_model, audio_language;
 `[search]` limit, mode, candidates, rrf_k, stemming, max_distance, max_per_file;
 `[launcher]` program; `[openers]` (свободная таблица: расширение → шаблон).
 
@@ -216,8 +216,8 @@ stat → сравнение с БД (`size`,`mtime_ns`,`state=ok`) → инач�
 
 **Видео** (`[media].video`): `ffmpeg` извлекает кадры (`video_frame_interval`,
 ≤ `video_max_frames`), каждый кадр = чанк с `time_ms` и вектор (image-эмбеддинг);
-тела чанков пусты (полнотекстового поиска по видео нет). Результат несёт таймкод,
-`open` подставляет `{time}`.
+тело чанка — OCR-текст кадра при `[media].video_ocr` (tesseract), иначе пусто.
+Результат несёт таймкод, `open` подставляет `{time}`.
 
 **Аудио** (`[media].audio`): `ffmpeg` → 16 кГц моно WAV → `whisper-cli -oj`; каждый
 сегмент = чанк с `time_ms` и телом-транскриптом, эмбеддинги **текстовые**
@@ -288,7 +288,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 22 | `AGENTS.md`/`RESEARCH.md` — вне git (`.gitignore`) | внутренние документы, не для публики | `.gitignore` |
 | 23 | OCR картинок за отдельным флагом `[index].ocr_images`, только `tesseract` (без `pdftoppm`) | без OCR/эмбеддингов картинки не дают текста; отдельный флаг не навязывает их тем, кому нужен только PDF-OCR, а рендерер для картинок не нужен | `config.DEFAULTS`, `pipeline._build_scanner`, `extract.extract_image` |
 | 24 | Поиск картинок: `[media].images` (opt-in), «1 файл = 1 чанк/вектор», предуменьшение `ffmpeg` (≤ `image_max_dim`), лимит `images_per_run` за проход, `--mmproj` только при включённых медиа | на CPU image-эмбеддинг дорог (десятки секунд на полный размер) и ест RAM; переиспользование `chunks_vec` не требует схемы v3; для текста на картинке дешевле OCR | `config.DEFAULTS`, `pipeline`, `client.embed_images`, `supervisor`, `indexer/media.py` |
-| 25 | Видео: `[media].video`, кадры `ffmpeg` → чанк с `time_ms` (схема v3) + image-вектор; `{time}` в `[openers]`, `open +N` = секунды для видео | таймкод нужен для перехода к моменту; отдельная колонка чище, чем переиспользовать `page`/`line`; текста в видео нет, поэтому только семантика | `db` (v3), `indexer/media.extract_frames`, `pipeline`, `openers`, `cmd_open` |
+| 25 | Видео: `[media].video`, кадры `ffmpeg` → чанк с `time_ms` (схема v3) + image-вектор; `{time}` в `[openers]`, `open +N` = секунды для видео; `video_ocr` добавляет OCR кадра в тело чанка | таймкод нужен для перехода к моменту; отдельная колонка чище, чем переиспользовать `page`/`line`; OCR кадров даёт полнотекстовый поиск по тексту в видео (опционально, дороже) | `db` (v3), `indexer/media.extract_frames`, `pipeline`, `openers`, `cmd_open` |
 | 26 | Аудио: `[media].audio`, `ffmpeg` → 16 кГц WAV → `whisper-cli -oj`; сегмент = чанк с `time_ms` и текстом, **текстовые** эмбеддинги; `whisper_binary`/`whisper_model`/`audio_language` | ASR даёт текст с таймкодами → обычный FTS + семантика (не нужен `mmproj`); полнотекстовый поиск работает без `llama-server` | `indexer/asr.py`, `pipeline`, `config`, `doctor` |
 | 27 | Лаунчер: `queryd` отдаёт `warmup` (фон) и `launcher` (готовый список, приложения первыми); двухфазный поиск на стороне клиента (`fts` сразу, `hybrid` после debounce); кэш `.desktop` в `QueryEngine` | холодный старт `llama-server` не должен блокировать ввод; тонкий QML — логика скоринга в Python; лаунчеры (wofi/rofi) не сообщают запрос | `search/queryd.py`, `apps.match_apps`, `quickshell/` |
 | 28 | Разделение серверов: медиа-сервер (`--mmproj`, файлы `llama-media.*`) поднимает только индексатор (`EmbeddingService(media=True)`), `queryd` — текстовый (`media=False`) | текстовым запросам проектор не нужен (векторы картинок уже в БД), а держать `--mmproj` (~1 ГиБ) ради текстового поиска нельзя; медиа-сервер выгружается по простою | `supervisor.SupervisorConfig.media`, `service.media_enabled`, `cmd_index/indexerd/setup` |

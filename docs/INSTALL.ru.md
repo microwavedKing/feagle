@@ -227,6 +227,7 @@ images_per_run = 200           # лимит картинок на проход �
 video = false                  # поиск видео по описанию (кадры через ffmpeg)
 video_frame_interval = 10      # кадр каждые N секунд
 video_max_frames = 60          # не больше кадров на одно видео
+video_ocr = false              # ещё и OCR кадров (нужен tesseract)
 audio = false                  # транскрипция аудио (нужны whisper.cpp + ffmpeg)
 whisper_binary = "whisper-cli" # имя в PATH или абсолютный путь
 whisper_model = "ggml-base.bin"  # имя в каталоге моделей или абсолютный путь
@@ -278,6 +279,7 @@ journalctl --user -u feagle-queryd -n 50                 # последние с
 | Текст с картинки/скриншота не находится | картинки не индексируются, OCR выключен | `[index].ocr_images = true` + `tesseract` и языковые данные, затем `feagle index` |
 | Картинка не находится по описанию | `[media].images` выключен, нет `mmproj`/`ffmpeg` | `[media].images = true`, положить `mmproj` (пресет `embeddinggemma-2-mmproj-q8`), поставить `ffmpeg`, затем `feagle index` |
 | Видео не находится по описанию | `[media].video` выключен, нет `mmproj`/`ffmpeg` | `[media].video = true` (+ `mmproj` и `ffmpeg`), затем `feagle index` |
+| Текст, показанный в видео, не находится | `[media].video_ocr` выключен или нет `tesseract` | `[media].video_ocr = true` + `tesseract` и языковые данные, затем `feagle index` |
 | Аудио не находится по словам | `[media].audio` выключен, нет `whisper.cpp`/модели/`ffmpeg` | `[media].audio = true`, указать `whisper_binary` и `whisper_model`, поставить `ffmpeg`, затем `feagle index` |
 | `open` не переходит к моменту видео | нет плейсхолдера `{time}` в опенере | добавить, напр. `mp4 = "mpv --start={time} {path}"` в `[openers]` |
 | Все результаты в режиме `fts` | нет `llama-server` или модели | `feagle doctor`; поставить AUR `llama.cpp-git`, модель — через `feagle setup` |
