@@ -330,6 +330,14 @@ The launcher is auto-detected (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`) or
 forced with `[launcher].program`. With none installed it prints a numbered list
 and reads a number, so it also works from scripts.
 
+### Quickshell launcher (example)
+
+For a live, semantic popup, `quickshell/` contains an example QML launcher for
+[Quickshell](https://quickshell.org) 0.3+. It talks to `queryd` directly and is
+two-phase: an `fts` request on every keystroke (instant) and a `hybrid` request
+after a short debounce, plus a `warmup` when it opens so `llama-server` loads in
+the background. See [`quickshell/README.md`](quickshell/README.md).
+
 Bind it in your compositor:
 
 **Hyprland** (released versions):
@@ -832,6 +840,14 @@ feagle pick --no-apps          # только файлы
 Лаунчер определяется автоматически (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
 или задаётся в `[launcher].program`. Если ничего нет — печатается нумерованный
 список и читается номер, так что работает и из скриптов.
+
+### Лаунчер на Quickshell (пример)
+
+Для живого семантического попапа в `quickshell/` лежит пример QML-лаунчера для
+[Quickshell](https://quickshell.org) 0.3+. Он общается с `queryd` напрямую и
+двухфазный: запрос `fts` на каждое нажатие (мгновенно) и `hybrid` после короткого
+debounce, плюс `warmup` при открытии, чтобы `llama-server` прогревался в фоне. См.
+[`quickshell/README.md`](quickshell/README.md).
 
 Бинды в композиторе:
 

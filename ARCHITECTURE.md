@@ -89,13 +89,13 @@
 | `fts.py` | BM25 | `search_fts()` (колонка `body`), `search_fts_stemmed()` (колонка `stem`), санитизация, `fallback_or` |
 | `vec.py` | KNN | `knn()`, `insert/delete/clear_vectors()` |
 | `hybrid.py` | RRF | `rrf()`, `search_text()` (точный+стем), `search_hybrid()` (+KNN), `max_distance`, `max_per_file` |
-| `queryd.py` | демон на сокете | NDJSON, `QueryEngine` (восстановление эмбеддера), `QuerydServer/Client` |
+| `queryd.py` | демон на сокете | NDJSON, `QueryEngine` (восстановление эмбеддера, `warmup()`, `launcher()`), `QuerydServer/Client` |
 
 ### Приложения, лаунчеры, открытие
 
 | Файл | Ответственность | Ключевое |
 |---|---|---|
-| `apps.py` | XDG `.desktop` | `discover_apps()`, `parse_desktop_file()`, `launch()` (gtk-launch→gio→Exec) |
+| `apps.py` | XDG `.desktop` | `discover_apps()`, `parse_desktop_file()`, `launch()` (gtk-launch→gio→Exec), `match_apps()`/`score_app()` для лаунчера |
 | `launchers.py` | dmenu-адаптеры | fuzzel/wofi/rofi/tofi/walker/stdout; формат `key\tdisplay`; fuzzel с `--with-nth/--accept-nth` |
 | `picker.py` | общий выбор | `app_items()`, `run_pick()` (приложения → запуск, файлы → `open_result`) |
 | `openers.py` | открытие на позиции | шаблоны `{path}/{line}/{page}/{time}`, `shlex` без shell, `--dry-run` |
@@ -151,6 +151,9 @@ chunks_vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[DIM])
                                                   "results":[{rank,score,path,page,line,snippet,chunk_id}]}
 {"op":"embed","texts":["..."],"kind":"doc"}    → {"ok":true,"dim":768,"embeddings":[[...]]}
 {"op":"status"}                                → {files, chunks, vectors, vec_coverage, ...}
+{"op":"warmup"}                                → {"ok":true,"warming":true}   (фон, не блокирует)
+{"op":"launcher","query":"...","mode":"fts|hybrid","apps_limit":8}
+                                               → {"ok":true,"mode":..,"results":[{kind:"app"|"file",...}]}
 {"op":false ...}                               → {"ok":false,"error":"...","hint":"..."}
 ```
 
@@ -244,7 +247,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 
 ## 7. Тесты
 
-- 39 файлов в `tests/`, ~480 тестов. Запуск: `.venv/bin/pytest -q`.
+- 39 файлов в `tests/`, ~489 тестов. Запуск: `.venv/bin/pytest -q`.
 - **Гейты `skipif`**: тесты, требующие `llama-server`/модели (`FEAGLE_RUN_MODEL_TESTS=1`),
   `pdftotext`, `tesseract`, `ocr_available()` — скипаются, поэтому CI проходит на
   чистом Ubuntu (без poppler/tesseract/llama).
@@ -284,6 +287,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 24 | Поиск картинок: `[media].images` (opt-in), «1 файл = 1 чанк/вектор», предуменьшение `ffmpeg` (≤ `image_max_dim`), лимит `images_per_run` за проход, `--mmproj` только при включённых медиа | на CPU image-эмбеддинг дорог (десятки секунд на полный размер) и ест RAM; переиспользование `chunks_vec` не требует схемы v3; для текста на картинке дешевле OCR | `config.DEFAULTS`, `pipeline`, `client.embed_images`, `supervisor`, `indexer/media.py` |
 | 25 | Видео: `[media].video`, кадры `ffmpeg` → чанк с `time_ms` (схема v3) + image-вектор; `{time}` в `[openers]`, `open +N` = секунды для видео | таймкод нужен для перехода к моменту; отдельная колонка чище, чем переиспользовать `page`/`line`; текста в видео нет, поэтому только семантика | `db` (v3), `indexer/media.extract_frames`, `pipeline`, `openers`, `cmd_open` |
 | 26 | Аудио: `[media].audio`, `ffmpeg` → 16 кГц WAV → `whisper-cli -oj`; сегмент = чанк с `time_ms` и текстом, **текстовые** эмбеддинги; `whisper_binary`/`whisper_model`/`audio_language` | ASR даёт текст с таймкодами → обычный FTS + семантика (не нужен `mmproj`); полнотекстовый поиск работает без `llama-server` | `indexer/asr.py`, `pipeline`, `config`, `doctor` |
+| 27 | Лаунчер: `queryd` отдаёт `warmup` (фон) и `launcher` (готовый список, приложения первыми); двухфазный поиск на стороне клиента (`fts` сразу, `hybrid` после debounce); кэш `.desktop` в `QueryEngine` | холодный старт `llama-server` не должен блокировать ввод; тонкий QML — логика скоринга в Python; лаунчеры (wofi/rofi) не сообщают запрос | `search/queryd.py`, `apps.match_apps`, `quickshell/` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 

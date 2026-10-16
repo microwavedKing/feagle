@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ffmpeg` and transcribed with `whisper.cpp` (`whisper-cli`), and the transcript
   is indexed as text (full-text and semantic) with per-segment timestamps. Audio
   needs no `mmproj`, and full-text search works without `llama-server`.
+- Launcher API: `queryd` gained `warmup` (start the embedder in the background,
+  never blocking the caller) and `launcher` (a ready-to-render mixed list:
+  applications first, then file hits with snippet and position). Applications are
+  scored by name (`apps.match_apps`) and discovered once, then cached in memory.
+  An example Quickshell popup that uses it lives in `quickshell/`.
 
 ## [0.1.1] - 2026-10-15
 
@@ -197,6 +202,11 @@ on Wayland.
   через `ffmpeg` и транскрибируется `whisper.cpp` (`whisper-cli`), а транскрипт
   индексируется как текст (полнотекстово и семантически) с таймкодами сегментов.
   Аудио не требует `mmproj`, а полнотекстовый поиск работает и без `llama-server`.
+- API лаунчера: у `queryd` появились `warmup` (запуск эмбеддера в фоне, не блокируя
+  вызов) и `launcher` (готовый смешанный список: сначала приложения, затем файлы
+  со сниппетом и позицией). Приложения скорингятся по имени (`apps.match_apps`) и
+  разбираются один раз, затем кэшируются в памяти. Пример попапа на Quickshell —
+  в `quickshell/`.
 
 ## 0.1.1 (по-русски)
 
