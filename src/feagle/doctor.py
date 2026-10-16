@@ -305,7 +305,7 @@ def check_ocr(cfg: dict[str, Any]) -> Check:
 
 def check_media(cfg: dict[str, Any]) -> Check:
     from .embeddings.service import resolve_mmproj
-    from .indexer import asr, media
+    from .indexer import asr, media, ocr
 
     media_cfg = cfg.get("media") or {}
     images = bool(media_cfg.get("images"))
@@ -319,6 +319,8 @@ def check_media(cfg: dict[str, Any]) -> Check:
         mmproj = resolve_mmproj(cfg)
         if mmproj is None or not mmproj.exists():
             problems.append(f"mmproj not found: {mmproj}")
+    if media_cfg.get("video_ocr") and not ocr.tesseract_available():
+        problems.append("tesseract not found (needed for [media].video_ocr)")
     if audio:
         if not asr.whisper_available(media_cfg.get("whisper_binary")):
             problems.append("whisper-cli not found")

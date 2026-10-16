@@ -221,3 +221,20 @@ def test_check_media_audio_missing_whisper(env, monkeypatch):
     check = doctor.check_media(cfg)
     assert check.status == "warn"
     assert "whisper-cli" in check.message
+
+
+def test_check_media_video_ocr_missing_tesseract(env, monkeypatch):
+    from feagle import paths
+    from feagle.indexer import media, ocr
+
+    cfg = config.default_config()
+    cfg["media"]["video"] = True
+    cfg["media"]["video_ocr"] = True
+    target = paths.models_dir() / "mmproj-embeddinggemma-2-Q8_0.gguf"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"x")
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(ocr, "tesseract_available", lambda: False)
+    check = doctor.check_media(cfg)
+    assert check.status == "warn"
+    assert "tesseract" in check.message
