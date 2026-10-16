@@ -52,6 +52,10 @@ class QueryEngine:
         self._clock = clock
         self._retry_cooldown = retry_cooldown
         self._retry_after = 0.0
+        self._warming = False
+        self._apps_cache: list[Any] | None = None
+        self._apps_built = 0.0
+        self._apps_ttl = 60.0
 
     def _ensure_embedder(self) -> Any | None:
         """Return an embedder, (re)starting it on demand with a cooldown."""
@@ -94,6 +98,66 @@ class QueryEngine:
 
     def ping(self) -> dict[str, Any]:
         return {"ok": True, "version": __version__}
+
+    def warmup(self) -> dict[str, Any]:
+        """Start the embedder in the background; never block the caller."""
+        if self.embedder is not None:
+            return {"ok": True, "warmed": True}
+        if self._provider is None:
+            return {"ok": False, "error": "embeddings unavailable", "hint": _EMBEDDINGS_HINT}
+        if not self._warming:
+            self._warming = True
+            threading.Thread(
+                target=self._warmup_worker, name="feagle-warmup", daemon=True
+            ).start()
+        return {"ok": True, "warming": True}
+
+    def _warmup_worker(self) -> None:
+        try:
+            self._ensure_embedder()
+        finally:
+            self._warming = False
+
+    def _app_list(self) -> list[Any]:
+        now = self._clock()
+        if self._apps_cache is None or now - self._apps_built > self._apps_ttl:
+            from .. import apps as apps_module
+
+            self._apps_cache = apps_module.discover_apps()
+            self._apps_built = now
+        return self._apps_cache
+
+    def launcher(
+        self,
+        query: str,
+        *,
+        limit: int | None = None,
+        mode: str | None = None,
+        apps_limit: int = 8,
+    ) -> dict[str, Any]:
+        """A ready-to-render list: applications first, then file hits."""
+        from .. import apps as apps_module
+
+        files = self.search(query, limit=limit, mode=mode)
+        results: list[dict[str, Any]] = []
+        for score, app in apps_module.match_apps(self._app_list(), query, limit=apps_limit):
+            results.append({
+                "kind": "app",
+                "id": app.id,
+                "name": app.name,
+                "score": score,
+                "exec": apps_module.launch_command(app),
+            })
+        for item in files["results"]:
+            entry = dict(item)
+            entry["kind"] = "file"
+            results.append(entry)
+        return {
+            "ok": True,
+            "mode": files["mode"],
+            "took_ms": files["took_ms"],
+            "results": results,
+        }
 
     def search(
         self, query: str, *, limit: int | None = None, mode: str | None = None
@@ -221,6 +285,15 @@ class QueryEngine:
         try:
             if op == "ping":
                 return self.ping()
+            if op == "warmup":
+                return self.warmup()
+            if op == "launcher":
+                return self.launcher(
+                    str(request.get("query", "")),
+                    limit=request.get("limit"),
+                    mode=request.get("mode"),
+                    apps_limit=int(request.get("apps_limit", 8)),
+                )
             if op == "search":
                 return self.search(
                     str(request.get("query", "")),

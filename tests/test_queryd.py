@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -280,3 +282,66 @@ def test_client_invalid_json(server, tmp_path):
 
 def test_is_running_false_when_absent(tmp_path):
     assert QuerydClient(tmp_path / "nope.sock").is_running() is False
+
+
+# -- warmup / launcher -----------------------------------------------------
+
+
+def test_warmup_starts_the_embedder_in_the_background(db_path):
+    started = threading.Event()
+
+    def provider():
+        started.set()
+        return FakeEmbedder()
+
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None, embedder_provider=provider)
+    assert engine.dispatch({"op": "warmup"})["ok"] is True
+    assert started.wait(2.0)  # the provider ran off the request thread
+    for _ in range(100):
+        if engine.embedder is not None:
+            break
+        time.sleep(0.01)
+    assert engine.embedder is not None
+
+
+def test_warmup_without_provider(db_path):
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+    result = engine.dispatch({"op": "warmup"})
+    assert result["ok"] is False
+    assert "hint" in result
+
+
+def test_launcher_lists_apps_first_then_files(db_path, monkeypatch):
+    from feagle import apps
+
+    fake = [apps.App("fire.desktop", "Firefox", "firefox", False, Path("/x/fire.desktop"))]
+    monkeypatch.setattr(apps, "discover_apps", lambda: fake)
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=FakeEmbedder())
+
+    result = engine.dispatch({"op": "launcher", "query": "fire", "mode": "fts"})
+    assert result["ok"] is True
+    assert result["results"][0]["kind"] == "app"
+    assert result["results"][0]["id"] == "fire.desktop"
+    assert result["results"][0]["exec"]
+
+
+def test_launcher_files_only_when_no_apps_match(db_path, monkeypatch):
+    from feagle import apps
+
+    monkeypatch.setattr(apps, "discover_apps", lambda: [])
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "launcher", "query": "alpha", "mode": "fts"})
+    assert [r["kind"] for r in result["results"]] == ["file"]
+    assert result["results"][0]["path"] == "/d/0.txt"
+
+
+def test_launcher_app_cache_reuses_discovery(db_path, monkeypatch):
+    from feagle import apps
+
+    calls = []
+    monkeypatch.setattr(apps, "discover_apps", lambda: calls.append(1) or [])
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+    engine.dispatch({"op": "launcher", "query": "a", "mode": "fts"})
+    engine.dispatch({"op": "launcher", "query": "b", "mode": "fts"})
+    assert calls == [1]  # discovery cached in the engine
