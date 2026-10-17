@@ -95,9 +95,10 @@
 
 | Файл | Ответственность | Ключевое |
 |---|---|---|
-| `apps.py` | XDG `.desktop` | `discover_apps()`, `parse_desktop_file()`, `launch()` (gtk-launch→gio→Exec), `match_apps()`/`score_app()` для лаунчера |
+| `apps.py` | XDG `.desktop` | `discover_apps()`, `parse_desktop_file()` (в т.ч. `Icon=` → `App.icon`), `launch()` (gtk-launch→gio→Exec), `match_apps()`/`score_app()` для лаунчера |
 | `launchers.py` | dmenu-адаптеры | fuzzel/wofi/rofi/tofi/walker/stdout; формат `key\tdisplay`; fuzzel с `--with-nth/--accept-nth` |
 | `picker.py` | общий выбор | `app_items()`, `run_pick()` (приложения → запуск, файлы → `open_result`) |
+| `quickshell/` | попап-лаунчер (QML) | `FeagleSearch.qml` — переиспользуемый бэкенд (сокет, протокол, `fts`+`hybrid`), `FeagleLauncher.qml` — демо; см. `quickshell/README.md` |
 | `openers.py` | открытие на позиции | шаблоны `{path}/{line}/{page}/{time}`, `shlex` без shell, `--dry-run` |
 
 ### CLI (`cli/`)
@@ -294,6 +295,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 28 | Разделение серверов: медиа-сервер (`--mmproj`, файлы `llama-media.*`) поднимает только индексатор (`EmbeddingService(media=True)`), `queryd` — текстовый (`media=False`) | текстовым запросам проектор не нужен (векторы картинок уже в БД), а держать `--mmproj` (~1 ГиБ) ради текстового поиска нельзя; медиа-сервер выгружается по простою | `supervisor.SupervisorConfig.media`, `service.media_enabled`, `cmd_index/indexerd/setup` |
 | 29 | Медиа-модели ставит `setup` (`--media-images/--media-video/--media-audio` + интерактивные вопросы): включает флаги `[media]` и качает `mmproj` / whisper-модель (пресеты, SHA256) | «одна команда» для включения медиа: пользователь не должен вручную править конфиг и угадывать имена/хэши файлов; загрузка идёт тем же проверяющим кодом, что и текстовая модель | `setup.SetupPlan.media_*`, `cmd_setup._download_media_models`, `presets.WHISPER_PRESETS` |
 | 30 | GPU-offload не хардкодим: `llama-server` берёт бэкенд своей сборки, флаги — через `[embeddings].extra_args` (применяются к текстовому и медиа-серверу), а `doctor` печатает `--list-devices` | железо у всех разное (CPU/Vulkan/CUDA/ROCm), а набор флагов зависит от сборки; `extra_args` уже проходит в оба сервера, отдельный код не нужен | `config` (шаблон), `doctor.check_llama_devices`, README/INSTALL |
+| 31 | Лаунчер: протокол вынесен в переиспользуемый `FeagleSearch.qml` (`QtObject`), демо `FeagleLauncher.qml` — одно окно; приложения первыми + файлы, `fts` мгновенно и `hybrid` после debounce; `icon` приложения в ответе `launcher` | «два окна» (`wofi \| feagle search --pick`) — плохой UX; один живой попап на Quickshell решает и это, а компонент позволяет встроить feagle в свой QS-лаунчер без копирования логики | `quickshell/FeagleSearch.qml`, `quickshell/FeagleLauncher.qml`, `queryd.launcher` (`icon`), `apps.App.icon` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 

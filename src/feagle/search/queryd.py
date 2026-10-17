@@ -146,6 +146,7 @@ class QueryEngine:
                 "id": app.id,
                 "name": app.name,
                 "score": score,
+                "icon": app.icon,
                 "exec": apps_module.launch_command(app),
             })
         for item in files["results"]:

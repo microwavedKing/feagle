@@ -330,9 +330,35 @@ works even without the multimodal projector, and full-text search works without
 
 ## Launcher and hotkeys
 
-`feagle pick` opens one launcher window containing **applications first and then
-indexed files**: type to filter, and Enter launches the application or opens the
-file at its position.
+Two ways to launch: the **Quickshell popup** (recommended — one live window) and
+the **`feagle pick`** fallback for any dmenu-compatible launcher.
+
+### Quickshell popup (recommended)
+
+`quickshell/` ships a single-window launcher: type once and applications appear
+first, then file hits — keyword results instantly, semantic ones a moment later.
+There is **no second window** (unlike piping a query into `feagle search --pick`,
+which opens one launcher to ask and another to show results). It talks to
+`queryd` directly, so semantic ranking follows what you type.
+
+```sh
+quickshell -p /path/to/feagle/quickshell                    # start it with your session
+qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle   # open it from a hotkey
+```
+
+(`qs ipc` needs the instance: with `-p` pass the same path, or use `qs ipc -c <name>`
+for a named config; the [launcher README](quickshell/README.md) explains it.)
+
+`quickshell/FeagleSearch.qml` is a small reusable backend, so you can also add
+feagle search to **your own** Quickshell launcher. See
+[`quickshell/README.md`](quickshell/README.md) for the component API, the wire
+protocol, and a drop-in example.
+
+### Fallback: `feagle pick` (any dmenu launcher)
+
+Without Quickshell, `feagle pick` opens one launcher window containing
+**applications first and then indexed files**: type to filter, and Enter launches
+the application or opens the file at its position.
 
 ```sh
 feagle pick                    # applications + indexed files
@@ -348,22 +374,24 @@ Note how launchers work: `wofi`/`rofi` filter a list **we hand them beforehand**
 they do not tell us the query while you type. So in `feagle pick` the files are
 matched by the launcher itself (keyword/fuzzy over path and snippet); semantic
 ranking needs the query as an argument, which is what `--query` and
-`feagle search --pick` are for. Applications always come first, so they win when
-both match.
+`feagle search --pick` are for — and why `wofi | feagle search --pick` opens two
+windows. Applications always come first, so they win when both match.
 
 The launcher is auto-detected (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`) or
 forced with `[launcher].program`. With none installed it prints a numbered list
 and reads a number, so it also works from scripts.
 
-### Quickshell launcher (example)
+### Compositor hotkeys
 
-For a live, semantic popup, `quickshell/` contains an example QML launcher for
-[Quickshell](https://quickshell.org) 0.3+. It talks to `queryd` directly and is
-two-phase: an `fts` request on every keystroke (instant) and a `hybrid` request
-after a short debounce, plus a `warmup` when it opens so `llama-server` loads in
-the background. See [`quickshell/README.md`](quickshell/README.md).
+**Quickshell popup** (after starting it, above; select the instance as explained
+there):
 
-Bind it in your compositor:
+- **Hyprland**: `bind = SUPER, D, exec, qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle`
+- **Sway**: `bindsym $mod+d exec qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle`
+- **niri**: `Mod+D { spawn "qs" "ipc" "-p" "/path/to/feagle/quickshell" "call" "feagle-launcher" "toggle"; }`
+- **River**: `riverctl map normal Super D spawn 'qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle'`
+
+**`feagle pick` fallback**:
 
 **Hyprland** (released versions):
 
@@ -404,7 +432,8 @@ TOML at `~/.config/mango/config.toml`:
 [bind.default]
 # one window: applications first, then indexed files
 "SUPER+d" = "spawn_shell,feagle pick"
-# semantic search: ask for the query, then show the ranked files
+# semantic search (opens two windows: one to ask, one for results);
+# the Quickshell popup above does this in a single live window instead
 "SUPER+s" = "spawn_shell,wofi --dmenu -p 'feagle:' | xargs -r feagle search --pick"
 ```
 
@@ -866,9 +895,36 @@ mp3 = "mpv --start={time} {path}"
 
 ## Лаунчер и хоткеи
 
-`feagle pick` открывает одно окно лаунчера, в котором **сначала приложения, затем
-файлы из индекса**: печатаете — фильтруется, Enter запускает приложение или
-открывает файл на нужной позиции.
+Два способа: **попап на Quickshell** (рекомендуется — одно живое окно) и
+**`feagle pick`** — фолбэк для любого dmenu-совместимого лаунчера.
+
+### Попап на Quickshell (рекомендуется)
+
+В `quickshell/` лежит лаунчер в одно окно: печатаете — приложения появляются
+первыми, затем файлы из индекса; ключевые результаты мгновенно, семантические
+через мгновение. **Второго окна нет** (в отличие от `wofi | feagle search --pick`,
+который открывает одно окно, чтобы спросить запрос, и второе — чтобы показать
+результаты). Он общается с `queryd` напрямую, поэтому семантика следует за тем,
+что вы печатаете.
+
+```sh
+quickshell -p /path/to/feagle/quickshell                    # запустить вместе с сессией
+qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle   # открыть по хоткею
+```
+
+(`qs ipc` нужно указать инстанс: с `-p` передайте тот же путь, либо `qs ipc -c <имя>`
+для именованного конфига; подробнее — в [README лаунчера](quickshell/README.md).)
+
+`quickshell/FeagleSearch.qml` — маленький переиспользуемый бэкенд, поэтому feagle
+можно добавить и в **свой** QS-лаунчер. См.
+[`quickshell/README.md`](quickshell/README.md): API компонента, протокол сокета и
+готовый пример встраивания.
+
+### Фолбэк: `feagle pick` (любой dmenu-лаунчер)
+
+Без Quickshell `feagle pick` открывает одно окно лаунчера, в котором **сначала
+приложения, затем файлы из индекса**: печатаете — фильтруется, Enter запускает
+приложение или открывает файл на нужной позиции.
 
 ```sh
 feagle pick                    # приложения + файлы из индекса
@@ -884,22 +940,24 @@ feagle pick --no-apps          # только файлы
 отдали** — они не сообщают нам запрос по мере ввода. Поэтому в `feagle pick`
 файлы фильтрует сам лаунчер (подстрока/фаззи по пути и сниппету), а для
 семантического ранжирования запрос нужно передать аргументом: `--query` или
-`feagle search --pick`. Приложения всегда идут первыми, поэтому при совпадении
-выигрывают они.
+`feagle search --pick` — и поэтому `wofi | feagle search --pick` открывает два
+окна. Приложения всегда идут первыми, поэтому при совпадении выигрывают они.
 
 Лаунчер определяется автоматически (`fuzzel`, `wofi`, `rofi`, `tofi`, `walker`)
 или задаётся в `[launcher].program`. Если ничего нет — печатается нумерованный
 список и читается номер, так что работает и из скриптов.
 
-### Лаунчер на Quickshell (пример)
+### Бинды в композиторе
 
-Для живого семантического попапа в `quickshell/` лежит пример QML-лаунчера для
-[Quickshell](https://quickshell.org) 0.3+. Он общается с `queryd` напрямую и
-двухфазный: запрос `fts` на каждое нажатие (мгновенно) и `hybrid` после короткого
-debounce, плюс `warmup` при открытии, чтобы `llama-server` прогревался в фоне. См.
-[`quickshell/README.md`](quickshell/README.md).
+**Попап на Quickshell** (после запуска, см. выше; инстанс выбирается как описано
+там):
 
-Бинды в композиторе:
+- **Hyprland**: `bind = SUPER, D, exec, qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle`
+- **Sway**: `bindsym $mod+d exec qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle`
+- **niri**: `Mod+D { spawn "qs" "ipc" "-p" "/path/to/feagle/quickshell" "call" "feagle-launcher" "toggle"; }`
+- **River**: `riverctl map normal Super D spawn 'qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle'`
+
+**Фолбэк `feagle pick`**:
 
 **Hyprland** (релизы):
 
@@ -940,7 +998,8 @@ riverctl map normal Super V spawn 'feagle pick'
 [bind.default]
 # одно окно: приложения + файлы из индекса
 "SUPER+d" = "spawn_shell,feagle pick"
-# семантический поиск: спросить запрос, затем показать ранжированные файлы
+# семантический поиск (открывает два окна: спросить запрос и показать результаты);
+# попап на Quickshell выше делает то же в одном живом окне
 "SUPER+s" = "spawn_shell,wofi --dmenu -p 'feagle:' | xargs -r feagle search --pick"
 ```
 

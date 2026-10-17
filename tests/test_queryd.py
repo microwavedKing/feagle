@@ -314,7 +314,9 @@ def test_warmup_without_provider(db_path):
 def test_launcher_lists_apps_first_then_files(db_path, monkeypatch):
     from feagle import apps
 
-    fake = [apps.App("fire.desktop", "Firefox", "firefox", False, Path("/x/fire.desktop"))]
+    fake = [
+        apps.App("fire.desktop", "Firefox", "firefox", False, Path("/x/fire.desktop"), "firefox")
+    ]
     monkeypatch.setattr(apps, "discover_apps", lambda: fake)
     engine = QueryEngine(make_cfg(), db_path=db_path, embedder=FakeEmbedder())
 
@@ -322,6 +324,7 @@ def test_launcher_lists_apps_first_then_files(db_path, monkeypatch):
     assert result["ok"] is True
     assert result["results"][0]["kind"] == "app"
     assert result["results"][0]["id"] == "fire.desktop"
+    assert result["results"][0]["icon"] == "firefox"
     assert result["results"][0]["exec"]
 
 
