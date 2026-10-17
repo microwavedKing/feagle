@@ -108,7 +108,7 @@ Configuration:
 | `debounceMs` | `120` | Delay before the semantic (`hybrid`) pass. |
 | `appsLimit` | `8` | Applications shown above the file hits. |
 | `limit` | `0` | Max file hits; `0` uses the daemon's configured limit. |
-| `feagleCommand` | `"feagle"` | Command used to open files (a name or an absolute path). |
+| `feagleCommand` | `$FEAGLE_BIN` or `"feagle"` | Command used to open files (a name or an absolute path). |
 
 State (read-only for the launcher):
 
@@ -204,7 +204,8 @@ at the top of your root QML or the `QS_ICON_THEME` variable.
   `feagle doctor`.
 - **Only keyword results, never "semantic"** — `llama-server` or the model is
   missing; `feagle doctor` says what to install. Keyword search still works.
-- **Files open with the wrong command** — set `feagleCommand` to the absolute
-  path; a venv/pipx install is often not on the session `PATH`.
+- **Files open with the wrong command** — set `feagleCommand`, or launch the shell
+  with `FEAGLE_BIN=/path/to/feagle`; a venv/pipx install is often not on the
+  session `PATH`.
 - **`PanelWindow is not creatable` from `qmllint`** — harmless, it is a qmllint
   limitation with Quickshell's types.

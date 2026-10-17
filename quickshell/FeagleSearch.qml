@@ -37,7 +37,8 @@ QtObject {
     /// Maximum file hits; 0 uses the daemon's configured limit.
     property int limit: 0
     /// The `feagle` command used to open files (a name on PATH or an absolute path).
-    property string feagleCommand: "feagle"
+    /// Defaults to `$FEAGLE_BIN`, then `"feagle"`.
+    property string feagleCommand: Quickshell.env("FEAGLE_BIN") || "feagle"
 
     // ---- state (read-only for the launcher) --------------------------------
     /// The current query text.
