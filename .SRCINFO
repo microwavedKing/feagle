@@ -29,6 +29,6 @@ pkgbase = feagle
 	optdepends = tofi: launcher for "feagle pick" (AUR)
 	optdepends = walker: launcher for "feagle pick" (AUR)
 	source = feagle-0.2.0.tar.gz::https://github.com/microwavedKing/feagle/archive/refs/tags/v0.2.0.tar.gz
-	sha256sums = 643c97a8712d92820afa47e5165ce530a0a9810620dfb017848b6a66c8302f86
+	sha256sums = 78a83db79116e96709bdeea7b39bb855fb53c30e869f201a818e79dcf63736fc
 
 pkgname = feagle
