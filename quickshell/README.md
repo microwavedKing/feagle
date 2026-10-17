@@ -8,6 +8,8 @@ no separate "ask for a query" step.
 `FeagleSearch.qml` is the reusable part: a small backend that talks to the
 `feagle queryd` daemon. `FeagleLauncher.qml` is a ready-to-run demo built on it —
 **drop the backend into your own Quickshell launcher** to add feagle search to it.
+The demo also shows a preview pane for the selected file, a `Tab` filter
+(all / applications / files) and frecency ranking for applications.
 
 Requires [Quickshell](https://quickshell.org) 0.3+ and a running `feagle queryd`
 (the `feagle-queryd.service` user unit, or `feagle queryd`).
@@ -30,7 +32,14 @@ Toggle it from a compositor hotkey:
 
 ```sh
 qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle   # also: show / hide
+qs ipc -p /path/to/feagle/quickshell call feagle-launcher search "rust ownership"
 ```
+
+`search` opens the launcher with the query already typed — handy for a second
+hotkey ("search my files") next to the plain launcher one.
+
+Keys inside the popup: `↑`/`↓` (and `PgUp`/`PgDn`, `Home`/`End`) move, `Tab`
+cycles the result filter, `Enter` runs the selection, `Esc` closes.
 
 `qs ipc` must know which instance to talk to. With `-p` (as above) pass the same
 path. If you installed the demo as a **named config**
@@ -75,7 +84,7 @@ Item {
 
     ListView {
         id: list
-        model: feagle.results
+        model: feagle.visibleResults   // results, with the filter applied
         currentIndex: 0
         delegate: Item {
             required property var modelData
@@ -109,6 +118,8 @@ Configuration:
 | `appsLimit` | `8` | Applications shown above the file hits while typing. |
 | `browseAppsLimit` | `300` | Applications listed when the query is empty (browse mode). |
 | `limit` | `0` | Max file hits; `0` uses the daemon's configured limit. |
+| `filter` | `"all"` | Client-side filter for `visibleResults`: `"all"`, `"apps"` or `"files"`. |
+| `previewDebounceMs` | `80` | Delay before fetching a preview for a new selection. |
 | `feagleCommand` | `$FEAGLE_BIN` or `"feagle"` | Command used to open files (a name or an absolute path). |
 
 State (read-only for the launcher):
@@ -117,10 +128,13 @@ State (read-only for the launcher):
 |---|---|
 | `query` | Current query text. |
 | `results` | Mixed list: `{kind: "app" \| "file", ...}`. |
+| `visibleResults` | `results` with `filter` applied — display this one. |
 | `mode` | `"fts"` (keyword) or `"hybrid"` (semantic) of the last reply. |
 | `tookMs` | Duration of the last search, in milliseconds. |
 | `busy` | True while a reply is pending. |
 | `error` | Last daemon error, or `""`. |
+| `preview` | Preview of the selected file (`{kind: "text"\|"image"\|"meta", ...}`) or `null`. |
+| `previewError` | Last preview error, or `""`. |
 | `connected` | Whether the socket is connected. |
 
 Functions and signals:
@@ -129,11 +143,17 @@ Functions and signals:
 |---|---|
 | `setQuery(text)` | Instant `fts` request + debounced `hybrid` request. |
 | `request(mode)` | Run a `launcher` request in `"fts"` or `"hybrid"`. |
+| `setFilter(name)` | Set the client-side filter (`"all"` / `"apps"` / `"files"`). |
+| `cycleFilter(reverse)` | Cycle the filter forward (or back); what `Tab` calls. |
+| `requestPreview(item)` | Fetch a preview for `item` (files only), debounced. |
 | `warmup()` | Ask the daemon to load the model in the background. |
 | `reset()` | Clear the query/results and warm up again. |
-| `activate(index)` | Run `results[index]`. |
+| `activate(index)` | Run `visibleResults[index]`. |
 | `activateItem(item)` | Launch an app or open a file for one item. |
-| `activated(item)` (signal) | Emitted after `activate*` runs something. |
+| `activated(item)` | Emitted after `activate*` runs something. |
+
+Launching an application also reports it to the daemon (`op: "used"`), which is
+what feeds the frecency ranking below.
 
 ## Wire protocol
 
@@ -179,6 +199,35 @@ there is no embedder (keyword search still works).
 {"op":"search","query":"tarts","limit":20,"mode":"hybrid"}
 ```
 
+**`used`** — remember that an application was launched (feeds the frecency
+ranking below). Send it after running `exec`:
+
+```json
+{"op":"used","key":"firefox.desktop"}
+{"ok":true}
+```
+
+**`preview`** — a small preview of one file, for a preview pane:
+
+```json
+{"op":"preview","path":"/home/me/notes.md","line":12}
+```
+
+```json
+{"ok":true,"kind":"text","path":"/home/me/notes.md","size":4200,"mtime":1792195650.4,
+ "line":12,"start_line":1,"total_lines":180,"truncated":false,"text":"…"}
+```
+
+- `kind` is `"text"` (context lines around `line`, at most ±12), `"image"` (the
+  client loads the file itself; no bytes are sent) or `"meta"` (binary or
+  unreadable: `size`, `mtime` and a `reason`).
+- `line` is optional; without it the first lines come back.
+- A missing file is `{"ok":false,"error":"…"}`.
+
+**Request tags.** Any request may carry a `"req"` string; the reply echoes it, so
+one connection can mix request kinds. The demo tags `"launcher"` and `"preview"`
+and routes on `req`.
+
 **`ping`** → `{"ok":true,"version":"0.1.1"}`.
 
 **`status`** → index counts (`files`, `chunks`, `vectors`, `schema_version`, …).
@@ -188,6 +237,21 @@ there is no embedder (keyword search still works).
 **Two-phase pattern.** Send `mode:"fts"` on every keystroke and `mode:"hybrid"`
 after a short pause; the later reply simply replaces the list. Send `warmup`
 when the popup opens so the first semantic query is not slow.
+
+## Ranking (frecency)
+
+The daemon remembers how often and how recently each application was launched
+(`op: "used"`; stored in `$XDG_STATE_HOME/feagle/frecency.json`, where the
+`feagle pick` fallback writes too). Ranking adds a **bounded** bonus — at most 5
+points — on top of the match score:
+
+- it never outranks a better match (the tiers are exact 100, prefix 50,
+  substring 25, fuzzy 10, browse 1, and the bonus stays below the gaps);
+- inside one tier, and for the empty-query browse list, the most-used application
+  comes first.
+
+The bonus decays with a 30-day half-life, so yesterday's application beats one
+used last year. Deleting the JSON file resets the history.
 
 ## Styling and icons
 
