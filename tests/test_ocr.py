@@ -167,3 +167,193 @@ def test_ocr_pages_without_tools_is_a_noop(monkeypatch):
     texts, count = ocr.ocr_pages(Path("x.pdf"), ["", ""])
     assert count == 0
     assert texts == ["", ""]
+
+
+# ---- page segmentation mode and OSD -------------------------------------
+
+
+def test_resolve_psm_explicit_mode_wins_over_osd(monkeypatch):
+    monkeypatch.setattr(ocr, "osd_available", lambda: True)
+    assert ocr.resolve_psm(6, osd=True, langs="eng") == (6, "eng")
+
+
+def test_resolve_psm_auto_leaves_the_tesseract_default(monkeypatch):
+    monkeypatch.setattr(ocr, "osd_available", lambda: True)
+    assert ocr.resolve_psm("auto", osd=False, langs="eng") == (None, "eng")
+    assert ocr.resolve_psm(None, langs="eng") == (None, "eng")
+
+
+def test_resolve_psm_with_osd_adds_mode_and_language(monkeypatch):
+    monkeypatch.setattr(ocr, "osd_available", lambda: True)
+    assert ocr.resolve_psm("auto", osd=True, langs="rus+eng") == (1, "rus+eng+osd")
+
+
+def test_resolve_psm_does_not_duplicate_the_osd_language(monkeypatch):
+    monkeypatch.setattr(ocr, "osd_available", lambda: True)
+    assert ocr.resolve_psm("auto", osd=True, langs="eng+osd") == (1, "eng+osd")
+
+
+def test_resolve_psm_without_osd_data_falls_back(monkeypatch):
+    monkeypatch.setattr(ocr, "osd_available", lambda: False)
+    assert ocr.resolve_psm("auto", osd=True, langs="eng") == (None, "eng")
+
+
+def test_osd_available_is_checked_once(monkeypatch):
+    calls = []
+
+    def languages(**kwargs):
+        calls.append(1)
+        return {"osd", "eng"}
+
+    monkeypatch.setattr(ocr, "tesseract_languages", languages)
+    ocr.osd_available.cache_clear()
+    try:
+        assert ocr.osd_available() is True
+        assert ocr.osd_available() is True
+    finally:
+        ocr.osd_available.cache_clear()
+    assert calls == [1]
+
+
+def test_ocr_image_passes_the_page_segmentation_mode(tmp_path, monkeypatch):
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"PNG")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"text\n", b"")
+
+    monkeypatch.setattr(ocr.subprocess, "run", fake_run)
+    ocr.ocr_image(image, langs="eng", psm=7, tesseract="tesseract")
+    assert calls[0][-2:] == ["--psm", "7"]
+
+
+def test_ocr_image_without_a_mode_keeps_the_default_command(tmp_path, monkeypatch):
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"PNG")
+    calls = []
+    monkeypatch.setattr(
+        ocr.subprocess, "run",
+        lambda cmd, **k: (calls.append(cmd), subprocess.CompletedProcess(cmd, 0, b"t", b""))[1],
+    )
+    ocr.ocr_image(image, langs="eng", tesseract="tesseract")
+    assert "--psm" not in calls[0]
+
+
+# ---- parallel page OCR ---------------------------------------------------
+
+
+class InlineExecutor:
+    """A ``ProcessPoolExecutor`` stand-in that runs each task immediately."""
+
+    def __init__(self, workers):
+        self.workers = workers
+        self.submitted = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def submit(self, fn, payload):
+        from concurrent.futures import Future
+
+        self.submitted.append(payload)
+        future = Future()
+        try:
+            future.set_result(fn(payload))
+        except Exception as exc:  # noqa: BLE001 - mirror a real pool
+            future.set_exception(exc)
+        return future
+
+
+def _fake_pages(monkeypatch, seen=None):
+    def fake_page(pdf, page, **kwargs):
+        if seen is not None:
+            seen.append(page)
+        return f"page {page} text"
+
+    monkeypatch.setattr(ocr, "ocr_pdf_page", fake_page)
+    monkeypatch.setattr(ocr, "ocr_available", lambda: True)
+
+
+def test_ocr_pages_parallel_keeps_page_order(monkeypatch):
+    seen = []
+    _fake_pages(monkeypatch, seen)
+    pools = []
+
+    def factory(workers):
+        pool = InlineExecutor(workers)
+        pools.append(pool)
+        return pool
+
+    texts, count = ocr.ocr_pages(
+        Path("x.pdf"), ["", "", ""], workers=2, executor_factory=factory
+    )
+    assert texts == ["page 1 text", "page 2 text", "page 3 text"]
+    assert count == 3
+    assert pools[0].workers == 2
+    assert sorted(seen) == [1, 2, 3]
+
+
+def test_ocr_pages_clamps_the_worker_count(monkeypatch):
+    _fake_pages(monkeypatch)
+    workers_seen = []
+    ocr.ocr_pages(
+        Path("x.pdf"), [""], workers=99,
+        executor_factory=lambda workers: workers_seen.append(workers) or InlineExecutor(workers),
+    )
+    assert workers_seen == [ocr.MAX_OCR_WORKERS]
+
+
+def test_ocr_pages_parallel_isolates_page_errors(monkeypatch):
+    monkeypatch.setattr(ocr, "ocr_available", lambda: True)
+
+    def flaky(pdf, page, **kwargs):
+        if page == 2:
+            raise ocr.OcrError("boom")
+        return f"page {page}"
+
+    monkeypatch.setattr(ocr, "ocr_pdf_page", flaky)
+    texts, count = ocr.ocr_pages(
+        Path("x.pdf"), ["", "", ""], workers=2, executor_factory=InlineExecutor
+    )
+    assert texts == ["page 1", "", "page 3"]
+    assert count == 2
+
+
+def test_ocr_pages_falls_back_when_the_pool_is_unavailable(monkeypatch):
+    _fake_pages(monkeypatch)
+
+    def no_pool(workers):
+        raise RuntimeError("no processes here")
+
+    texts, count = ocr.ocr_pages(
+        Path("x.pdf"), ["", ""], workers=2, executor_factory=no_pool
+    )
+    assert texts == ["page 1 text", "page 2 text"]
+    assert count == 2
+
+
+def test_ocr_pages_with_one_worker_stays_in_process(monkeypatch):
+    _fake_pages(monkeypatch)
+    texts, count = ocr.ocr_pages(
+        Path("x.pdf"), [""], workers=1,
+        executor_factory=lambda workers: pytest.fail("must not start a pool"),
+    )
+    assert texts == ["page 1 text"]
+    assert count == 1
+
+
+def test_ocr_pages_custom_page_callable_disables_the_pool(monkeypatch):
+    monkeypatch.setattr(ocr, "ocr_available", lambda: True)
+    seen = []
+    texts, count = ocr.ocr_pages(
+        Path("x.pdf"), ["", ""], workers=2,
+        ocr_page=lambda pdf, page, **kwargs: (seen.append(page), "text")[1],
+        executor_factory=lambda workers: pytest.fail("must not pool a custom callable"),
+    )
+    assert count == 2
+    assert seen == [1, 2]

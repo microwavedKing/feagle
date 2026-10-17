@@ -69,6 +69,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `Tab` (all / applications / files) and can open pre-filled from a hotkey
   (`qs ipc -p … call feagle-launcher search "…"`). Replies echo an optional `req`
   tag, so one socket can mix request kinds.
+- OCR tuning: `[index].ocr_workers` (1 or 2) recognizes scanned PDF pages in a
+  process pool — `tesseract` is single-threaded, and two workers measured **1.78×**
+  faster (0.97 s → 0.52 s per page) on the synthetic scan. `[index].ocr_psm`
+  selects tesseract's page segmentation mode, and `[index].ocr_osd` uses OSD
+  (`--psm 1` with the `osd` language) so a rotated scan is detected and undone;
+  `feagle doctor` warns when `ocr_osd` is on but `tesseract-data-osd` is missing.
+  `bench/ocr_eval.py` measures OCR throughput and quality (CER/WER, word
+  confidence) across `--psm` and DPI values.
 
 ### Changed
 

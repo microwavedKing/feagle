@@ -221,6 +221,9 @@ ocr_langs = "rus+eng"   # keep English in the list for mixed documents
 ocr_dpi = 300
 ocr_min_chars = 20      # pages with less text than this are OCR'd
 ocr_max_pages = 200     # safety limit; OCR is slow
+ocr_workers = 2         # 1 or 2 worker processes (tesseract is single-threaded)
+ocr_psm = "auto"        # or a tesseract --psm value, 0..13
+ocr_osd = false         # detect and undo rotated scans (needs tesseract-data-osd)
 ```
 
 OCR is off by default (it is CPU-heavy: roughly a second or more per page).
@@ -228,6 +231,25 @@ If `tesseract` or the requested language data is missing, pages simply stay
 empty, the rest of the index is unaffected, and `feagle doctor` says what to
 install. For Latin-only documents `ocr_langs = "eng"` gives cleaner results than
 `rus+eng`.
+
+`tesseract` is single-threaded, so `ocr_workers = 2` runs two pages at once and
+roughly halves the time on a multi-core machine (measured on the synthetic scan:
+0.97 s/page → 0.52 s/page, **1.78×**) at the cost of one more rendered page in
+memory. It is capped at 2: a 300-dpi page is tens of megabytes once decoded, and
+more workers mostly fight over the same cores.
+
+`ocr_psm` sets tesseract's page segmentation mode (`"auto"` leaves the default,
+3). `ocr_osd = true` uses mode 1 with the `osd` language, which makes tesseract
+detect and undo a rotated scan — but only when its orientation confidence is
+high enough, i.e. on text-heavy pages. `feagle doctor` warns if `ocr_osd` is on
+while `tesseract-data-osd` is missing.
+
+**Measured** with `python bench/ocr_eval.py` (synthetic fixtures, `eng`): all
+`--psm` values and 150/200/300 dpi recognized the fixture with **CER/WER = 0**,
+mean word confidence 96; 300 dpi is ~3× slower per page than 150 dpi, so raise
+`ocr_dpi` only when the scan needs it. The 180°-rotated copy is *not* fixed by
+OSD on this fixture (CER 0.79): it holds two lines, and OSD reports a weak margin
+and refuses to rotate.
 
 **Images.** With `[index].ocr_images = true`, `feagle` indexes `png`, `jpg`,
 `jpeg`, `webp` and `tiff` files by OCR'ing them directly with `tesseract`. No
@@ -489,6 +511,7 @@ as an upper bound for that class of hardware. Raw results are in
 ```sh
 feagle bench --files 60 --seed 1 --out bench/results/bench.json
 python bench/quality_eval.py --files 60 --seed 1
+python bench/ocr_eval.py --pages 6     # OCR speed (workers) and quality (psm/dpi)
 ```
 
 ### Model: q4 is the default
@@ -549,7 +572,8 @@ corpus (**3.9× faster**, `stem_text` 7.8×, only 285 real stemmer calls). Searc
 
 - OCR is opt-in and slow: about a second per PDF page and ~0.65 s per image on
   the reference laptop. It needs `tesseract` plus language data; scanned PDF
-  pages also need `pdftoppm` from `poppler`.
+  pages also need `pdftoppm` from `poppler`. `ocr_workers = 2` (the default) runs
+  two pages at once for a measured 1.78× speedup.
 - Image search is opt-in and CPU-heavy: it needs the `mmproj` file and `ffmpeg`,
   images are downscaled before embedding, and the embeddings server then uses
   about 1 GiB of RAM.
@@ -788,6 +812,9 @@ ocr_langs = "rus+eng"   # для смешанных документов ост�
 ocr_dpi = 300
 ocr_min_chars = 20      # страницы, где текста меньше — распознаются
 ocr_max_pages = 200     # предохранитель: OCR медленный
+ocr_workers = 2         # 1 или 2 процесса-воркера (tesseract однопоточный)
+ocr_psm = "auto"        # либо значение --psm, 0..13
+ocr_osd = false         # определять и разворачивать повёрнутые сканы (нужен tesseract-data-osd)
 ```
 
 OCR по умолчанию выключен (тяжёлый: примерно секунда и больше на страницу).
@@ -795,6 +822,26 @@ OCR по умолчанию выключен (тяжёлый: примерно �
 остальной индекс не пострадает, а `feagle doctor` скажет, что поставить. Для
 чисто латинских документов `ocr_langs = "eng"` даёт более чистый результат, чем
 `rus+eng`.
+
+`tesseract` однопоточный, поэтому `ocr_workers = 2` распознаёт две страницы
+одновременно и примерно вдвое сокращает время на многоядерной машине (замер на
+синтетическом скане: 0.97 с/страница → 0.52 с/страница, **1.78×**) ценой ещё
+одной отрендеренной страницы в памяти. Больше двух нельзя: страница при 300 dpi
+после декодирования — это десятки мегабайт, а лишние воркеры лишь конкурируют за
+те же ядра.
+
+`ocr_psm` задаёт режим сегментации tesseract (`"auto"` оставляет значение по
+умолчанию, 3). `ocr_osd = true` включает режим 1 с языком `osd` — tesseract сам
+определяет и разворачивает повёрнутый скан, но только если его уверенность в
+ориентации достаточно высока, то есть на страницах с большим количеством текста.
+`feagle doctor` предупредит, если `ocr_osd` включён, а `tesseract-data-osd` нет.
+
+**Замеры** (`python bench/ocr_eval.py`, синтетические фикстуры, `eng`): при всех
+значениях `--psm` и 150/200/300 dpi фикстура распознана с **CER/WER = 0**, средняя
+уверенность в словах 96; 300 dpi примерно втрое медленнее на страницу, чем 150
+dpi, поэтому поднимайте `ocr_dpi` только если скан этого требует. Копию,
+повёрнутую на 180°, OSD на этой фикстуре **не** исправляет (CER 0.79): в ней две
+строки, OSD сообщает о слабом запасе и отказывается разворачивать.
 
 **Картинки.** При `[index].ocr_images = true` `feagle` индексирует `png`, `jpg`,
 `jpeg`, `webp` и `tiff`, распознавая их напрямую через `tesseract`. Рендер не
@@ -1055,6 +1102,7 @@ max_per_file = 3
 ```sh
 feagle bench --files 60 --seed 1 --out bench/results/bench.json
 python bench/quality_eval.py --files 60 --seed 1
+python bench/ocr_eval.py --pages 6     # OCR speed (workers) and quality (psm/dpi)
 ```
 
 ### Модель: по умолчанию q4
@@ -1117,7 +1165,8 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
   колонкой со стемами (Snowball), а не токенизатором.
 - OCR включается вручную, тяжёлый (примерно секунда на страницу PDF и ~0.65 с на
   картинку на эталонном ноутбуке) и требует `tesseract` с языковыми данными; для
-  страниц сканированных PDF нужен ещё `pdftoppm` из poppler.
+  страниц сканированных PDF нужен ещё `pdftoppm` из poppler. `ocr_workers = 2`
+  (значение по умолчанию) распознаёт две страницы разом: замерено 1.78×.
 - Поиск картинок включается вручную и тяжёл на CPU: нужны файл `mmproj` и `ffmpeg`,
   картинки уменьшаются перед эмбеддингом, а сервер эмбеддингов начинает занимать
   около 1 ГиБ RAM.

@@ -225,6 +225,67 @@ def test_pdf_ocr_is_invoked_for_empty_pages(tmp_path, monkeypatch):
     assert captured["kwargs"]["langs"] == "rus+eng"
 
 
+def _empty_pdf(tmp_path, monkeypatch):
+    path = tmp_path / "scan.pdf"
+    path.write_bytes(b"%PDF-1.7")
+    monkeypatch.setattr("feagle.indexer.extract.shutil.which", lambda name: "/usr/bin/pdftotext")
+
+    class Proc:
+        returncode = 0
+        stdout = b""
+        stderr = b""
+
+    monkeypatch.setattr("feagle.indexer.extract.subprocess.run", lambda *a, **k: Proc())
+    return path
+
+
+def test_pdf_ocr_passes_the_tuning_options(tmp_path, monkeypatch):
+    path = _empty_pdf(tmp_path, monkeypatch)
+    captured = {}
+
+    def fake_ocr(pdf, pages, **kwargs):
+        captured.update(kwargs)
+        return pages, 0
+
+    monkeypatch.setattr("feagle.indexer.extract.ocr_pages", fake_ocr)
+    extract_pdf(path, ocr=True, ocr_psm=6, ocr_workers=2)
+    assert captured["psm"] == 6
+    assert captured["workers"] == 2
+
+
+def test_pdf_ocr_with_osd_resolves_mode_and_language(tmp_path, monkeypatch):
+    from feagle.indexer import ocr
+
+    path = _empty_pdf(tmp_path, monkeypatch)
+    monkeypatch.setattr(ocr, "osd_available", lambda: True)
+    captured = {}
+
+    def fake_ocr(pdf, pages, **kwargs):
+        captured.update(kwargs)
+        return pages, 0
+
+    monkeypatch.setattr("feagle.indexer.extract.ocr_pages", fake_ocr)
+    extract_pdf(path, ocr=True, ocr_langs="eng", ocr_osd=True)
+    assert captured["langs"] == "eng+osd"
+    assert captured["psm"] == 1
+
+
+def test_image_ocr_resolves_the_mode(tmp_path, monkeypatch):
+    path = tmp_path / "shot.png"
+    path.write_bytes(b"PNG")
+    monkeypatch.setattr("feagle.indexer.extract.image_ocr_available", lambda: True)
+    captured = {}
+
+    def fake_ocr(image, **kwargs):
+        captured.update(kwargs)
+        return "recognized"
+
+    monkeypatch.setattr("feagle.indexer.extract.ocr_image", fake_ocr)
+    result = extract(path, ocr_images=True, ocr_langs="eng", ocr_psm=11)
+    assert result.pages == ("recognized",)
+    assert captured["psm"] == 11
+
+
 def test_pdf_without_ocr_does_not_call_ocr(tmp_path, monkeypatch):
     path = tmp_path / "scan.pdf"
     path.write_bytes(b"%PDF-1.7")

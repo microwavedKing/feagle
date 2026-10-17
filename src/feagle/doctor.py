@@ -324,13 +324,22 @@ def check_ocr(cfg: dict[str, Any]) -> Check:
             "ocr", "warn", f"{detail}; missing languages: {', '.join(missing_langs)}",
             "install tesseract-data-" + "/tesseract-data-".join(missing_langs),
         )
+    if cfg["index"].get("ocr_osd") and "osd" not in langs:
+        # Rotation detection silently does nothing without the OSD data.
+        return Check(
+            "ocr", "warn",
+            f"{detail}; ocr_osd is on but the osd data is missing (rotated scans are not detected)",
+            "sudo pacman -S tesseract-data-osd",
+        )
     if pdf_enabled and not pdftoppm:
         # Images work with tesseract alone; scanned PDF pages also need poppler.
         return Check(
             "ocr", "warn", f"{detail}; pdftoppm missing (PDF pages are skipped)",
             "sudo pacman -S poppler",
         )
-    return Check("ocr", "ok", f"{detail}; languages: {', '.join(wanted)}")
+    workers = cfg["index"].get("ocr_workers", 1)
+    extra = f"; osd on, {workers} worker(s)" if cfg["index"].get("ocr_osd") else ""
+    return Check("ocr", "ok", f"{detail}; languages: {', '.join(wanted)}{extra}")
 
 
 def check_media(cfg: dict[str, Any]) -> Check:

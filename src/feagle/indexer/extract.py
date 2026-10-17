@@ -19,10 +19,12 @@ from .ocr import (
     DEFAULT_LANGS,
     IMAGE_SUFFIXES,
     OCR_TIMEOUT,
+    PSM_AUTO,
     OcrError,
     image_ocr_available,
     ocr_image,
     ocr_pages,
+    resolve_psm,
 )
 
 log = get_logger("indexer.extract")
@@ -90,6 +92,9 @@ def extract(
     ocr_dpi: int = DEFAULT_DPI,
     ocr_min_chars: int = 20,
     ocr_max_pages: int = 200,
+    ocr_psm: str | int | None = PSM_AUTO,
+    ocr_osd: bool = False,
+    ocr_workers: int = 1,
 ) -> Extracted:
     """Extract indexable text from ``path`` based on its extension."""
     suffix = path.suffix.lower()
@@ -101,6 +106,9 @@ def extract(
             ocr_dpi=ocr_dpi,
             ocr_min_chars=ocr_min_chars,
             ocr_max_pages=ocr_max_pages,
+            ocr_psm=ocr_psm,
+            ocr_osd=ocr_osd,
+            ocr_workers=ocr_workers,
         )
     if suffix in IMAGE_SUFFIXES:
         return extract_image(
@@ -108,6 +116,8 @@ def extract(
             enabled=ocr_images or media_images,
             ocr=ocr_images,
             ocr_langs=ocr_langs,
+            ocr_psm=ocr_psm,
+            ocr_osd=ocr_osd,
         )
     return extract_text(path, max_bytes=max_bytes)
 
@@ -167,6 +177,8 @@ def extract_image(
     ocr: bool = False,
     ocr_langs: str = DEFAULT_LANGS,
     timeout: float = OCR_TIMEOUT,
+    ocr_psm: str | int | None = PSM_AUTO,
+    ocr_osd: bool = False,
 ) -> Extracted:
     """Prepare an image for indexing.
 
@@ -181,8 +193,9 @@ def extract_image(
     if ocr:
         if not image_ocr_available():
             raise UnsupportedFile(f"{IMAGE_NO_TESSERACT_HINT}: {path}")
+        psm, langs = resolve_psm(ocr_psm, osd=ocr_osd, langs=ocr_langs)
         try:
-            text = ocr_image(path, langs=ocr_langs, timeout=timeout)
+            text = ocr_image(path, langs=langs, timeout=timeout, psm=psm)
         except OcrError as exc:
             raise ExtractionError(str(exc)) from exc
         if not text.strip():
@@ -201,6 +214,9 @@ def extract_pdf(
     ocr_dpi: int = DEFAULT_DPI,
     ocr_min_chars: int = 20,
     ocr_max_pages: int = 200,
+    ocr_psm: str | int | None = PSM_AUTO,
+    ocr_osd: bool = False,
+    ocr_workers: int = 1,
 ) -> Extracted:
     """Extract a PDF page by page using ``pdftotext`` (with optional OCR)."""
     binary = shutil.which("pdftotext")
@@ -233,13 +249,16 @@ def extract_pdf(
         pages = [""]
 
     if ocr:
+        psm, langs = resolve_psm(ocr_psm, osd=ocr_osd, langs=ocr_langs)
         pages, ocrned = ocr_pages(
             path,
             pages,
-            langs=ocr_langs,
+            langs=langs,
             dpi=ocr_dpi,
             min_chars=ocr_min_chars,
             max_pages=ocr_max_pages,
+            psm=psm,
+            workers=ocr_workers,
         )
         if ocrned:
             log.info("OCR recovered text on %d page(s) of %s", ocrned, path)

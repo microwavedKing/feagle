@@ -391,6 +391,9 @@ def index_file(
                 ocr_dpi=index_cfg["ocr_dpi"],
                 ocr_min_chars=index_cfg["ocr_min_chars"],
                 ocr_max_pages=index_cfg["ocr_max_pages"],
+                ocr_psm=index_cfg["ocr_psm"],
+                ocr_osd=index_cfg["ocr_osd"],
+                ocr_workers=index_cfg["ocr_workers"],
             )
             if is_image and media_images:
                 # One image = one chunk/vector, whatever the OCR text length is.
