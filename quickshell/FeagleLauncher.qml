@@ -1,31 +1,38 @@
-// feagle launcher popup for Quickshell (example).
+// feagle launcher — one window, everything: applications first, then file hits,
+// ranked semantically as you type (instant keyword results, then a semantic
+// refresh). No second window, no separate "ask for a query" step.
 //
-// Talks line-delimited JSON to feagle's queryd socket. The reply is a ready
-// mixed list (applications first, then file hits), so this file only draws and
-// launches.
+// The feagle protocol lives in FeagleSearch.qml; this file only draws and keys.
 //
-// Two phases, so typing never waits for the model:
-//   1. fast  — {"op":"launcher",...,"mode":"fts"}    on every keystroke
-//   2. slow  — {"op":"launcher",...,"mode":"hybrid"} after a short debounce
-// On open it also sends {"op":"warmup"} to warm llama-server in the background.
+//   Run the demo:      quickshell -p /path/to/feagle/quickshell
+//   Toggle from a key: qs ipc call feagle-launcher toggle
 //
-// Toggle it from a compositor hotkey with:  qs ipc call feagle-launcher toggle
+// To use feagle inside your own launcher, copy FeagleSearch.qml and read its
+// header — you do not need this file.
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Widgets
 
 PanelWindow {
     id: root
 
+    // ---- state -------------------------------------------------------------
     property bool open: false
-    property string query: ""
-    property var results: []
     property int currentIndex: 0
+    /// True when the daemon has not answered for a moment after opening.
+    property bool daemonSlow: false
 
-    // queryd socket lives in the user runtime dir.
-    readonly property string socketPath:
-        (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user") + "/feagle/queryd.sock"
+    // ---- theme (edit these to match your shell) ----------------------------
+    readonly property color base: "#1e1e2e"
+    readonly property color border: "#313244"
+    readonly property color text: "#cdd6f4"
+    readonly property color muted: "#a6adc8"
+    readonly property color selected: "#313244"
+    readonly property color hovered: "#28283a"
 
     visible: open
     color: "transparent"
@@ -36,59 +43,94 @@ PanelWindow {
     WlrLayershell.keyboardFocus:
         root.open ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
-    function send(obj) {
-        if (!socket.connected) return;
-        socket.write(JSON.stringify(obj) + "\n");
-        socket.flush();
+    // ---- feagle backend ----------------------------------------------------
+    FeagleSearch {
+        id: feagle
+        active: root.open
+        onResultsChanged: root.currentIndex = 0
     }
 
-    function refresh(mode) {
-        send({ op: "launcher", query: root.query, mode: mode, apps_limit: 8 });
+    Timer {
+        id: connectTimer
+        interval: 800
+        repeat: false
+        running: root.open && !feagle.connected
+        onTriggered: root.daemonSlow = true
+    }
+
+    // ---- helpers -----------------------------------------------------------
+    function fileIcon(path) {
+        const name = String(path).split("/").pop();
+        const dot = name.lastIndexOf(".");
+        const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+        const icons = {
+            pdf: "application-pdf",
+            doc: "x-office-document", docx: "x-office-document", odt: "x-office-document",
+            xls: "x-office-spreadsheet", xlsx: "x-office-spreadsheet", ods: "x-office-spreadsheet",
+            ppt: "x-office-presentation", pptx: "x-office-presentation", odp: "x-office-presentation",
+            png: "image-x-generic", jpg: "image-x-generic", jpeg: "image-x-generic",
+            webp: "image-x-generic", gif: "image-x-generic", tiff: "image-x-generic",
+            bmp: "image-x-generic", svg: "image-x-generic",
+            mp4: "video-x-generic", mkv: "video-x-generic", webm: "video-x-generic",
+            mov: "video-x-generic", avi: "video-x-generic",
+            mp3: "audio-x-generic", flac: "audio-x-generic", ogg: "audio-x-generic",
+            wav: "audio-x-generic", m4a: "audio-x-generic",
+            zip: "package-x-generic", tar: "package-x-generic", gz: "package-x-generic",
+            xz: "package-x-generic", "7z": "package-x-generic", rar: "package-x-generic",
+            md: "text-markdown", rst: "text-x-generic", txt: "text-x-generic",
+            py: "text-x-python", js: "text-x-javascript", ts: "text-x-javascript",
+            json: "application-json", html: "text-html", css: "text-css",
+            sh: "text-x-script", c: "text-x-csrc", h: "text-x-chdr", cpp: "text-x-c++src",
+            rs: "text-x-rust", go: "text-x-go", java: "text-x-java"
+        };
+        return icons[ext] || "text-x-generic";
+    }
+
+    function primaryLabel(item) {
+        return item.kind === "app" ? item.name : item.path;
+    }
+
+    function secondaryLabel(item) {
+        return item.kind === "app" ? "Application" : (item.snippet || "");
+    }
+
+    function fmtTime(seconds) {
+        const total = Math.round(seconds);
+        const minutes = Math.floor(total / 60);
+        const rest = total % 60;
+        return minutes + ":" + (rest < 10 ? "0" : "") + rest;
+    }
+
+    function positionLabel(item) {
+        if (item.kind === "app")
+            return "";
+        if (item.time !== null && item.time !== undefined)
+            return fmtTime(item.time);
+        if (item.page !== null && item.page !== undefined)
+            return "p. " + item.page;
+        if (item.line !== null && item.line !== undefined)
+            return ":" + item.line;
+        return "";
+    }
+
+    function move(delta) {
+        if (feagle.results.length === 0)
+            return;
+        root.currentIndex = Math.max(
+            0, Math.min(root.currentIndex + delta, feagle.results.length - 1));
     }
 
     function openLauncher() {
         root.open = true;
-        root.query = "";
-        field.text = "";
-        root.results = [];
         root.currentIndex = 0;
-        if (socket.connected) {
-            send({ op: "warmup" });
-            refresh("fts");
-        }
+        root.daemonSlow = false;
+        field.text = "";
+        feagle.reset();
         field.forceActiveFocus();
     }
 
     function closeLauncher() {
         root.open = false;
-    }
-
-    function activate(index) {
-        if (index < 0 || index >= root.results.length) return;
-        const item = root.results[index];
-        if (item.kind === "app") {
-            Quickshell.execDetached(item.exec);
-        } else {
-            const argv = ["feagle", "open", item.path];
-            if (item.time !== null && item.time !== undefined)
-                argv.push("--time", String(item.time));
-            else if (item.page !== null && item.page !== undefined)
-                argv.push("--page", String(item.page));
-            else if (item.line !== null && item.line !== undefined)
-                argv.push("--line", String(item.line));
-            Quickshell.execDetached(argv);
-        }
-        closeLauncher();
-    }
-
-    function handleLine(line) {
-        if (!line) return;
-        let msg;
-        try { msg = JSON.parse(line); } catch (e) { return; }
-        if (msg && msg.ok && msg.results) {
-            root.results = msg.results;
-            root.currentIndex = 0;
-        }
     }
 
     IpcHandler {
@@ -98,139 +140,273 @@ PanelWindow {
         function hide(): void { root.closeLauncher(); }
     }
 
-    Socket {
-        id: socket
-        path: root.socketPath
-        connected: root.open
-        onConnectedChanged: {
-            if (connected && root.open) {
-                root.send({ op: "warmup" });
-                root.refresh("fts");
-            }
-        }
-        parser: SplitParser {
-            onRead: (line) => root.handleLine(line)
-        }
-    }
-
-    // Dimmed backdrop; a click outside the panel closes the launcher.
+    // ---- backdrop ----------------------------------------------------------
     Rectangle {
         anchors.fill: parent
-        color: "#aa000000"
+        color: "#000000"
+        opacity: root.open ? 0.5 : 0
+        Behavior on opacity { NumberAnimation { duration: 120 } }
         MouseArea { anchors.fill: parent; onClicked: root.closeLauncher() }
     }
 
+    // ---- card --------------------------------------------------------------
     Rectangle {
-        id: panel
-        width: Math.min(680, parent.width - 80)
-        height: Math.min(480, parent.height - 120)
+        id: card
+        width: Math.min(620, parent.width - 48)
+        height: Math.min(440, parent.height - 96)
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
-        anchors.topMargin: parent.height * 0.18
-        radius: 12
-        color: "#1e1e2e"
-        border.color: "#45475a"
+        anchors.topMargin: Math.max(40, parent.height * 0.15)
+        radius: 14
+        color: root.base
+        border.width: 1
+        border.color: root.border
+        opacity: root.open ? 1 : 0
+        scale: root.open ? 1 : 0.98
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+        Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
-        Column {
-            anchors.fill: parent
-            anchors.margins: 12
-            spacing: 8
+        // Swallow clicks so they never reach the backdrop.
+        MouseArea { anchors.fill: parent }
 
-            Rectangle {
-                id: fieldBox
-                width: parent.width
-                height: 40
-                radius: 8
-                color: "#313244"
+        // Search field.
+        Item {
+            id: searchRow
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            height: 56
 
-                TextInput {
-                    id: field
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    color: "#cdd6f4"
-                    font.pixelSize: 16
-                    clip: true
-                    onTextChanged: {
-                        root.query = text;
-                        root.refresh("fts");   // fast phase
-                        debounce.restart();    // semantic phase after a pause
-                    }
-                    Keys.onPressed: (event) => {
-                        if (event.key === Qt.Key_Down) {
-                            root.currentIndex = Math.min(root.currentIndex + 1, root.results.length - 1);
-                            event.accepted = true;
-                        } else if (event.key === Qt.Key_Up) {
-                            root.currentIndex = Math.max(root.currentIndex - 1, 0);
-                            event.accepted = true;
-                        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                            root.activate(root.currentIndex);
-                            event.accepted = true;
-                        } else if (event.key === Qt.Key_Escape) {
-                            root.closeLauncher();
-                            event.accepted = true;
-                        }
-                    }
+            // Drawn magnifier — no icon-theme dependency, always renders.
+            Item {
+                id: searchGlyph
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 18
+                width: 18
+                height: 18
+
+                Rectangle {
+                    x: 1
+                    y: 1
+                    width: 11
+                    height: 11
+                    radius: 5.5
+                    color: "transparent"
+                    border.width: 1.6
+                    border.color: root.muted
+                }
+                Rectangle {
+                    x: 10
+                    y: 10
+                    width: 2
+                    height: 6
+                    radius: 1
+                    color: root.muted
+                    rotation: 45
+                    transformOrigin: Item.TopLeft
                 }
             }
 
-            Timer {
-                id: debounce
-                interval: 120
-                repeat: false
-                onTriggered: root.refresh("hybrid")
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: searchGlyph.right
+                anchors.leftMargin: 12
+                color: root.muted
+                font.pixelSize: 17
+                text: "Search files and applications…"
+                visible: field.text.length === 0
             }
 
-            ListView {
-                id: list
-                width: parent.width
-                height: parent.height - fieldBox.height - 8
+            TextInput {
+                id: field
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: searchGlyph.right
+                anchors.right: parent.right
+                anchors.leftMargin: 12
+                anchors.rightMargin: 18
+                color: root.text
+                font.pixelSize: 17
                 clip: true
-                model: root.results
-                currentIndex: root.currentIndex
-                delegate: Rectangle {
-                    required property var modelData
-                    required property int index
-                    width: list.width
-                    height: 44
-                    radius: 6
-                    color: index === root.currentIndex ? "#45475a" : "transparent"
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: 10
-                        anchors.right: parent.right
-                        anchors.rightMargin: 10
-                        Text {
-                            width: parent.width
-                            color: "#cdd6f4"
-                            elide: Text.ElideMiddle
-                            text: {
-                                if (modelData.kind === "app") return modelData.name;
-                                let base = modelData.path;
-                                if (modelData.time !== null && modelData.time !== undefined)
-                                    base += "  @ " + modelData.time + "s";
-                                else if (modelData.page !== null && modelData.page !== undefined)
-                                    base += "  (page " + modelData.page + ")";
-                                else if (modelData.line !== null && modelData.line !== undefined)
-                                    base += ":" + modelData.line;
-                                return base;
-                            }
-                        }
-                        Text {
-                            width: parent.width
-                            color: "#a6adc8"
-                            font.pixelSize: 11
-                            elide: Text.ElideRight
-                            visible: text.length > 0
-                            text: modelData.snippet !== undefined ? modelData.snippet : ""
-                        }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.activate(index)
+                selectByMouse: true
+                onTextChanged: {
+                    root.currentIndex = 0;
+                    feagle.setQuery(text);
+                }
+                Keys.onPressed: (event) => {
+                    if (event.key === Qt.Key_Down) {
+                        root.move(1); event.accepted = true;
+                    } else if (event.key === Qt.Key_Up) {
+                        root.move(-1); event.accepted = true;
+                    } else if (event.key === Qt.Key_PageDown) {
+                        root.move(6); event.accepted = true;
+                    } else if (event.key === Qt.Key_PageUp) {
+                        root.move(-6); event.accepted = true;
+                    } else if (event.key === Qt.Key_Home) {
+                        root.currentIndex = 0; event.accepted = true;
+                    } else if (event.key === Qt.Key_End) {
+                        root.currentIndex = Math.max(0, feagle.results.length - 1);
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        feagle.activate(root.currentIndex); root.closeLauncher();
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Escape) {
+                        root.closeLauncher(); event.accepted = true;
                     }
                 }
             }
+        }
+
+        Rectangle {
+            id: dividerTop
+            anchors { top: searchRow.bottom; left: parent.left; right: parent.right }
+            height: 1
+            color: root.border
+            visible: feagle.results.length > 0
+        }
+
+        // Footer with the mode and key hints.
+        Item {
+            id: footer
+            anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+            height: 34
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 18
+                anchors.right: hints.left
+                anchors.rightMargin: 12
+                elide: Text.ElideRight
+                color: root.muted
+                font.pixelSize: 11
+                text: {
+                    if (root.daemonSlow && !feagle.connected)
+                        return "queryd is not reachable — start feagle-queryd";
+                    if (feagle.error)
+                        return "queryd: " + feagle.error;
+                    const count = feagle.results.length;
+                    const kind = feagle.mode === "hybrid" ? "semantic" : "keyword";
+                    return count + (count === 1 ? " result" : " results")
+                        + " · " + kind + " · " + Math.round(feagle.tookMs) + " ms";
+                }
+            }
+
+            Text {
+                id: hints
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: parent.right
+                anchors.rightMargin: 18
+                color: root.muted
+                font.pixelSize: 11
+                text: "↑↓  ↵ open  esc close"
+            }
+        }
+
+        Rectangle {
+            id: dividerBottom
+            anchors { bottom: footer.top; left: parent.left; right: parent.right }
+            height: 1
+            color: root.border
+            visible: feagle.results.length > 0
+        }
+
+        ListView {
+            id: list
+            anchors.top: dividerTop.bottom
+            anchors.bottom: dividerBottom.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            clip: true
+            model: feagle.results
+            currentIndex: root.currentIndex
+            onCurrentIndexChanged: {
+                if (currentIndex >= 0)
+                    positionViewAtIndex(currentIndex, ListView.Contain);
+            }
+            delegate: Rectangle {
+                id: row
+                required property var modelData
+                required property int index
+                width: list.width
+                height: 50
+                color: index === root.currentIndex
+                    ? root.selected
+                    : (hover.hovered ? root.hovered : "transparent")
+
+                IconImage {
+                    id: rowIcon
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 18
+                    implicitSize: 22
+                    source: row.modelData.kind === "app"
+                        ? Quickshell.iconPath(row.modelData.icon || "", "application-x-executable")
+                        : Quickshell.iconPath(root.fileIcon(row.modelData.path), "text-x-generic")
+                }
+
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: rowIcon.right
+                    anchors.leftMargin: 12
+                    anchors.right: rowPos.left
+                    anchors.rightMargin: 12
+                    spacing: 1
+
+                    Text {
+                        width: parent.width
+                        color: root.text
+                        font.pixelSize: 14
+                        elide: Text.ElideMiddle
+                        text: root.primaryLabel(row.modelData)
+                    }
+                    Text {
+                        width: parent.width
+                        color: root.muted
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        visible: text.length > 0
+                        text: root.secondaryLabel(row.modelData)
+                    }
+                }
+
+                Text {
+                    id: rowPos
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: 18
+                    color: root.muted
+                    font.pixelSize: 11
+                    text: root.positionLabel(row.modelData)
+                }
+
+                HoverHandler {
+                    id: hover
+                    onHoveredChanged: {
+                        if (hovered)
+                            root.currentIndex = row.index;
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        feagle.activateItem(row.modelData);
+                        root.closeLauncher();
+                    }
+                }
+            }
+        }
+
+        Text {
+            anchors.centerIn: list
+            width: list.width - 48
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            color: root.muted
+            font.pixelSize: 13
+            visible: feagle.results.length === 0
+            text: feagle.query.length === 0
+                ? "Type to search your files and applications"
+                : "No matches for “" + feagle.query + "”"
         }
     }
 }

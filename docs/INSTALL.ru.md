@@ -153,6 +153,7 @@ feagle index           # разовая индексация (если setup е�
 feagle search "рецепт борща"          # гибридный поиск
 feagle search "рецепт борща" --json   # машинно-читаемо
 feagle pick                           # окно: приложения + файлы
+# либо попап на Quickshell (одно живое окно): quickshell -p …/feagle/quickshell
 ```
 
 Первый семантический запрос после долгого простоя занимает ~1.5–2 с (запуск
@@ -160,9 +161,20 @@ feagle pick                           # окно: приложения + фай�
 
 ## 5. Хоткей в композиторе
 
-Ниже — по одной строке для каждого композитора. Если `feagle` не в `PATH`
-(venv/pipx), замените `feagle` на полный путь, например
-`/home/имя/.local/bin/feagle`.
+Рекомендуемый вариант — **попап на Quickshell** (одно живое окно, встраивается и в
+свой QS-лаунчер; см. [`../quickshell/README.md`](../quickshell/README.md)):
+
+- **Hyprland**: `bind = SUPER, D, exec, qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle`
+- **Sway**: `bindsym $mod+d exec qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle`
+- **niri**: `Mod+D { spawn "qs" "ipc" "-p" "/path/to/feagle/quickshell" "call" "feagle-launcher" "toggle"; }`
+- **River**: `riverctl map normal Super D spawn 'qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle'`
+
+(нужно, чтобы `quickshell -p …/feagle/quickshell` был запущен вместе с сессией;
+`qs ipc` указывает инстанс через `-p <тот же путь>` или `-c <имя конфига>`.)
+
+Без Quickshell используйте `feagle pick`. Ниже — по одной строке для каждого
+композитора. Если `feagle` не в `PATH` (venv/pipx), замените `feagle` на полный
+путь, например `/home/имя/.local/bin/feagle`.
 
 **mango** (`~/.config/mango/config.toml`, с 0.18):
 
@@ -170,7 +182,7 @@ feagle pick                           # окно: приложения + фай�
 [bind.default]
 # одно окно: приложения + файлы из индекса
 "SUPER+d" = "spawn_shell,feagle pick"
-# семантический поиск: спросить запрос, затем показать ранжированные файлы
+# семантический поиск (открывает два окна); попап на Quickshell делает это в одном
 "SUPER+s" = "spawn_shell,wofi --dmenu -p 'feagle:' | xargs -r feagle search --pick"
 ```
 

@@ -38,6 +38,8 @@ class App:
     exec_line: str
     terminal: bool
     path: Path
+    #: The ``Icon=`` value (a themed icon name or an absolute path); "" if absent.
+    icon: str = ""
 
 
 def data_dirs() -> list[Path]:
@@ -102,6 +104,7 @@ def parse_desktop_file(path: Path, root: Path) -> App | None:
         exec_line=exec_line,
         terminal=values.get("Terminal", "false").lower() == "true",
         path=path,
+        icon=values.get("Icon", ""),
     )
 
 

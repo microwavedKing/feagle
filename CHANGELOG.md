@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `feagle doctor` reports the devices `llama-server` can offload to
   (`--list-devices`), so GPU offload availability is visible before tuning
   `[embeddings].extra_args`.
+- A single-window Quickshell launcher: `quickshell/FeagleLauncher.qml` shows
+  applications first, then file hits, with keyword results on every keystroke and
+  a semantic refresh a moment later — no second "ask for a query" window. The
+  protocol is factored into a reusable `quickshell/FeagleSearch.qml` backend so
+  feagle search can be added to any existing Quickshell launcher;
+  `quickshell/README.md` documents the component API and the wire protocol.
+- `queryd`'s `launcher` results for applications now carry `icon` (the `.desktop`
+  `Icon=` name), so a launcher can show real application icons.
 
 ### Changed
 

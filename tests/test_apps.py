@@ -77,6 +77,20 @@ def test_other_sections_are_ignored(tmp_path):
     assert app is not None and app.name == "Example Editor"
 
 
+def test_parse_icon_name(tmp_path):
+    path = write(tmp_path, "icon.desktop", ENTRY + "Icon=example-editor\n")
+    app = apps.parse_desktop_file(path, tmp_path)
+    assert app is not None
+    assert app.icon == "example-editor"
+
+
+def test_icon_defaults_to_empty(tmp_path):
+    path = write(tmp_path, "noicon.desktop", ENTRY)
+    app = apps.parse_desktop_file(path, tmp_path)
+    assert app is not None
+    assert app.icon == ""
+
+
 def test_discover_apps_prefers_user_entries(tmp_path):
     user = tmp_path / "user"
     system = tmp_path / "system"
