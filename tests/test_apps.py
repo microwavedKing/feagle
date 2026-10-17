@@ -170,3 +170,21 @@ def test_match_apps_orders_and_limits():
     assert [app.name for _, app in matched] == ["File Manager", "Files"]
     assert len(matched) == 2
     assert apps.match_apps(fakes, "zzz") == []
+
+
+def test_match_apps_bonus_reorders_within_a_tier():
+    fakes = [_app(name) for name in ("Files", "File Manager")]
+    # Both are prefix matches (same tier); the bonus decides the order.
+    boosted = apps.match_apps(fakes, "file", bonus=lambda app: 5.0 if app.name == "Files" else 0.0)
+    assert [app.name for _, app in boosted] == ["Files", "File Manager"]
+
+
+def test_match_apps_bonus_cannot_create_a_match():
+    fakes = [_app("Firefox")]
+    assert apps.match_apps(fakes, "zzz", bonus=lambda app: 100.0) == []
+
+
+def test_match_apps_bonus_is_clamped_to_non_negative():
+    fakes = [_app(name) for name in ("Files", "File Manager")]
+    matched = apps.match_apps(fakes, "file", bonus=lambda app: -100.0)
+    assert [app.name for _, app in matched] == ["File Manager", "Files"]

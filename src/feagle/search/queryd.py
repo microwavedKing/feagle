@@ -19,7 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .. import __version__, db, paths
+from .. import __version__, db, frecency, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..log import get_logger
 from ..search import hybrid
@@ -28,6 +28,27 @@ from ..search.vec import vec_count
 log = get_logger("search.queryd")
 
 _EMBEDDINGS_HINT = "start llama-server and run 'feagle setup' to enable semantic search"
+
+#: Largest ranking bonus frecency can add to an application. Kept below the gap
+#: between match tiers (1/10/25/50/100), so history reorders within a tier but
+#: never lets a weakly matching app outrank a stronger match.
+_FRECENCY_BONUS = 5.0
+
+#: Lines of context shown before and after the matched line in a preview.
+_PREVIEW_CONTEXT_LINES = 12
+#: A preview never reads more than this many bytes of a file.
+_PREVIEW_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _preview_window(total: int, line: int | None) -> tuple[int, int]:
+    """The ``[start, end)`` line range to show for a preview."""
+    if line is None or line < 1:
+        return 0, min(total, _PREVIEW_CONTEXT_LINES * 2)
+    index = line - 1
+    return (
+        max(0, index - _PREVIEW_CONTEXT_LINES),
+        min(total, index + _PREVIEW_CONTEXT_LINES + 1),
+    )
 
 
 class QueryEngine:
@@ -43,6 +64,7 @@ class QueryEngine:
         on_embedder_failure: Callable[[], Any] | None = None,
         clock: Callable[[], float] = time.monotonic,
         retry_cooldown: float = 30.0,
+        frecency_store: Any | None = None,
     ) -> None:
         self.cfg = cfg
         self.db_path = db_path or paths.db_path()
@@ -56,6 +78,7 @@ class QueryEngine:
         self._apps_cache: list[Any] | None = None
         self._apps_built = 0.0
         self._apps_ttl = 60.0
+        self._frecency = frecency_store if frecency_store is not None else frecency.FrecencyStore()
 
     def _ensure_embedder(self) -> Any | None:
         """Return an embedder, (re)starting it on demand with a cooldown."""
@@ -127,6 +150,18 @@ class QueryEngine:
             self._apps_built = now
         return self._apps_cache
 
+    def _app_bonus(self) -> Callable[[Any], float]:
+        """A bounded frecency bonus for ranking applications."""
+        scores = self._frecency.scores()
+        if not scores:
+            return lambda app: 0.0
+
+        def bonus(app: Any) -> float:
+            value = scores.get(app.id, 0.0)
+            return min(value, frecency.SATURATION) / frecency.SATURATION * _FRECENCY_BONUS
+
+        return bonus
+
     def launcher(
         self,
         query: str,
@@ -140,7 +175,9 @@ class QueryEngine:
 
         files = self.search(query, limit=limit, mode=mode)
         results: list[dict[str, Any]] = []
-        for score, app in apps_module.match_apps(self._app_list(), query, limit=apps_limit):
+        for score, app in apps_module.match_apps(
+            self._app_list(), query, limit=apps_limit, bonus=self._app_bonus()
+        ):
             results.append({
                 "kind": "app",
                 "id": app.id,
@@ -158,6 +195,50 @@ class QueryEngine:
             "mode": files["mode"],
             "took_ms": files["took_ms"],
             "results": results,
+        }
+
+    def used(self, key: str) -> dict[str, Any]:
+        """Remember that ``key`` was launched (feeds the frecency ranking)."""
+        self._frecency.record(key)
+        return {"ok": True}
+
+    def preview(self, path: str, *, line: int | None = None) -> dict[str, Any]:
+        """A small preview of a file: text around a line, or an image marker.
+
+        The client renders ``kind == "image"`` by loading the file itself and
+        ``kind == "text"`` as monospace context; anything unreadable or binary
+        comes back as ``kind == "meta"`` with the file's size and mtime.
+        """
+        from ..indexer import extract
+
+        target = Path(path)
+        try:
+            stat = target.stat()
+        except OSError as exc:
+            return {"ok": False, "error": f"cannot read {path}: {exc}"}
+        if not target.is_file():
+            return {"ok": False, "error": "not a regular file"}
+        base = {"path": str(target), "size": stat.st_size, "mtime": stat.st_mtime}
+        if target.suffix.lower() in extract.IMAGE_SUFFIXES:
+            return {"ok": True, "kind": "image", **base}
+        try:
+            extracted = extract.extract_text(target, max_bytes=_PREVIEW_MAX_BYTES)
+        except extract.UnsupportedFile as exc:
+            return {"ok": True, "kind": "meta", **base, "reason": str(exc)}
+        except extract.ExtractionError as exc:
+            return {"ok": False, "error": str(exc)}
+        text = extracted.pages[0] if extracted.pages else ""
+        lines = text.splitlines()
+        start, end = _preview_window(len(lines), line)
+        return {
+            "ok": True,
+            "kind": "text",
+            **base,
+            "line": line,
+            "start_line": start + 1,
+            "total_lines": len(lines),
+            "text": "\n".join(lines[start:end]),
+            "truncated": stat.st_size > _PREVIEW_MAX_BYTES,
         }
 
     def search(
@@ -295,6 +376,14 @@ class QueryEngine:
                     mode=request.get("mode"),
                     apps_limit=int(request.get("apps_limit", 8)),
                 )
+            if op == "used":
+                return self.used(str(request.get("key", "")))
+            if op == "preview":
+                line = request.get("line")
+                return self.preview(
+                    str(request.get("path", "")),
+                    line=int(line) if line is not None else None,
+                )
             if op == "search":
                 return self.search(
                     str(request.get("query", "")),
@@ -328,6 +417,10 @@ class _Handler(socketserver.StreamRequestHandler):
                 response: dict[str, Any] = {"ok": False, "error": f"invalid JSON: {exc}"}
             else:
                 response = self.server.engine.dispatch(request)
+                # Echo the client's optional tag so it can route the reply.
+                tag = request.get("req")
+                if isinstance(tag, str):
+                    response["req"] = tag
             self.wfile.write((json.dumps(response, ensure_ascii=False) + "\n").encode())
             self.wfile.flush()
             hook = getattr(self.server, "request_hook", None)

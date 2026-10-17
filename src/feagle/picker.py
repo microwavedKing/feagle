@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from . import apps, launchers
+from . import apps, frecency, launchers
 from .log import get_logger
 from .openers import OpenError, open_result
 
@@ -65,6 +65,7 @@ def run_pick(
         except OSError as exc:
             log.error("cannot launch %s: %s", app.id, exc)
             return 1
+        frecency.FrecencyStore().record(app.id)
         return 0
 
     hit = (hits_by_key or {}).get(choice)

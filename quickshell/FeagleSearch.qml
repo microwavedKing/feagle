@@ -14,6 +14,11 @@
 // one that replaces the list. While `active` it also sends `warmup` so
 // `llama-server` loads in the background.
 //
+// `visibleResults` applies the `filter` ("all" / "apps" / "files") client-side,
+// and `requestPreview()` fetches a small preview of the selected file. After a
+// launch the component reports it back to the daemon (`op: "used"`) so the
+// daemon can rank frequently used applications higher.
+//
 // See README.md in this directory for the wire protocol and a full launcher.
 pragma ComponentBehavior: Bound
 
@@ -38,6 +43,10 @@ QtObject {
     property int browseAppsLimit: 300
     /// Maximum file hits; 0 uses the daemon's configured limit.
     property int limit: 0
+    /// Which results to expose through `visibleResults`: "all", "apps" or "files".
+    property string filter: "all"
+    /// Wait this many milliseconds before fetching a preview for a new selection.
+    property int previewDebounceMs: 80
     /// The `feagle` command used to open files (a name on PATH or an absolute path).
     /// Defaults to `$FEAGLE_BIN`, then `"feagle"`.
     property string feagleCommand: Quickshell.env("FEAGLE_BIN") || "feagle"
@@ -55,8 +64,21 @@ QtObject {
     property bool busy: false
     /// Last daemon error, or "".
     property string error: ""
+    /// The preview of the selected file: `{kind: "text"|"image"|"meta", ...}` or null.
+    property var preview: null
+    /// Last preview error, or "".
+    property string previewError: ""
     /// Whether the socket is connected.
     readonly property bool connected: socket.connected
+
+    /// `results` filtered by `filter`; this is what a launcher should display.
+    readonly property var visibleResults: {
+        if (root.filter === "apps")
+            return root.results.filter((item) => item.kind === "app");
+        if (root.filter === "files")
+            return root.results.filter((item) => item.kind === "file");
+        return root.results;
+    }
 
     /// Emitted after `activate()` runs something, with the item it ran.
     signal activated(var item)
@@ -97,9 +119,10 @@ QtObject {
         const browsing = root.query.trim().length === 0;
         var msg = {
             op: "launcher",
+            req: "launcher",
             query: root.query,
             mode: modeName,
-            apps_limit: browsing ? root.browseAppsLimit : root.appsLimit
+            apps_limit: root.appsLimitFor()
         };
         if (root.limit > 0)
             msg.limit = root.limit;
@@ -107,11 +130,43 @@ QtObject {
         send(msg);
     }
 
-    /// Run the result at `index` (launch an application or open a file).
+    /// How many applications the next request should ask for.
+    function appsLimitFor(): int {
+        if (root.filter === "files")
+            return 0;   // the user only wants files: do not rank applications
+        return root.query.trim().length === 0 ? root.browseAppsLimit : root.appsLimit;
+    }
+
+    /// Switch the client-side result filter: "all", "apps" or "files".
+    /// The visible list updates at once; the next request asks for less work.
+    function setFilter(name): void {
+        root.filter = name;
+    }
+
+    /// Cycle the filter forward (or back with `reverse`).
+    function cycleFilter(reverse): void {
+        const order = ["all", "apps", "files"];
+        const at = Math.max(0, order.indexOf(root.filter));
+        root.filter = order[(at + (reverse ? order.length - 1 : 1)) % order.length];
+    }
+
+    /// Fetch a preview for `item` (files only); debounced, safe to call on hover.
+    function requestPreview(item): void {
+        pendingPreview = item && item.kind === "file" ? item : null;
+        if (pendingPreview)
+            previewDebounce.restart();
+        else {
+            previewDebounce.stop();
+            root.preview = null;
+            root.previewError = "";
+        }
+    }
+
+    /// Run the result at `index` of `visibleResults`.
     function activate(index): void {
-        if (index < 0 || index >= root.results.length)
+        if (index < 0 || index >= root.visibleResults.length)
             return;
-        activateItem(root.results[index]);
+        activateItem(root.visibleResults[index]);
     }
 
     /// Run a single result item.
@@ -120,6 +175,9 @@ QtObject {
             return;
         if (item.kind === "app") {
             Quickshell.execDetached(item.exec);
+            // Tell the daemon so it can rank this application higher next time.
+            if (item.id)
+                send({ op: "used", key: item.id });
         } else {
             const argv = [root.feagleCommand, "open", item.path];
             if (item.time !== null && item.time !== undefined)
@@ -134,11 +192,34 @@ QtObject {
     }
 
     // ---- internals ---------------------------------------------------------
+    /// The file awaiting a preview request (set by `requestPreview`).
+    property var pendingPreview: null
+
     function send(obj): void {
         if (!socket.connected)
             return;
         socket.write(JSON.stringify(obj) + "\n");
         socket.flush();
+    }
+
+    function sendPreview(): void {
+        const item = root.pendingPreview;
+        if (!item)
+            return;
+        var msg = { op: "preview", req: "preview", path: item.path };
+        if (item.line !== null && item.line !== undefined)
+            msg.line = item.line;
+        send(msg);
+    }
+
+    function applyPreview(msg): void {
+        if (msg.ok) {
+            root.preview = msg;
+            root.previewError = "";
+        } else {
+            root.preview = null;
+            root.previewError = msg.error || "preview error";
+        }
     }
 
     function handleLine(line): void {
@@ -149,6 +230,10 @@ QtObject {
             msg = JSON.parse(line);
         } catch (e) {
             return;
+        }
+        if (msg && msg.req === "preview") {
+            applyPreview(msg);
+            return;   // previews never affect the result list or `busy`
         }
         root.busy = false;
         if (msg && msg.ok) {
@@ -179,5 +264,11 @@ QtObject {
         interval: root.debounceMs
         repeat: false
         onTriggered: root.request("hybrid")
+    }
+
+    property Timer previewDebounce: Timer {
+        interval: root.previewDebounceMs
+        repeat: false
+        onTriggered: root.sendPreview()
     }
 }

@@ -95,10 +95,11 @@
 
 | Файл | Ответственность | Ключевое |
 |---|---|---|
-| `apps.py` | XDG `.desktop` | `discover_apps()`, `parse_desktop_file()` (в т.ч. `Icon=` → `App.icon`), `launch()` (gtk-launch→gio→Exec), `match_apps()`/`score_app()` для лаунчера |
+| `apps.py` | XDG `.desktop` | `discover_apps()`, `parse_desktop_file()` (в т.ч. `Icon=` → `App.icon`), `launch()` (gtk-launch→gio→Exec), `match_apps()`/`score_app()` (+ опциональный `bonus`) для лаунчера |
+| `frecency.py` | история запусков | `FrecencyStore` (JSON в `$XDG_STATE_HOME/feagle/`), скор = count × полураспад 30 дней, обрезка/лимит, атомарная запись |
 | `launchers.py` | dmenu-адаптеры | fuzzel/wofi/rofi/tofi/walker/stdout; формат `key\tdisplay`; fuzzel с `--with-nth/--accept-nth` |
-| `picker.py` | общий выбор | `app_items()`, `run_pick()` (приложения → запуск, файлы → `open_result`) |
-| `quickshell/` | попап-лаунчер (QML) | `FeagleSearch.qml` — переиспользуемый бэкенд (сокет, протокол, `fts`+`hybrid`), `FeagleLauncher.qml` — демо; см. `quickshell/README.md` |
+| `picker.py` | общий выбор | `app_items()`, `run_pick()` (приложения → запуск + запись в frecency, файлы → `open_result`) |
+| `quickshell/` | попап-лаунчер (QML) | `FeagleSearch.qml` — переиспользуемый бэкенд (сокет, протокол, `fts`+`hybrid`, фильтр, превью), `FeagleLauncher.qml` — демо (панель превью, `Tab`); см. `quickshell/README.md` |
 | `openers.py` | открытие на позиции | шаблоны `{path}/{line}/{page}/{time}`, `shlex` без shell, `--dry-run` |
 
 ### CLI (`cli/`)
@@ -155,8 +156,14 @@ chunks_vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[DIM])
 {"op":"warmup"}                                → {"ok":true,"warming":true}   (фон, не блокирует)
 {"op":"launcher","query":"...","mode":"fts|hybrid","apps_limit":8}
                                                → {"ok":true,"mode":..,"results":[{kind:"app"|"file",...}]}
+{"op":"used","key":"firefox.desktop"}          → {"ok":true}   (история запусков для frecency)
+{"op":"preview","path":"...","line":12}        → {"ok":true,"kind":"text|image|meta","text":...}
 {"op":false ...}                               → {"ok":false,"error":"...","hint":"..."}
 ```
+
+Любой запрос может нести строку `req` — сервер вернёт её в ответе (`req`), чтобы
+один сокет мог смешивать разные виды запросов (клиент-лаунчер различает так
+`launcher` и `preview`).
 
 Тред на соединение, своё read-only соединение к БД на запрос. Сервер не падает на
 исключениях: ошибка возвращается в `ok:false`.
@@ -251,7 +258,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 
 ## 7. Тесты
 
-- 39 файлов в `tests/`, ~489 тестов. Запуск: `.venv/bin/pytest -q`.
+- 40 файлов в `tests/`, ~535 тестов. Запуск: `.venv/bin/pytest -q`.
 - **Гейты `skipif`**: тесты, требующие `llama-server`/модели (`FEAGLE_RUN_MODEL_TESTS=1`),
   `pdftotext`, `tesseract`, `ocr_available()` — скипаются, поэтому CI проходит на
   чистом Ubuntu (без poppler/tesseract/llama).
@@ -296,6 +303,8 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 29 | Медиа-модели ставит `setup` (`--media-images/--media-video/--media-audio` + интерактивные вопросы): включает флаги `[media]` и качает `mmproj` / whisper-модель (пресеты, SHA256) | «одна команда» для включения медиа: пользователь не должен вручную править конфиг и угадывать имена/хэши файлов; загрузка идёт тем же проверяющим кодом, что и текстовая модель | `setup.SetupPlan.media_*`, `cmd_setup._download_media_models`, `presets.WHISPER_PRESETS` |
 | 30 | GPU-offload не хардкодим: `llama-server` берёт бэкенд своей сборки, флаги — через `[embeddings].extra_args` (применяются к текстовому и медиа-серверу), а `doctor` печатает `--list-devices` | железо у всех разное (CPU/Vulkan/CUDA/ROCm), а набор флагов зависит от сборки; `extra_args` уже проходит в оба сервера, отдельный код не нужен | `config` (шаблон), `doctor.check_llama_devices`, README/INSTALL |
 | 31 | Лаунчер: протокол вынесен в переиспользуемый `FeagleSearch.qml` (`QtObject`), демо `FeagleLauncher.qml` — одно окно; приложения первыми + файлы, `fts` мгновенно и `hybrid` после debounce; `icon` приложения в ответе `launcher` | «два окна» (`wofi \| feagle search --pick`) — плохой UX; один живой попап на Quickshell решает и это, а компонент позволяет встроить feagle в свой QS-лаунчер без копирования логики | `quickshell/FeagleSearch.qml`, `quickshell/FeagleLauncher.qml`, `queryd.launcher` (`icon`), `apps.App.icon` |
+| 32 | Frecency считается **на сервере** и добавляется как **ограниченный** бонус (≤ 5 к базовому скору, с полураспадом 30 дней); хранилище — JSON в `$XDG_STATE_HOME/feagle/frecency.json`, `feagle pick` пишет туда же | скоринг приложений уже живёт в `queryd`, поэтому историю видит любой клиент (включая dmenu-фолбэк), а не только QML; бонус меньше зазора между тирами (1/10/25/50/100), поэтому история не может вытеснить лучшее совпадение, но упорядочивает внутри тира и в режиме обзора | `frecency.py`, `queryd._app_bonus`/`used`, `apps.match_apps(bonus=…)`, `picker.run_pick` |
+| 33 | Превью — операция `preview` в `queryd` (текст вокруг строки ±12, маркер картинки, метаданные) + панель справа в демо; фильтр результатов (`all/apps/files`) — **на клиенте** (`Tab`), без нового запроса | превью — это чтение файла и логика, ей место рядом с индексом (любой клиент получит её даром); фильтр же не должен терять уже полученную семантическую выдачу, поэтому он клиентский и мгновенный | `queryd.preview`, `FeagleSearch.visibleResults/setFilter`, `FeagleLauncher` (панель, `Tab`) |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 

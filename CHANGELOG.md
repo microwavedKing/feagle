@@ -56,6 +56,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   component API and the wire protocol.
 - `queryd`'s `launcher` results for applications now carry `icon` (the `.desktop`
   `Icon=` name), so a launcher can show real application icons.
+- `queryd` gained `preview` (a small preview of one file: numbered context lines
+  around a match, an image marker, or file metadata) and `used` (remember that an
+  application was launched). Application ranking adds a bounded *frecency* bonus —
+  how often and how recently an app was launched, decaying with a 30-day half-life
+  — so a frequently used app comes first inside a match tier and in the
+  empty-query browse list, while never outranking a better name match. History
+  lives in `$XDG_STATE_HOME/feagle/frecency.json`, and `feagle pick` records
+  launches there too.
+- The Quickshell launcher shows a **preview pane** for the selected file (numbered
+  context lines with the match highlighted, or the image itself), filters results
+  with `Tab` (all / applications / files) and can open pre-filled from a hotkey
+  (`qs ipc -p … call feagle-launcher search "…"`). Replies echo an optional `req`
+  tag, so one socket can mix request kinds.
 
 ### Changed
 

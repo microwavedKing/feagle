@@ -16,6 +16,7 @@ import os
 import shlex
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -183,9 +184,26 @@ def score_app(name: str, query: str) -> float:
     return 0.0
 
 
-def match_apps(apps: list[App], query: str, *, limit: int = 10) -> list[tuple[float, App]]:
-    """``(score, app)`` pairs that match ``query``, best first."""
-    scored = [(score_app(app.name, query), app) for app in apps]
-    matched = [(score, app) for score, app in scored if score > 0.0]
+def match_apps(
+    apps: list[App],
+    query: str,
+    *,
+    limit: int = 10,
+    bonus: Callable[[App], float] | None = None,
+) -> list[tuple[float, App]]:
+    """``(score, app)`` pairs that match ``query``, best first.
+
+    ``bonus`` adds a non-negative ranking bonus to every *matching* app (for
+    example a frecency boost). It is applied after the match test, so it can
+    reorder results but never make a non-matching app appear.
+    """
+    matched: list[tuple[float, App]] = []
+    for app in apps:
+        score = score_app(app.name, query)
+        if score <= 0.0:
+            continue
+        if bonus is not None:
+            score += max(0.0, bonus(app))
+        matched.append((score, app))
     matched.sort(key=lambda item: (-item[0], item[1].name.casefold()))
     return matched[:limit]
