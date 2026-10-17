@@ -11,7 +11,7 @@ import pytest
 
 from feagle import config, db
 from feagle.embeddings.client import ServerUnavailable
-from feagle.search import vec
+from feagle.search import queryd, vec
 from feagle.search.queryd import QuerydClient, QuerydServer, QueryEngine
 
 
@@ -478,3 +478,96 @@ def test_preview_directory_is_an_error(db_path, tmp_path):
     result = engine.dispatch({"op": "preview", "path": str(tmp_path)})
     assert result["ok"] is False
     assert "not a regular file" in result["error"]
+
+
+# ---- PDF page previews ---------------------------------------------------
+
+
+TWO_PAGES = Path(__file__).parent / "fixtures" / "two_pages.pdf"
+
+
+@pytest.fixture
+def pdf_chunk(db_path):
+    """A chunk whose body matches page 2 of the PDF fixture."""
+    conn = db.open_database(db_path)
+    try:
+        cur = conn.execute(
+            "INSERT INTO files(path, size, mtime_ns, state, updated_at) VALUES(?,?,?,'ok',?)",
+            (str(TWO_PAGES), 100, 1, 0),
+        )
+        file_id = cur.lastrowid
+        cur = conn.execute(
+            "INSERT INTO chunks(file_id, seq, page, line, time_ms, body) VALUES(?,?,?,?,?,?)",
+            (file_id, 0, 2, None, None,
+             "Page two heading\nEcho foxtrot golf hotel in the second page."),
+        )
+        chunk_id = cur.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+    return chunk_id
+
+
+def _needs_poppler():
+    import shutil
+
+    if shutil.which("pdftotext") is None:
+        pytest.skip("poppler (pdftotext) is required")
+
+
+def test_find_anchor_matches_the_first_non_empty_line():
+    lines = ["", "Page two heading", "Echo foxtrot"]
+    assert queryd._find_anchor(lines, "\n\nPage two heading\nEcho foxtrot") == 2
+    assert queryd._find_anchor(lines, "   ") is None
+    assert queryd._find_anchor(lines, "nothing like this") is None
+
+
+def test_preview_pdf_page_anchors_on_the_chunk(db_path, pdf_chunk):
+    _needs_poppler()
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({
+        "op": "preview", "path": str(TWO_PAGES), "page": 2, "chunk_id": pdf_chunk,
+    })
+    assert result["ok"] is True
+    assert result["kind"] == "text"
+    assert result["page"] == 2
+    assert result["line"] == 1
+    assert "Echo foxtrot golf hotel" in result["text"]
+
+
+def test_preview_pdf_page_without_a_chunk_starts_at_the_top(db_path, pdf_chunk):
+    _needs_poppler()
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(TWO_PAGES), "page": 1})
+    assert result["kind"] == "text"
+    assert result["line"] is None
+    assert result["start_line"] == 1
+    assert "Alpha bravo charlie delta" in result["text"]
+
+
+def test_preview_pdf_without_poppler_degrades_to_metadata(db_path, monkeypatch):
+    monkeypatch.setattr(queryd.shutil, "which", lambda name: None)
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(TWO_PAGES), "page": 1})
+    assert result["ok"] is True
+    assert result["kind"] == "meta"
+    assert "poppler" in result["reason"]
+
+
+def test_preview_pdf_page_is_rendered_once(db_path, pdf_chunk, monkeypatch):
+    _needs_poppler()
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+    calls = []
+    real_run = queryd.subprocess.run
+
+    def counting_run(command, **kwargs):
+        calls.append(command)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(queryd.subprocess, "run", counting_run)
+    for _ in range(3):
+        engine.dispatch({"op": "preview", "path": str(TWO_PAGES), "page": 2, "chunk_id": pdf_chunk})
+    assert len(calls) == 1

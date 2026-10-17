@@ -11,8 +11,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import socket
 import socketserver
+import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -38,6 +40,10 @@ _FRECENCY_BONUS = 5.0
 _PREVIEW_CONTEXT_LINES = 12
 #: A preview never reads more than this many bytes of a file.
 _PREVIEW_MAX_BYTES = 2 * 1024 * 1024
+#: Wall-clock limit for rendering one PDF page for a preview.
+_PREVIEW_PDF_TIMEOUT = 20.0
+#: How many rendered PDF pages to keep (moving through one page must not re-render).
+_PREVIEW_PAGE_CACHE = 8
 
 
 def _preview_window(total: int, line: int | None) -> tuple[int, int]:
@@ -49,6 +55,21 @@ def _preview_window(total: int, line: int | None) -> tuple[int, int]:
         max(0, index - _PREVIEW_CONTEXT_LINES),
         min(total, index + _PREVIEW_CONTEXT_LINES + 1),
     )
+
+
+def _find_anchor(lines: list[str], needle: str) -> int | None:
+    """The 1-based line of ``needle``'s first non-empty line, or ``None``."""
+    wanted = next((part.strip() for part in needle.splitlines() if part.strip()), "")
+    if not wanted:
+        return None
+    head = wanted[:60]
+    for number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped == wanted or stripped.startswith(head) or head.startswith(stripped[:60]):
+            return number
+    return None
 
 
 class QueryEngine:
@@ -79,6 +100,7 @@ class QueryEngine:
         self._apps_built = 0.0
         self._apps_ttl = 60.0
         self._frecency = frecency_store if frecency_store is not None else frecency.FrecencyStore()
+        self._page_cache: dict[tuple[str, int, int], list[str]] = {}
 
     def _ensure_embedder(self) -> Any | None:
         """Return an embedder, (re)starting it on demand with a cooldown."""
@@ -202,12 +224,23 @@ class QueryEngine:
         self._frecency.record(key)
         return {"ok": True}
 
-    def preview(self, path: str, *, line: int | None = None) -> dict[str, Any]:
+    def preview(
+        self,
+        path: str,
+        *,
+        line: int | None = None,
+        page: int | None = None,
+        chunk_id: int | None = None,
+    ) -> dict[str, Any]:
         """A small preview of a file: text around a line, or an image marker.
 
         The client renders ``kind == "image"`` by loading the file itself and
         ``kind == "text"`` as monospace context; anything unreadable or binary
         comes back as ``kind == "meta"`` with the file's size and mtime.
+
+        A PDF has no line numbers (a chunk carries only its page), so with
+        ``page`` the page is rendered and the window is anchored on the chunk's
+        own text when ``chunk_id`` is given.
         """
         from ..indexer import extract
 
@@ -219,8 +252,11 @@ class QueryEngine:
         if not target.is_file():
             return {"ok": False, "error": "not a regular file"}
         base = {"path": str(target), "size": stat.st_size, "mtime": stat.st_mtime}
-        if target.suffix.lower() in extract.IMAGE_SUFFIXES:
+        suffix = target.suffix.lower()
+        if suffix in extract.IMAGE_SUFFIXES:
             return {"ok": True, "kind": "image", **base}
+        if suffix == ".pdf" and page is not None:
+            return self._preview_pdf(target, page, stat.st_mtime_ns, chunk_id, base)
         try:
             extracted = extract.extract_text(target, max_bytes=_PREVIEW_MAX_BYTES)
         except extract.UnsupportedFile as exc:
@@ -240,6 +276,82 @@ class QueryEngine:
             "text": "\n".join(lines[start:end]),
             "truncated": stat.st_size > _PREVIEW_MAX_BYTES,
         }
+
+    def _preview_pdf(
+        self,
+        target: Path,
+        page: int,
+        mtime_ns: int,
+        chunk_id: int | None,
+        base: dict[str, Any],
+    ) -> dict[str, Any]:
+        """The text of one PDF page, centred on the chunk that matched."""
+        lines = self._pdf_page_lines(target, page, mtime_ns)
+        if lines is None:
+            return {
+                "ok": True,
+                "kind": "meta",
+                **base,
+                "page": page,
+                "reason": "cannot read the page text (is poppler installed?)",
+            }
+        anchor = None
+        if chunk_id is not None:
+            body = self._chunk_body(int(chunk_id))
+            if body:
+                anchor = _find_anchor(lines, body)
+        start, end = _preview_window(len(lines), anchor)
+        return {
+            "ok": True,
+            "kind": "text",
+            **base,
+            "page": page,
+            "line": anchor,
+            "start_line": start + 1,
+            "total_lines": len(lines),
+            "text": "\n".join(lines[start:end]),
+            "truncated": False,
+        }
+
+    def _pdf_page_lines(self, target: Path, page: int, mtime_ns: int) -> list[str] | None:
+        """One PDF page's text lines, cached per (file, mtime, page)."""
+        key = (str(target), mtime_ns, page)
+        cached = self._page_cache.get(key)
+        if cached is not None:
+            return cached
+        binary = shutil.which("pdftotext")
+        if binary is None:
+            return None
+        try:
+            proc = subprocess.run(
+                [
+                    binary, "-enc", "UTF-8", "-q",
+                    "-f", str(page), "-l", str(page), "--", str(target), "-",
+                ],
+                capture_output=True,
+                timeout=_PREVIEW_PDF_TIMEOUT,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.warning("cannot render %s page %d: %s", target, page, exc)
+            return None
+        if proc.returncode != 0:
+            detail = proc.stderr.decode("utf-8", errors="replace").strip()
+            log.warning("pdftotext failed for %s page %d: %s", target, page, detail[:200])
+            return None
+        lines = proc.stdout.decode("utf-8", errors="replace").splitlines()
+        if len(self._page_cache) >= _PREVIEW_PAGE_CACHE:
+            self._page_cache.pop(next(iter(self._page_cache)))
+        self._page_cache[key] = lines
+        return lines
+
+    def _chunk_body(self, chunk_id: int) -> str | None:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT body FROM chunks WHERE id = ?", (chunk_id,)).fetchone()
+        finally:
+            conn.close()
+        return row["body"] if row is not None else None
 
     def search(
         self, query: str, *, limit: int | None = None, mode: str | None = None
@@ -380,9 +492,13 @@ class QueryEngine:
                 return self.used(str(request.get("key", "")))
             if op == "preview":
                 line = request.get("line")
+                page = request.get("page")
+                chunk_id = request.get("chunk_id")
                 return self.preview(
                     str(request.get("path", "")),
                     line=int(line) if line is not None else None,
+                    page=int(page) if page is not None else None,
+                    chunk_id=int(chunk_id) if chunk_id is not None else None,
                 )
             if op == "search":
                 return self.search(
