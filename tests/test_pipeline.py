@@ -494,3 +494,76 @@ def test_pause_check_stops_the_run(root, conn):
     # a later run without the pause finishes the remaining files
     rest = pipeline.index_roots(conn, make_cfg(root))
     assert rest.reindexed == 3
+
+
+# ---- targeted indexing (watch events) -----------------------------------
+
+
+def test_index_paths_indexes_only_the_given_file(root, conn):
+    (root / "a.txt").write_text("hello world", encoding="utf-8")
+    (root / "b.txt").write_text("second document", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root))
+
+    (root / "a.txt").write_text("hello changed world", encoding="utf-8")
+    stats = pipeline.index_paths(conn, make_cfg(root), [root / "a.txt"])
+    assert stats.scanned == 1
+    assert stats.reindexed == 1
+    assert stats.unchanged == 0
+    assert fts_hits(conn, "changed")
+    assert file_row(conn, root / "b.txt") is not None
+
+
+def test_index_paths_does_not_walk_the_root(root, conn, monkeypatch):
+    (root / "a.txt").write_text("hello world", encoding="utf-8")
+    walks = []
+
+    def no_walk(self, roots):
+        walks.append(list(roots))
+        return iter(())
+
+    monkeypatch.setattr(pipeline.Scanner, "iter_files", no_walk)
+    pipeline.index_paths(conn, make_cfg(root), [root / "a.txt"])
+    assert walks == []  # a file event never walks the tree
+    assert file_row(conn, root / "a.txt") is not None
+
+
+def test_index_paths_prunes_a_deleted_file(root, conn):
+    target = root / "a.txt"
+    target.write_text("hello world", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root))
+
+    target.unlink()
+    stats = pipeline.index_paths(conn, make_cfg(root), [target])
+    assert stats.pruned == 1
+    assert file_row(conn, target) is None
+
+
+def test_index_paths_keeps_a_filtered_but_existing_file(root, conn):
+    target = root / "a.txt"
+    target.write_text("hello world", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root))
+
+    # .txt is no longer allowlisted, but the file is still there: do not prune.
+    stats = pipeline.index_paths(conn, make_cfg(root, include_ext=[".md"]), [target])
+    assert stats.pruned == 0
+    assert stats.scanned == 0
+    assert file_row(conn, target) is not None
+
+
+def test_index_paths_walks_a_changed_directory(root, conn):
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "a.txt").write_text("one", encoding="utf-8")
+    (sub / "b.txt").write_text("two", encoding="utf-8")
+
+    stats = pipeline.index_paths(conn, make_cfg(root), [sub])
+    assert stats.reindexed == 2
+
+
+def test_index_paths_honours_the_pause(root, conn):
+    (root / "a.txt").write_text("hello world", encoding="utf-8")
+    stats = pipeline.index_paths(
+        conn, make_cfg(root), [root / "a.txt"], pause_check=lambda: "on battery"
+    )
+    assert stats.paused == "on battery"
+    assert stats.scanned == 0

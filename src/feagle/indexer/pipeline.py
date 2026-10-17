@@ -19,7 +19,7 @@ import os
 import sqlite3
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -564,6 +564,39 @@ def wipe(conn: sqlite3.Connection) -> None:
         db.drop_vec_table(conn)
 
 
+def _apply_outcome(
+    stats: IndexStats, outcome: str, written: int, inserted: int, path: Path
+) -> None:
+    """Record one file's result in ``stats`` (shared by both pass kinds)."""
+    if outcome == "unchanged":
+        stats.unchanged += 1
+    elif outcome == "touched":
+        stats.touched += 1
+    elif outcome == "reindexed":
+        stats.reindexed += 1
+        stats.chunks += written
+        stats.vectors += inserted
+    elif outcome == "unsupported":
+        stats.unsupported += 1
+    elif outcome == "error":
+        stats.errors += 1
+        if len(stats.error_samples) < 5:
+            stats.error_samples.append(str(path))
+
+
+def _remove_path(conn: sqlite3.Connection, path: Path) -> int:
+    """Delete the index rows for one path; ``1`` when something was removed."""
+    row = conn.execute("SELECT id FROM files WHERE path = ?", (_canonical(path),)).fetchone()
+    if row is None:
+        return 0
+    with conn:
+        old_ids = _delete_file_chunks(conn, row["id"])
+        if old_ids and db.has_vec_table(conn):
+            vec_delete(conn, old_ids)
+        conn.execute("DELETE FROM files WHERE id = ?", (row["id"],))
+    return 1
+
+
 def _prune_missing(
     conn: sqlite3.Connection, roots: list[Path], seen: set[str], stats: IndexStats
 ) -> None:
@@ -576,12 +609,7 @@ def _prune_missing(
             continue
         path = Path(stored)
         if any(path == root or root in path.parents for root in roots):
-            with conn:
-                old_ids = _delete_file_chunks(conn, row["id"])
-                if old_ids and db.has_vec_table(conn):
-                    vec_delete(conn, old_ids)
-                conn.execute("DELETE FROM files WHERE id = ?", (row["id"],))
-            stats.pruned += 1
+            stats.pruned += _remove_path(conn, path)
 
 
 def index_roots(
@@ -639,23 +667,72 @@ def index_roots(
         )
         if is_media and limit_media and outcome == "reindexed" and inserted > 0:
             image_budget -= 1
-        if outcome == "unchanged":
-            stats.unchanged += 1
-        elif outcome == "touched":
-            stats.touched += 1
-        elif outcome == "reindexed":
-            stats.reindexed += 1
-            stats.chunks += written
-            stats.vectors += inserted
-        elif outcome == "unsupported":
-            stats.unsupported += 1
-        elif outcome == "error":
-            stats.errors += 1
-            if len(stats.error_samples) < 5:
-                stats.error_samples.append(str(candidate.path))
+        _apply_outcome(stats, outcome, written, inserted, candidate.path)
 
     if not full and not rebuild:
         _prune_missing(conn, active, seen, stats)
 
     log.info("index run finished: %s", stats.summary())
+    return stats
+
+
+def index_paths(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    paths: Iterable[Path | str],
+    *,
+    embedder: Embedder | None = None,
+    pause_check: Callable[[], str | None] | None = None,
+) -> IndexStats:
+    """Index exactly ``paths`` (no root walk) and drop the ones that vanished.
+
+    The watcher already knows which files changed, so re-walking every root and
+    stat-ing every file in it is wasted work on a large tree. A path that is a
+    directory is walked as a small root of its own. Deletions are handled for the
+    paths in the batch; anything the watcher misses is caught by the periodic
+    full rescan.
+    """
+    if embedder is not None:
+        db.ensure_vec_table(conn, embedder.dim, model_id=cfg["embeddings"]["model"])
+
+    stats = IndexStats()
+    scanner = _build_scanner(cfg)
+    media_cfg = cfg.get("media") or {}
+    media_images = bool(media_cfg.get("images"))
+    media_video = bool(media_cfg.get("video"))
+    image_budget = int(media_cfg.get("images_per_run", 0))
+    limit_media = (media_images or media_video) and image_budget > 0
+
+    for raw in sorted({str(path) for path in paths}):
+        if pause_check is not None:
+            reason = pause_check()
+            if reason:
+                stats.paused = reason
+                log.info("indexing paused: %s", reason)
+                break
+        path = Path(os.path.abspath(os.path.expanduser(raw)))
+        if path.is_dir():
+            candidates: Iterable[ScanCandidate] = scanner.iter_files([path])
+        elif not path.exists():
+            stats.pruned += _remove_path(conn, path)
+            continue
+        else:
+            candidate = scanner.candidate_for(path)
+            candidates = [candidate] if candidate is not None else []
+
+        for candidate in candidates:
+            stats.scanned += 1
+            suffix = candidate.path.suffix.lower()
+            is_media = (suffix in IMAGE_SUFFIXES and media_images) or (
+                suffix in VIDEO_SUFFIXES and media_video
+            )
+            allow_image = (not is_media) or (not limit_media) or image_budget > 0
+            outcome, written, inserted = index_file(
+                conn, candidate, cfg, embedder=embedder, allow_image=allow_image
+            )
+            if is_media and limit_media and outcome == "reindexed" and inserted > 0:
+                image_budget -= 1
+            _apply_outcome(stats, outcome, written, inserted, candidate.path)
+
+    log.info("change pass finished: %s", stats.summary())
     return stats
