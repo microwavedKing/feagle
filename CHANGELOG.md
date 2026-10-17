@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-18
+
+Feature release: opt-in media search (images, video, audio), image OCR, a
+single-window Quickshell launcher with previews, and indexer/OCR performance
+work with measured numbers in the README.
+
 ### Added
 
 - Image OCR: with `[index].ocr_images = true`, `feagle` indexes `png`, `jpg`,
