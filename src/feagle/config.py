@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import paths
+from .indexer.ocr import MAX_OCR_WORKERS
 from .log import get_logger
 
 log = get_logger("config")
@@ -49,6 +50,9 @@ DEFAULTS: dict[str, Any] = {
         "ocr_dpi": 300,
         "ocr_min_chars": 20,
         "ocr_max_pages": 200,
+        "ocr_workers": 2,
+        "ocr_psm": "auto",
+        "ocr_osd": False,
     },
     "embeddings": {
         "model": "embeddinggemma-2-q4",
@@ -182,6 +186,16 @@ def validate(cfg: dict[str, Any], source: Path | None = None) -> None:
         _check(index[key] > 0, f"index.{key}", "must be > 0", source)
     _check_type(index, "ocr_min_chars", (int,), source)
     _check(index["ocr_min_chars"] >= 0, "index.ocr_min_chars", "must be >= 0", source)
+    _check_type(index, "ocr_workers", (int,), source)
+    _check(1 <= index["ocr_workers"] <= MAX_OCR_WORKERS, "index.ocr_workers",
+           f"must be between 1 and {MAX_OCR_WORKERS} (each worker renders a page in memory)",
+           source)
+    _check_type(index, "ocr_psm", (int, str), source)
+    if isinstance(index["ocr_psm"], str):
+        _check(index["ocr_psm"] == "auto", "index.ocr_psm", 'must be "auto" or 0..13', source)
+    else:
+        _check(0 <= index["ocr_psm"] <= 13, "index.ocr_psm", "must be between 0 and 13", source)
+    _check_type(index, "ocr_osd", (bool,), source)
 
     emb = cfg["embeddings"]
     _check_type(emb, "model", (str,), source)
@@ -324,6 +338,14 @@ ocr_dpi = 300
 ocr_min_chars = 20
 # Safety limit on how many pages per PDF are OCR'd (OCR is slow).
 ocr_max_pages = 200
+# OCR worker processes for scanned PDF pages (1 or 2). tesseract is
+# single-threaded, so 2 roughly halves the time on a multi-core machine, at the
+# cost of one more rendered page in memory at once.
+ocr_workers = 2
+# Page segmentation mode: "auto" or 0..13 (tesseract --psm).
+ocr_psm = "auto"
+# Detect and undo rotated scans (uses --psm 1 and the "osd" traineddata).
+ocr_osd = false
 
 [embeddings]
 # Preset name from embeddings/presets.py, or an absolute path to a GGUF file.

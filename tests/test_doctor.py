@@ -182,6 +182,24 @@ def test_check_ocr_missing_languages(monkeypatch):
     assert "missing languages" in check.message
 
 
+def test_check_ocr_osd_without_the_data_warns(monkeypatch):
+    _patch_ocr(monkeypatch, langs=("rus", "eng"))
+    cfg = config.default_config()
+    cfg["index"]["ocr_osd"] = True
+    check = doctor.check_ocr(cfg)
+    assert check.status == "warn"
+    assert "osd" in check.message
+
+
+def test_check_ocr_osd_with_the_data_is_ok(monkeypatch):
+    _patch_ocr(monkeypatch, langs=("rus", "eng", "osd"))
+    cfg = config.default_config()
+    cfg["index"]["ocr_osd"] = True
+    check = doctor.check_ocr(cfg)
+    assert check.status == "ok"
+    assert "osd on" in check.message
+
+
 def test_check_media_disabled():
     check = doctor.check_media(config.default_config())
     assert check.status == "info"
