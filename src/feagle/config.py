@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import paths
+from .embeddings import presets
 from .indexer.ocr import MAX_OCR_WORKERS
 from .log import get_logger
 
@@ -21,7 +22,14 @@ log = get_logger("config")
 SEARCH_MODES = ("auto", "hybrid", "fts")
 STEMMING_MODES = ("auto", "none")
 LAUNCHERS = ("auto", "fuzzel", "wofi", "rofi", "tofi", "walker", "stdout")
-MRL_DIMS = (128, 256, 512, 768)
+
+#: Matryoshka sizes accepted in ``[embeddings].mrl_dim`` (single source: presets).
+MRL_DIMS = presets.MRL_DIMS
+
+#: Vector distance cutoff tuned on EmbeddingGemma (``[search].max_distance``).
+#: Another model can have a different distance scale, so its preset may suggest
+#: its own value when the config still holds this default.
+DEFAULT_MAX_DISTANCE = 0.8
 
 DEFAULTS: dict[str, Any] = {
     "index": {
@@ -84,7 +92,9 @@ DEFAULTS: dict[str, Any] = {
         "stemming": "auto",
         # Drop vector neighbours whose L2 distance (on normalized vectors) is
         # above this; unrelated results otherwise always fill the list. 0 disables.
-        "max_distance": 0.8,
+        # Tuned on EmbeddingGemma; a model preset may suggest its own value when
+        # this one is left at the default (see hybrid.effective_max_distance).
+        "max_distance": DEFAULT_MAX_DISTANCE,
         # At most this many chunks of the same file in the results (0 = no cap).
         "max_per_file": 3,
     },
@@ -351,8 +361,10 @@ ocr_osd = false
 # Preset name from embeddings/presets.py, or an absolute path to a GGUF file.
 # q4 is the light default (about half the size of q8, ~30% faster indexing,
 # same measured retrieval quality); q8 is the official-repo alternative.
+# qwen3-embedding-0.6b-q8 is the fallback model (1024-dim, own prompts and
+# --pooling last, handled automatically); compare them in the README.
 model = "embeddinggemma-2-q4"
-# Matryoshka truncation, one of 128, 256, 512, 768.
+# Matryoshka truncation: 128, 256, 512, 768 (or 1024 for Qwen3-Embedding).
 mrl_dim = 768
 # External llama-server base URL. Empty means feagle manages the server itself.
 server_url = ""
@@ -401,6 +413,8 @@ rrf_k = 60
 # Russian stemming for the full-text index: auto | none
 stemming = "auto"
 # Ignore vector neighbours farther than this (L2 on normalized vectors; 0 = off).
+# Tuned on EmbeddingGemma; a model preset may use its own value while this one
+# stays at the default above (Qwen3-Embedding spreads correct pairs further out).
 max_distance = 0.8
 # Maximum chunks of one file in the results (0 = unlimited).
 max_per_file = 3

@@ -233,3 +233,42 @@ def test_embedder_adapter_embeds_images(env, tmp_path):
     assert len(embedder.embed_images([image])[0]) == 5
     assert touched == [1]
     svc.close()
+
+
+# -- model-specific settings ----------------------------------------------
+
+
+def test_embeddinggemma_needs_no_pooling(env):
+    sup = service.build_supervisor(cfg_with(model="embeddinggemma-2-q8"))
+    assert sup.cfg.pooling is None
+
+
+def test_qwen3_sets_last_pooling_and_its_prompt_family(env, monkeypatch):
+    cfg = cfg_with(model="qwen3-embedding-0.6b-q8")
+    sup = service.build_supervisor(cfg)
+    assert sup.cfg.pooling == "last"
+
+    service_obj = service.EmbeddingService(cfg)
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, base_url, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(service, "EmbeddingClient", FakeClient)
+    service_obj._make_client("http://127.0.0.1:1")
+    assert seen["family"] == "qwen3"
+
+
+def test_unknown_model_path_uses_the_default_family(env, monkeypatch):
+    cfg = cfg_with(model="/tmp/custom.gguf")
+    service_obj = service.EmbeddingService(cfg)
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, base_url, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(service, "EmbeddingClient", FakeClient)
+    service_obj._make_client("http://127.0.0.1:1")
+    assert seen["family"] == "gemma"

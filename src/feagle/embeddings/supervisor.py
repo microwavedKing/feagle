@@ -52,6 +52,9 @@ class SupervisorConfig:
     batch: int = 4096
     ubatch: int = 4096
     extra_args: list[str] = field(default_factory=list)
+    #: ``--pooling`` for models that need it. EmbeddingGemma has mean pooling
+    #: baked into the GGUF (never pass it); Qwen3-Embedding needs ``last``.
+    pooling: str | None = None
     llama_server: str = "llama-server"
     health_timeout: float = 60.0
     #: How long to wait for an already-listed server to become healthy before
@@ -81,7 +84,10 @@ def build_llama_command(cfg: SupervisorConfig, port: int) -> list[str]:
         command += ["-t", str(cfg.threads)]
     if cfg.mmproj_path is not None:
         command += ["--mmproj", str(cfg.mmproj_path)]
-    # NOTE: never pass --pooling; mean pooling is baked into the GGUF (§12.2).
+    # Only pass --pooling when the model needs it: EmbeddingGemma has mean pooling
+    # baked into the GGUF, while Qwen3-Embedding requires `last` (RESEARCH §4.2).
+    if cfg.pooling:
+        command += ["--pooling", cfg.pooling]
     command += list(cfg.extra_args)
     return command
 

@@ -29,6 +29,12 @@ class ModelSpec:
     mmproj_url: str | None = None
     mmproj_sha256: str | None = None
     mmproj_size: int | None = None
+    #: Which prompt family the model expects (see ``embeddings/prompts.py``).
+    prompt_family: str = "gemma"
+    #: Suggested ``[search].max_distance`` for this model's distance scale. Used
+    #: only while the config keeps the built-in default (see
+    #: ``hybrid.effective_max_distance``).
+    max_distance: float | None = None
     note: str = ""
 
 
@@ -73,6 +79,31 @@ PRESETS: dict[str, ModelSpec] = {
             "the benchmark corpus (see bench/results)."
         ),
     ),
+    "qwen3-embedding-0.6b-q8": ModelSpec(
+        name="qwen3-embedding-0.6b-q8",
+        filename="Qwen3-Embedding-0.6B-Q8_0.gguf",
+        url=(
+            "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/"
+            "Qwen3-Embedding-0.6B-Q8_0.gguf"
+        ),
+        sha256="06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439",
+        size=639_150_592,
+        dim=1024,
+        context=32768,
+        repo="Qwen/Qwen3-Embedding-0.6B-GGUF",
+        pooling="last",  # the GGUF has no pooling baked in, unlike EmbeddingGemma
+        prompt_family="qwen3",
+        # Measured: correct pairs sit at L2 0.66-1.25 and unrelated ones at ~1.39,
+        # so EmbeddingGemma's 0.8 cutoff would drop nearly every neighbour and
+        # silently leave full-text-only results. The filter is close to a no-op
+        # for this model - which is fine, RRF already handles the ranking.
+        max_distance=1.3,
+        note=(
+            "Fallback model (0.6B, 1024-dim): queries need an "
+            "'Instruct: …\\nQuery: …' prefix and documents none, and the server "
+            "needs --pooling last. Measured against EmbeddingGemma in the README."
+        ),
+    ),
 }
 
 #: Multimodal projector presets (only used in the optional media phase).
@@ -88,8 +119,9 @@ MMPROJ_PRESETS: dict[str, ModelSpec] = {
     ),
 }
 
-#: Matryoshka dimensions supported by EmbeddingGemma 2.
-MRL_DIMS: tuple[int, ...] = (128, 256, 512, 768)
+#: Matryoshka dimensions: the EmbeddingGemma sizes plus the Qwen3-Embedding
+#: full size (a larger ``mrl_dim`` than the model's dimension is a no-op).
+MRL_DIMS: tuple[int, ...] = (128, 256, 512, 768, 1024)
 
 #: whisper.cpp speech-to-text models for audio transcription (not embeddings).
 #: Keyed by filename so it matches ``[media].whisper_model`` (which is a

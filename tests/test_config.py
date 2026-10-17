@@ -110,3 +110,16 @@ def test_bool_not_accepted_as_int(tmp_path):
 def test_render_defaults_is_valid_documented_toml():
     data = tomllib.loads(config.render_defaults())
     assert data == config.DEFAULTS
+
+
+def test_mrl_dim_1024_is_accepted(tmp_path):
+    """Qwen3-Embedding is 1024-dim, so its full size must be allowed."""
+    path = tmp_path / "config.toml"
+    path.write_text("[embeddings]\nmrl_dim = 1024\n", encoding="utf-8")
+    assert config.load_config(path)["embeddings"]["mrl_dim"] == 1024
+
+
+def test_mrl_dims_come_from_the_presets():
+    from feagle.embeddings import presets
+
+    assert config.MRL_DIMS is presets.MRL_DIMS
