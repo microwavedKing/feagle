@@ -21,6 +21,12 @@ __pycache__/
 # Benchmark outputs
 bench/results/
 
+# makepkg artifacts. Build in a copy of the repository: makepkg extracts into
+# ./src/, which is the Python package directory here.
+/pkg/
+*.pkg.tar.*
+/src/feagle-*/
+
 # Editors / OS
 .idea/
 .vscode/
