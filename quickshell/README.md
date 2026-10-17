@@ -106,7 +106,8 @@ Configuration:
 | `socketPath` | `$XDG_RUNTIME_DIR/feagle/queryd.sock` | The queryd socket. |
 | `active` | `false` | Connect and send `warmup` while true. |
 | `debounceMs` | `120` | Delay before the semantic (`hybrid`) pass. |
-| `appsLimit` | `8` | Applications shown above the file hits. |
+| `appsLimit` | `8` | Applications shown above the file hits while typing. |
+| `browseAppsLimit` | `300` | Applications listed when the query is empty (browse mode). |
 | `limit` | `0` | Max file hits; `0` uses the daemon's configured limit. |
 | `feagleCommand` | `$FEAGLE_BIN` or `"feagle"` | Command used to open files (a name or an absolute path). |
 
@@ -192,10 +193,14 @@ when the popup opens so the first semantic query is not slow.
 
 `FeagleLauncher.qml` keeps all colors in a small theme block at the top (`base`,
 `border`, `text`, `muted`, `selected`, `hovered`) — edit them to match your shell.
-Icons come from the system icon theme via `Quickshell.iconPath(name, fallback)`:
-application icons use the `icon` field, file icons are mapped from the extension
-with a `text-x-generic` fallback. Pick a theme with `//@ pragma IconTheme <name>`
-at the top of your root QML or the `QS_ICON_THEME` variable.
+Icons come from the system icon theme via `Quickshell.iconPath(name, true)`:
+application icons use the `icon` field, file icons are mapped from the extension.
+When the theme has no such icon (the default `hicolor` theme lacks most mimetype
+icons), the launcher draws a small badge with the application's initial or the
+file extension instead — so nothing looks broken and there are no missing-texture
+warnings. For real mimetype icons, pick a full theme with
+`//@ pragma IconTheme Adwaita` at the top of your root QML (or the `QS_ICON_THEME`
+variable).
 
 ## Troubleshooting
 

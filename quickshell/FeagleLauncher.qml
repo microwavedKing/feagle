@@ -90,8 +90,27 @@ PanelWindow {
         return item.kind === "app" ? item.name : item.path;
     }
 
+    // The themed icon path, or "" when the theme has no such icon (no warnings).
+    function iconSource(item) {
+        if (item.kind === "app")
+            return Quickshell.iconPath(item.icon || "", true);
+        return Quickshell.iconPath(fileIcon(item.path), true);
+    }
+
+    // Shown in the drawn fallback badge: the app initial, or the file extension.
+    function fallbackLabel(item) {
+        if (item.kind === "app") {
+            const name = String(item.name || "").trim();
+            return name.length > 0 ? name.charAt(0).toUpperCase() : "?";
+        }
+        const base = String(item.path).split("/").pop();
+        const dot = base.lastIndexOf(".");
+        const ext = dot > 0 ? base.slice(dot + 1).toUpperCase() : "";
+        return ext.length > 0 ? ext.slice(0, 4) : "•";
+    }
+
     function secondaryLabel(item) {
-        return item.kind === "app" ? "Application" : (item.snippet || "");
+        return item.kind === "app" ? "" : (item.snippet || "");
     }
 
     function fmtTime(seconds) {
@@ -332,15 +351,33 @@ PanelWindow {
                     ? root.selected
                     : (hover.hovered ? root.hovered : "transparent")
 
+                // Real themed icon when the theme has one, else a drawn fallback.
                 IconImage {
                     id: rowIcon
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: 18
                     implicitSize: 22
-                    source: row.modelData.kind === "app"
-                        ? Quickshell.iconPath(row.modelData.icon || "", "application-x-executable")
-                        : Quickshell.iconPath(root.fileIcon(row.modelData.path), "text-x-generic")
+                    visible: source !== ""
+                    source: root.iconSource(row.modelData)
+                }
+
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 18
+                    width: 22
+                    height: 22
+                    radius: 6
+                    color: root.hovered
+                    visible: rowIcon.source === ""
+                    Text {
+                        anchors.centerIn: parent
+                        color: root.muted
+                        font.pixelSize: 9
+                        font.bold: true
+                        text: root.fallbackLabel(row.modelData)
+                    }
                 }
 
                 Column {

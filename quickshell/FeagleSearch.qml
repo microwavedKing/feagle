@@ -32,8 +32,10 @@ QtObject {
     property bool active: false
     /// Wait this many milliseconds after typing before the semantic pass.
     property int debounceMs: 120
-    /// How many applications to show above the file hits.
+    /// How many applications to show above the file hits while typing.
     property int appsLimit: 8
+    /// How many applications to list when the query is empty (browse mode).
+    property int browseAppsLimit: 300
     /// Maximum file hits; 0 uses the daemon's configured limit.
     property int limit: 0
     /// The `feagle` command used to open files (a name on PATH or an absolute path).
@@ -83,16 +85,21 @@ QtObject {
     function setQuery(text): void {
         root.query = text;
         root.request("fts");
-        debounce.restart();
+        if (text.trim().length > 0)
+            debounce.restart();
+        else
+            debounce.stop();   // nothing to embed for an empty query
     }
 
     /// Run a launcher request in the given mode ("fts" or "hybrid").
     function request(modeName): void {
+        // An empty query means "browse": list every application, not just a few.
+        const browsing = root.query.trim().length === 0;
         var msg = {
             op: "launcher",
             query: root.query,
             mode: modeName,
-            apps_limit: root.appsLimit
+            apps_limit: browsing ? root.browseAppsLimit : root.appsLimit
         };
         if (root.limit > 0)
             msg.limit = root.limit;
