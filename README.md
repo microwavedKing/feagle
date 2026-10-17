@@ -339,11 +339,15 @@ the **`feagle pick`** fallback for any dmenu-compatible launcher.
 first, then file hits — keyword results instantly, semantic ones a moment later.
 There is **no second window** (unlike piping a query into `feagle search --pick`,
 which opens one launcher to ask and another to show results). It talks to
-`queryd` directly, so semantic ranking follows what you type.
+`queryd` directly, so semantic ranking follows what you type. It also shows a
+**preview pane** for the selected file (surrounding text, or the image itself),
+cycles a result filter with `Tab` (all / applications / files), and ranks
+**frequently launched** applications higher.
 
 ```sh
 quickshell -p /path/to/feagle/quickshell                    # start it with your session
 qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle   # open it from a hotkey
+qs ipc -p /path/to/feagle/quickshell call feagle-launcher search "rust ownership"
 ```
 
 (`qs ipc` needs the instance: with `-p` pass the same path, or use `qs ipc -c <name>`
@@ -905,11 +909,14 @@ mp3 = "mpv --start={time} {path}"
 через мгновение. **Второго окна нет** (в отличие от `wofi | feagle search --pick`,
 который открывает одно окно, чтобы спросить запрос, и второе — чтобы показать
 результаты). Он общается с `queryd` напрямую, поэтому семантика следует за тем,
-что вы печатаете.
+что вы печатаете. Плюс **панель превью** для выбранного файла (окружающий текст
+или сама картинка), переключение фильтра результатов по `Tab`
+(все / приложения / файлы) и приоритет **часто запускаемых** приложений.
 
 ```sh
 quickshell -p /path/to/feagle/quickshell                    # запустить вместе с сессией
 qs ipc -p /path/to/feagle/quickshell call feagle-launcher toggle   # открыть по хоткею
+qs ipc -p /path/to/feagle/quickshell call feagle-launcher search "rust ownership"
 ```
 
 (`qs ipc` нужно указать инстанс: с `-p` передайте тот же путь, либо `qs ipc -c <имя>`
