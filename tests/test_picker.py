@@ -12,6 +12,7 @@ from feagle import apps, config, picker
 @pytest.fixture
 def cfg(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     return config.default_config()
 
 
@@ -109,3 +110,28 @@ def test_run_pick_launch_failure_returns_one(cfg, monkeypatch):
 
     monkeypatch.setattr(picker.apps, "launch", boom)
     assert picker.run_pick(cfg, [("a.desktop", "Alpha")], {"a.desktop": app}) == 1
+
+
+def test_run_pick_records_a_launch_for_frecency(cfg, monkeypatch):
+    from feagle import frecency
+
+    app = apps.App("a.desktop", "Alpha", "alpha", False, Path("/a.desktop"))
+    monkeypatch.setattr(picker.launchers, "pick", lambda items, program: "a.desktop")
+    monkeypatch.setattr(picker.apps, "launch", lambda app, **kw: None)
+
+    assert picker.run_pick(cfg, [("a.desktop", "Alpha")], {"a.desktop": app}) == 0
+    assert frecency.FrecencyStore().scores()["a.desktop"] == pytest.approx(1.0)
+
+
+def test_run_pick_does_not_record_a_failed_launch(cfg, monkeypatch):
+    from feagle import frecency
+
+    app = apps.App("a.desktop", "Alpha", "alpha", False, Path("/a.desktop"))
+    monkeypatch.setattr(picker.launchers, "pick", lambda items, program: "a.desktop")
+
+    def boom(app, **kw):
+        raise OSError("nope")
+
+    monkeypatch.setattr(picker.apps, "launch", boom)
+    assert picker.run_pick(cfg, [("a.desktop", "Alpha")], {"a.desktop": app}) == 1
+    assert frecency.FrecencyStore().scores() == {}

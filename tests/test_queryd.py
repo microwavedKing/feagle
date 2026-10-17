@@ -61,6 +61,12 @@ def engine(db_path):
     return QueryEngine(make_cfg(), db_path=db_path, embedder=FakeEmbedder())
 
 
+@pytest.fixture(autouse=True)
+def _isolated_state(tmp_path, monkeypatch):
+    """Never let a test write the real frecency/state file."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+
 def test_dispatch_ping(engine):
     assert engine.dispatch({"op": "ping"})["ok"] is True
 
@@ -348,3 +354,127 @@ def test_launcher_app_cache_reuses_discovery(db_path, monkeypatch):
     engine.dispatch({"op": "launcher", "query": "a", "mode": "fts"})
     engine.dispatch({"op": "launcher", "query": "b", "mode": "fts"})
     assert calls == [1]  # discovery cached in the engine
+
+
+def _two_apps():
+    from feagle import apps
+
+    return [
+        apps.App("alpha.desktop", "Alpha", "alpha", False, Path("/x/a.desktop")),
+        apps.App("alps.desktop", "Alps", "alps", False, Path("/x/b.desktop")),
+    ]
+
+
+def test_used_op_records_a_launch(db_path, monkeypatch):
+    from feagle import apps, frecency
+
+    monkeypatch.setattr(apps, "discover_apps", lambda: [])
+    store = frecency.FrecencyStore(db_path.parent / "frecency.json")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None, frecency_store=store)
+
+    assert engine.dispatch({"op": "used", "key": "fire.desktop"})["ok"] is True
+    assert store.scores()["fire.desktop"] == pytest.approx(1.0)
+
+
+def test_launcher_boosts_frequently_used_apps(db_path, monkeypatch):
+    from feagle import apps, frecency
+
+    monkeypatch.setattr(apps, "discover_apps", _two_apps)
+    store = frecency.FrecencyStore(db_path.parent / "frecency.json")
+    for _ in range(int(frecency.SATURATION)):
+        store.record("alps.desktop")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None, frecency_store=store)
+
+    # Both match "al" as a prefix (the same tier); frecency decides the order.
+    result = engine.dispatch({"op": "launcher", "query": "al", "mode": "fts"})
+    assert [r["name"] for r in result["results"] if r["kind"] == "app"] == ["Alps", "Alpha"]
+
+
+def test_launcher_browse_lists_used_apps_first(db_path, monkeypatch):
+    from feagle import apps, frecency
+
+    monkeypatch.setattr(apps, "discover_apps", _two_apps)
+    store = frecency.FrecencyStore(db_path.parent / "frecency.json")
+    store.record("alps.desktop")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None, frecency_store=store)
+
+    result = engine.dispatch({"op": "launcher", "query": "", "mode": "fts"})
+    assert [r["name"] for r in result["results"] if r["kind"] == "app"] == ["Alps", "Alpha"]
+
+
+def test_launcher_frecency_never_beats_a_better_match(db_path, monkeypatch):
+    from feagle import apps, frecency
+
+    fake = [
+        apps.App("al.desktop", "Al", "al", False, Path("/x/al.desktop")),          # exact
+        apps.App("alps.desktop", "Alps", "alps", False, Path("/x/alps.desktop")),  # prefix
+    ]
+    monkeypatch.setattr(apps, "discover_apps", lambda: fake)
+    store = frecency.FrecencyStore(db_path.parent / "frecency.json")
+    for _ in range(50):
+        store.record("alps.desktop")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None, frecency_store=store)
+
+    result = engine.dispatch({"op": "launcher", "query": "al", "mode": "fts"})
+    assert [r["name"] for r in result["results"] if r["kind"] == "app"] == ["Al", "Alps"]
+
+
+def test_preview_text_around_the_matched_line(db_path, tmp_path):
+    target = tmp_path / "note.txt"
+    target.write_text("\n".join(f"line {i}" for i in range(1, 51)), encoding="utf-8")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(target), "line": 25})
+    assert result["ok"] is True
+    assert result["kind"] == "text"
+    assert result["start_line"] == 13
+    assert result["total_lines"] == 50
+    lines = result["text"].splitlines()
+    assert lines[0] == "line 13"
+    assert lines[-1] == "line 37"
+
+
+def test_preview_without_a_line_shows_the_top(db_path, tmp_path):
+    target = tmp_path / "note.txt"
+    target.write_text("\n".join(f"line {i}" for i in range(1, 51)), encoding="utf-8")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(target)})
+    assert result["start_line"] == 1
+    assert result["text"].splitlines()[-1] == "line 24"
+
+
+def test_preview_image_is_a_marker(db_path, tmp_path):
+    target = tmp_path / "shot.png"
+    target.write_bytes(b"\x89PNG\r\n\x1a\n")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(target)})
+    assert result["ok"] is True
+    assert result["kind"] == "image"
+    assert result["path"] == str(target)
+
+
+def test_preview_binary_file_is_metadata(db_path, tmp_path):
+    target = tmp_path / "blob.bin"
+    target.write_bytes(b"\x00\x01\x02binary")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(target)})
+    assert result["ok"] is True
+    assert result["kind"] == "meta"
+    assert result["size"] == 9
+
+
+def test_preview_missing_file_is_an_error(db_path, tmp_path):
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+    result = engine.dispatch({"op": "preview", "path": str(tmp_path / "gone.txt")})
+    assert result["ok"] is False
+    assert "cannot read" in result["error"]
+
+
+def test_preview_directory_is_an_error(db_path, tmp_path):
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+    result = engine.dispatch({"op": "preview", "path": str(tmp_path)})
+    assert result["ok"] is False
+    assert "not a regular file" in result["error"]
