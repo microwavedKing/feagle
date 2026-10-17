@@ -102,3 +102,39 @@ def test_extra_excluded_paths(tmp_path):
 def test_missing_root_is_skipped(tmp_path):
     candidates = list(_scanner().iter_files([tmp_path / "does-not-exist"]))
     assert candidates == []
+
+
+# ---- candidate_for: one path, same filters ------------------------------
+
+
+def test_candidate_for_accepts_a_normal_file(tmp_path):
+    _make_tree(tmp_path)
+    candidate = _scanner().candidate_for(tmp_path / "a.txt")
+    assert candidate is not None
+    assert candidate.path == tmp_path / "a.txt"
+    assert candidate.size == 5
+
+
+def test_candidate_for_rejects_what_a_walk_would_skip(tmp_path):
+    _make_tree(tmp_path)
+    scanner = _scanner()
+    assert scanner.candidate_for(tmp_path / "c.bin") is None          # extension
+    assert scanner.candidate_for(tmp_path / ".hidden.txt") is None    # hidden
+    assert scanner.candidate_for(tmp_path / "node_modules" / "e.txt") is None
+    assert scanner.candidate_for(tmp_path / "missing.txt") is None
+    assert scanner.candidate_for(tmp_path) is None                    # a directory
+
+
+def test_candidate_for_respects_gitignore_along_the_way(tmp_path):
+    _make_tree(tmp_path)
+    sub = tmp_path / "sub"
+    (sub / ".gitignore").write_text("d.txt\n", encoding="utf-8")
+    assert _scanner().candidate_for(sub / "d.txt") is None
+    assert _scanner(use_gitignore=False).candidate_for(sub / "d.txt") is not None
+
+
+def test_candidate_for_respects_size_limits(tmp_path):
+    big = tmp_path / "big.txt"
+    big.write_text("x" * 2048, encoding="utf-8")
+    assert _scanner(max_file_size_mb=0.001).candidate_for(big) is None
+    assert _scanner(max_file_size_mb=1).candidate_for(big) is not None

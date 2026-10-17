@@ -12,11 +12,32 @@ the semantic side did not consider relevant.
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
+from ..config import DEFAULT_MAX_DISTANCE
+from ..embeddings import presets
 from .fts import SearchHit, _snippet, search_fts, search_fts_stemmed
 from .vec import knn
 
 DEFAULT_RRF_K = 60
+
+
+def effective_max_distance(cfg: dict[str, Any]) -> float:
+    """The vector distance cutoff, falling back to the model's own scale.
+
+    ``[search].max_distance`` is tuned on EmbeddingGemma. Another model can put
+    its distances on a different scale (Qwen3-Embedding spreads even loosely
+    related pairs much further apart), and a cutoff that is too tight silently
+    drops *every* vector neighbour, leaving full-text-only results. When the
+    config still holds the built-in default, the model preset's suggestion wins;
+    an explicit user value is always respected.
+    """
+    configured = float(cfg["search"]["max_distance"])
+    if configured != DEFAULT_MAX_DISTANCE:
+        return configured
+    spec = presets.spec_for(str(cfg["embeddings"]["model"]))
+    suggested = spec.max_distance if spec is not None else None
+    return float(suggested) if suggested is not None else configured
 
 
 def rrf(rankings: list[list[int]], *, k: int = DEFAULT_RRF_K) -> list[tuple[int, float]]:

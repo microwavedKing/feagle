@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from feagle import bench, config
+from feagle.embeddings import presets
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,10 +23,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1, help="random seed")
     parser.add_argument("--json", action="store_true", help="print JSON instead of a table")
     parser.add_argument("--keep-db", action="store_true", help="keep the throwaway database")
+    parser.add_argument(
+        "--model", default=None, help="override [embeddings].model (a preset name or a GGUF path)"
+    )
+    parser.add_argument(
+        "--mrl-dim", type=int, default=None, choices=presets.MRL_DIMS,
+        help="override [embeddings].mrl_dim (Matryoshka truncation)",
+    )
     args = parser.parse_args(argv)
 
+    cfg = config.load_config()
+    if args.model:
+        cfg["embeddings"]["model"] = args.model
+    if args.mrl_dim:
+        cfg["embeddings"]["mrl_dim"] = args.mrl_dim
+
     report = bench.quality_report(
-        config.load_config(),
+        cfg,
         corpus_dir=args.corpus,
         files=args.files,
         seed=args.seed,
@@ -40,6 +54,10 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"Quality: {report['files']} documents, {report['queries']} queries "
         f"(seed {report['seed']})"
+    )
+    print(
+        f"Model: {report['model']} at mrl_dim={report['mrl_dim']} · "
+        f"{report['chunks']} chunks · DB {report['db_size_per_chunk']} B/chunk"
     )
     for mode, metrics in report["quality"].items():
         parts = [f"MRR@10={metrics['mrr@10']:.3f}", f"Recall@10={metrics['recall@10']:.3f}",

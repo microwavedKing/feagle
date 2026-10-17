@@ -244,7 +244,8 @@ def measure_queries(
             hybrid.search_hybrid(
                 conn, query, query_vector=vector, limit=limit,
                 candidates=search_cfg["candidates"], rrf_k=search_cfg["rrf_k"], stem=True,
-                max_distance=search_cfg["max_distance"], max_per_file=search_cfg["max_per_file"],
+                max_distance=hybrid.effective_max_distance(cfg),
+                max_per_file=search_cfg["max_per_file"],
             )
             vector_search_lat.append((time.perf_counter() - start) * 1000)
             hybrid_lat.append(embed_lat[-1] + vector_search_lat[-1])
@@ -292,7 +293,7 @@ def evaluate_quality(
                 hits = hybrid.search_hybrid(
                     conn, query, query_vector=vector, limit=limit,
                     candidates=search_cfg["candidates"], rrf_k=search_cfg["rrf_k"], stem=True,
-                    max_distance=search_cfg["max_distance"],
+                    max_distance=hybrid.effective_max_distance(cfg),
                     max_per_file=search_cfg["max_per_file"],
                 )
             accepted = expected_by_concept[item["concept"]]
@@ -354,6 +355,8 @@ def quality_report(
         conn = db.open_database(db_path)
         try:
             pipeline.index_roots(conn, cfg, roots=[str(corpus_dir / "docs")], embedder=embedder)
+            chunks = conn.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"]
+            db_size = db_path.stat().st_size
             quality = evaluate_quality(conn, embedder, manifest["queries"], cfg=cfg, limit=limit)
         finally:
             conn.close()
@@ -368,6 +371,11 @@ def quality_report(
         "files": len(manifest["files"]),
         "seed": seed,
         "queries": len(manifest["queries"]),
+        "model": cfg["embeddings"]["model"],
+        "mrl_dim": cfg["embeddings"]["mrl_dim"],
+        "chunks": chunks,
+        "db_size_bytes": db_size,
+        "db_size_per_chunk": round(db_size / chunks) if chunks else 0,
         "quality": quality,
     }
 

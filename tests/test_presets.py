@@ -16,9 +16,14 @@ def test_q8_preset_matches_published_pin():
     assert spec.context == 8192
 
 
-def test_pooling_is_never_forced():
-    for spec in presets.PRESETS.values():
-        assert spec.pooling is None  # mean pooling lives in the GGUF
+def test_pooling_is_only_set_where_the_model_needs_it():
+    # EmbeddingGemma has mean pooling baked into the GGUF; Qwen3-Embedding needs
+    # `last` on the command line.
+    for name, spec in presets.PRESETS.items():
+        if name.startswith("embeddinggemma"):
+            assert spec.pooling is None
+        else:
+            assert spec.pooling == "last"
 
 
 def test_urls_are_https_hf():
@@ -38,8 +43,19 @@ def test_spec_for_path_returns_none():
 
 
 def test_mrl_and_mmproj_presets_exist():
-    assert presets.MRL_DIMS == (128, 256, 512, 768)
+    assert presets.MRL_DIMS == (128, 256, 512, 768, 1024)
     assert presets.MMPROJ_PRESETS["embeddinggemma-2-mmproj-q8"].size == 554_821_024
+
+
+def test_qwen3_preset_matches_published_pin():
+    spec = presets.get_preset("qwen3-embedding-0.6b-q8")
+    assert spec.filename == "Qwen3-Embedding-0.6B-Q8_0.gguf"
+    assert spec.size == 639_150_592
+    assert spec.sha256 == "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439"
+    assert spec.dim == 1024
+    assert spec.context == 32768
+    assert spec.pooling == "last"
+    assert spec.prompt_family == "qwen3"
 
 
 def test_q4_preset_is_pinned_to_the_mirror():

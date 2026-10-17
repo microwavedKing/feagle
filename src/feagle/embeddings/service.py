@@ -15,6 +15,7 @@ from typing import Any, Protocol
 
 from .. import paths
 from ..log import get_logger
+from . import prompts
 from .client import EmbeddingClient, EmbeddingError, ServerUnavailable
 from .presets import MMPROJ_PRESETS, ModelSpec, spec_for
 from .supervisor import LlamaSupervisor, SupervisorConfig
@@ -109,7 +110,7 @@ def build_supervisor(
     runtime_dir: Path | None = None,
 ) -> LlamaSupervisor:
     embeddings = cfg["embeddings"]
-    model_path, _spec = resolve_model(cfg)
+    model_path, spec = resolve_model(cfg)
     mmproj = resolve_mmproj(cfg) if media else None
     supervisor_cfg = SupervisorConfig(
         model_path=model_path,
@@ -119,6 +120,7 @@ def build_supervisor(
         mmproj_path=mmproj if (mmproj is not None and mmproj.exists()) else None,
         media=media,
         extra_args=list(embeddings["extra_args"]),
+        pooling=spec.pooling if spec is not None else None,
     )
     files: dict[str, Path] = {}
     if runtime_dir is not None:
@@ -200,10 +202,12 @@ class EmbeddingService:
         return self._adapter
 
     def _make_client(self, base_url: str) -> EmbeddingClient:
+        _path, spec = resolve_model(self.cfg)
         return EmbeddingClient(
             base_url,
             mrl_dim=self.cfg["embeddings"]["mrl_dim"],
             batch_size=self.cfg["index"]["embed_batch_size"],
+            family=spec.prompt_family if spec is not None else prompts.DEFAULT_FAMILY,
             transport=self._transport,
         )
 

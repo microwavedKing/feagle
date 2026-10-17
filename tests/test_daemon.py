@@ -319,3 +319,129 @@ def test_idle_hook_failure_does_not_stop_the_daemon(root, conn):
         idle_hook=boom,
     )
     daemon.run()  # must not raise
+
+
+# ---- targeted re-indexing and config hot-reload -------------------------
+
+
+def test_watch_batch_does_not_rescan_the_whole_root(root, conn, monkeypatch):
+    (root / "b.txt").write_text("second", encoding="utf-8")
+    walks = []
+    original = pipeline.index_roots
+
+    def counting(conn_, cfg_, **kwargs):
+        walks.append(kwargs.get("roots"))
+        return original(conn_, cfg_, **kwargs)
+
+    monkeypatch.setattr(pipeline, "index_roots", counting)
+
+    def source(stop_event):
+        yield {root / "b.txt"}
+
+    daemon = IndexerDaemon(
+        make_cfg(root), conn=conn, embedder_provider=lambda: None,
+        watcher=Watcher([root], source=source), pause_check=lambda: None, rescan_interval_s=0,
+    )
+    daemon.run()
+    assert len(walks) == 1  # the initial pass only; the batch was targeted
+
+
+def test_watch_batch_prunes_a_deleted_file(root, conn):
+    target = root / "a.txt"
+
+    def source(stop_event):
+        target.unlink()  # the watcher reports the deletion
+        yield {target}
+
+    daemon = IndexerDaemon(
+        make_cfg(root), conn=conn, embedder_provider=lambda: None,
+        watcher=Watcher([root], source=source), pause_check=lambda: None, rescan_interval_s=0,
+    )
+    daemon.run()
+    assert conn.execute("SELECT COUNT(*) AS n FROM files").fetchone()["n"] == 0
+
+
+def test_config_reload_keeps_the_old_config_on_error(root, conn):
+    def broken():
+        raise ValueError("invalid TOML")
+
+    daemon = IndexerDaemon(
+        make_cfg(root), conn=conn, pause_check=lambda: None, watch=False, reload_config=broken
+    )
+    assert daemon._reload_config() is False
+    assert daemon.cfg["index"]["roots"] == [str(root)]
+
+
+def test_config_reload_reports_root_changes(root, conn, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    fresh = make_cfg(other)
+    daemon = IndexerDaemon(
+        make_cfg(root), conn=conn, pause_check=lambda: None, watch=False,
+        reload_config=lambda: fresh,
+    )
+    assert daemon._reload_config() is True   # the roots changed
+    assert daemon._reload_config() is False  # the same config again
+    assert daemon.cfg["index"]["roots"] == [str(other)]
+
+
+def test_config_reload_applies_settings_and_rescan_interval(root, conn):
+    fresh = make_cfg(root)
+    fresh["index"]["max_chunks_per_file"] = 1
+    fresh["index"]["rescan_interval_min"] = 5
+    daemon = IndexerDaemon(
+        make_cfg(root), conn=conn, pause_check=lambda: None, watch=False,
+        reload_config=lambda: fresh,
+    )
+    assert daemon._reload_config() is False  # same roots: no watcher restart
+    assert daemon.cfg["index"]["max_chunks_per_file"] == 1
+    assert daemon.rescan_interval_s == 300.0
+
+
+def test_config_reload_does_not_override_an_injected_pause_check(root, conn):
+    injected = lambda: "always"  # noqa: E731
+    fresh = make_cfg(root)
+    daemon = IndexerDaemon(
+        make_cfg(root), conn=conn, pause_check=injected, watch=False, reload_config=lambda: fresh
+    )
+    daemon._reload_config()
+    assert daemon.pause_check is injected
+
+
+def test_roots_change_restarts_the_watcher(root, conn, tmp_path):
+    import queue
+
+    other = tmp_path / "other"
+    other.mkdir()
+    daemon = IndexerDaemon(
+        make_cfg(root), conn=conn, pause_check=lambda: None, watch=False,
+        reload_config=lambda: make_cfg(other),
+    )
+    events: queue.Queue = queue.Queue()
+    daemon.watcher = Watcher([root], source=lambda stop: iter(()))
+    daemon._start_watcher(events)
+    first = daemon._watcher_generation
+
+    assert daemon._reload_config() is True
+    daemon._restart_watcher(events)
+    assert daemon._watcher_generation == first + 1
+    assert daemon.watcher.roots == [other]
+
+
+def test_run_applies_reloaded_settings_without_a_restart(root, conn):
+    fresh = make_cfg(root)
+    fresh["index"]["max_chunks_per_file"] = 1
+    seen = []
+
+    def source(stop_event):
+        yield {root / "a.txt"}
+
+    daemon = IndexerDaemon(
+        make_cfg(root), conn=conn, embedder_provider=lambda: None,
+        watcher=Watcher([root], source=source), pause_check=lambda: None, rescan_interval_s=0,
+        reload_config=lambda: (seen.append(1), fresh)[1],
+    )
+    daemon.run()
+    assert seen  # the reload was consulted between iterations
+    assert daemon.cfg["index"]["max_chunks_per_file"] == 1
+    assert daemon._watcher_generation == 1  # roots unchanged: no restart

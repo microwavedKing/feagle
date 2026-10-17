@@ -61,26 +61,26 @@
 | Файл | Ответственность | Ключевое |
 |---|---|---|
 | `gitignore.py` | минимальный `.gitignore` | `GitIgnore(base, patterns)`, `matches_chain()` |
-| `scanner.py` | обход корней и фильтры | `Scanner.iter_files()` → `ScanCandidate`; скрытые, `exclude_dirs`, allowlist расширений, лимиты размера, симлинки не трогаем, `exclude_paths` (данные feagle) |
+| `scanner.py` | обход корней и фильтры | `Scanner.iter_files()` → `ScanCandidate`; скрытые, `exclude_dirs`, allowlist расширений, лимиты размера, симлинки не трогаем, `exclude_paths` (данные feagle); `candidate_for(path)` — те же фильтры для одного пути (событие вотчера) |
 | `extract.py` | текст/код/PDF/картинки | `extract()`, `Extracted(pages, kind, encoding)`; **фолбэк кодировок**; PDF через `pdftotext`; картинки — OCR (`kind="image"`) |
 | `ocr.py` | OCR страниц PDF и картинок | `ocr_pdf_page()` (pdftoppm→tesseract), `ocr_image()` (только tesseract), `ocr_pages()` с лимитами и **пулом процессов** (`ocr_workers` ≤ `MAX_OCR_WORKERS`=2, ошибка страницы изолирована, откат в один поток), `resolve_psm()` (`ocr_psm`/`ocr_osd` → `--psm` + язык `osd`) |
 | `media.py` | подготовка картинок и видео | `image_dimensions()`/`downscale_image()` (ffprobe/ffmpeg), `extract_frames()` (кадр каждые N с, ≤ `video_max_frames`), `VIDEO_SUFFIXES` |
 | `asr.py` | транскрипция аудио (whisper.cpp) | `transcribe()` (ffmpeg → 16 кГц WAV → `whisper-cli -oj`), `Segment(start_ms,end_ms,text)`, `AUDIO_SUFFIXES` |
 | `chunker.py` | чанки ~1400 симв. | `chunk_extracted()`; прилипание к границе строки (точный `line`), перекрытие 150, cap 2200, PDF не пересекает страницу, у картинок `line`/`page` = None |
-| `pipeline.py` | инкрементальная синхронизация | `index_roots()`, `index_file()`, `backfill()`, `wipe()`; stat→hash→reindex, prune, `pause_check`, эмбеддинги **вне транзакции**, частичные векторы |
+| `pipeline.py` | инкрементальная синхронизация | `index_roots()`, `index_file()`, `index_paths()` (точечно по событиям вотчера, без обхода), `backfill()`, `wipe()`; stat→hash→reindex, prune, `pause_check`, эмбеддинги **вне транзакции**, частичные векторы |
 | `watcher.py` | изменения ФС | обёртка `watchfiles`; источник инжектируется для тестов |
-| `daemon.py` | `feagle indexerd` | первый проход, пересканирование затронутых корней, периодический rescan, паузы, очередь событий |
+| `daemon.py` | `feagle indexerd` | первый проход, точечная реакция на изменения, hot-reload конфига (перезапуск вотчера по генерации), периодический rescan, паузы, очередь событий |
 
 ### Эмбеддинги (`embeddings/`)
 
 | Файл | Ответственность | Ключевое |
 |---|---|---|
-| `presets.py` | пресеты моделей | `ModelSpec` с SHA256/размером; `embeddinggemma-2-q4` (дефолт), `-q8`, `-bf16`, mmproj |
-| `prompts.py` | task-префиксы | `format_query/format_doc`, `TASKS` (search/code/qa) |
-| `client.py` | HTTP `/v1/embeddings` | батчи, порядок по `index`, discovery dim, MRL-усечение + L2-перенормировка, `health()`; `embed_images()` (content-parts, без task-префиксов) |
+| `presets.py` | пресеты моделей | `ModelSpec` с SHA256/размером; `embeddinggemma-2-q4` (дефолт), `-q8`, `-bf16`, `qwen3-embedding-0.6b-q8` (1024-dim, `pooling="last"`, `prompt_family="qwen3"`), mmproj; `MRL_DIMS` до 1024 |
+| `prompts.py` | промпты по семейству модели | `PromptFamily` (`gemma`, `qwen3`), `get_family()`, `format_query/format_doc`; у Qwen3 инструкция только у запроса |
+| `client.py` | HTTP `/v1/embeddings` | батчи, порядок по `index`, discovery dim, MRL-усечение + L2-перенормировка, `health()`; `embed_images()` (content-parts, без task-префиксов); `family=` выбирает промпты |
 | `download.py` | загрузка модели | поток, SHA256/размер, сверка пина с HF tree API |
-| `supervisor.py` | жизненный цикл `llama-server` | port/pid/lock/touch-файлы, `ensure_running()`, idle-stop, обнаружение мёртвого владельца, `--mmproj` при медиа |
-| `service.py` | связка «супервизор + клиент» | `EmbeddingService.start()/ensure()/reset()`, `resolve_mmproj()`, `EmbedderAdapter` (touch на каждый эмбеддинг) |
+| `supervisor.py` | жизненный цикл `llama-server` | port/pid/lock/touch-файлы, `ensure_running()`, idle-stop, обнаружение мёртвого владельца, `--mmproj` при медиа, `--pooling` только если модель требует |
+| `service.py` | связка «супервизор + клиент» | `EmbeddingService.start()/ensure()/reset()`, `resolve_mmproj()`, `EmbedderAdapter` (touch на каждый эмбеддинг); берёт `pooling`/`prompt_family` из пресета |
 
 ### Поиск (`search/`)
 
@@ -258,7 +258,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 
 ## 7. Тесты
 
-- 40 файлов в `tests/`, ~559 тестов. Запуск: `.venv/bin/pytest -q`.
+- 40 файлов в `tests/`, ~594 теста. Запуск: `.venv/bin/pytest -q`.
 - **Гейты `skipif`**: тесты, требующие `llama-server`/модели (`FEAGLE_RUN_MODEL_TESTS=1`),
   `pdftotext`, `tesseract`, `ocr_available()` — скипаются, поэтому CI проходит на
   чистом Ubuntu (без poppler/tesseract/llama).
@@ -307,6 +307,10 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 33 | Превью — операция `preview` в `queryd` (текст вокруг строки ±12, маркер картинки, метаданные) + панель справа в демо; фильтр результатов (`all/apps/files`) — **на клиенте** (`Tab`), без нового запроса | превью — это чтение файла и логика, ей место рядом с индексом (любой клиент получит её даром); фильтр же не должен терять уже полученную семантическую выдачу, поэтому он клиентский и мгновенный | `queryd.preview`, `FeagleSearch.visibleResults/setFilter`, `FeagleLauncher` (панель, `Tab`) |
 | 34 | Параллельный OCR страниц PDF: `ProcessPoolExecutor` на `ocr_workers` (по умолчанию 2), **жёсткий потолок 2**; воркер — модульная функция, возвращающая `(page, text, error)`; при недоступности пула или своём `ocr_page` — один поток | `tesseract` однопоточный, поэтому единственный способ использовать несколько ядер — процессы; страница 300 dpi после декодирования — десятки МБ, поэтому потолок 2 (цель 8 ГБ); ошибка страницы не должна ронять проход, а результат пишется по номеру страницы, чтобы порядок не зависел от воркеров | `ocr.ocr_pages`/`_ocr_page_task`/`_process_pool`, `config.ocr_workers`, `extract_pdf(ocr_workers=…)`, `pipeline` |
 | 35 | Качество OCR: `ocr_psm` (`"auto"` → значение tesseract по умолчанию) и `ocr_osd` (`--psm 1` + язык `osd` в `-l`; без `osd` в списке языков OSD вообще не запускается). Текст по-прежнему берём из `txt`-вывода, а **TSV оставили только для замеров** | замер показал, что TSV-реконструкция текста нормализованно **совпадает** с `txt` на обеих фикстурах → порядок слов уже верный, переписывать рабочее нечего; а `--psm`/DPI на синтетике не меняют CER/WER (0.000), но 300 dpi втрое медленнее 150 — значит нужен замерный скрипт, а не «улучшение» вслепую | `ocr.resolve_psm`, `ocr.osd_available` (кэш), `config.ocr_psm/ocr_osd`, `doctor.check_ocr`, `bench/ocr_eval.py` |
+| 36 | Изменение вотчера индексируется **точечно**: `index_paths()` обрабатывает ровно пути из события (каталог — как маленький корень), а удаления в батче снимаются сразу; полный обход корня остаётся только у периодического rescan | обход + stat всего корня на каждое сохранение файла — это O(корень) работы на O(1) изменений (замер: 185 мс против 2 мс на 3000 файлах, 86×); фильтры переиспользуются (`Scanner.candidate_for`), чтобы точечный путь не индексировал то, что пропустил бы обход; страховка от пропущенных удалений — периодический rescan | `pipeline.index_paths`/`_remove_path`/`_apply_outcome`, `Scanner.candidate_for`, `daemon.index_changes` |
+| 37 | `indexerd` перечитывает конфиг между итерациями (`reload_config`); смена корней перезапускает вотчер **по поколениям** (у каждого продюсера свой stop-event; терминальный `None` кладёт только текущее поколение); `--root` отключает reload; битый конфиг → лог и прежний конфиг | правки корней/лимитов/OCR не должны требовать рестарта юнита (ручная операция + простой индексации); поколения нужны, чтобы остановка старого вотчера не завершала демон (иначе смена корней = выход из цикла) | `daemon._reload_config`/`_start_watcher`/`_restart_watcher`/`_produce`, `cmd_indexerd` |
+| 38 | Вторая модель — пресет `qwen3-embedding-0.6b-q8` (1024-dim): `--pooling last`, `prompt_family="qwen3"`; промпты вынесены в `PromptFamily` (`gemma`/`qwen3`) и берутся из пресета; `MRL_DIMS` дополнен 1024 | у Qwen3 другой пулинг (в GGUF его нет) и другая схема ввода: инструкция только у запроса (`Instruct: …\nQuery: …`), у документов — ничего, а формат критичен для качества; привязка к пресету значит, что новый пресет приносит свои настройки и не требует правок в клиенте | `presets.ModelSpec(pooling, prompt_family)`, `prompts.PromptFamily`, `client(family=…)`, `service._make_client`, `supervisor.build_llama_command` |
+| 39 | `[search].max_distance` стал модельно-зависимым: `ModelSpec.max_distance` применяется, пока в конфиге стоит встроенное значение (`hybrid.effective_max_distance`); явно заданное пользователем значение всегда важнее | порог подобран под EmbeddingGemma, а у Qwen3 шкала L2 сдвинута: правильные пары 0.66–1.25, «чужие» ~1.39, поэтому порог 0.8 отбрасывал **всех** соседей и гибрид молча вырождался в полнотекстовый поиск (замер: MRR@10 0.000 на синтетике и 0.077 на книгах против 0.75/1.000) | `presets.ModelSpec.max_distance`, `hybrid.effective_max_distance`, `queryd.search`, `bench.evaluate_quality` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 
@@ -314,7 +318,18 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 - Индексация: ~2.3 чанка/с ≈ ~450 токенов/с (упор в CPU); cold start 1.6 с.
 - `llama-server` RSS: ~458 МиБ (q4) / ~523 МиБ (q8) — определяется весами модели,
   флаги `-b/-ub/-np/-t` на память почти не влияют.
-- БД: ~5.6 КБ/чанк в установившемся режиме; `vec0` предвыделяет ~3.1 МиБ на 1024 строки.
+- БД: ~8.6 КБ/чанк на 1300 чанках (1200 файлов, 768 измерений) — ~3 КБ вектор +
+  текст/FTS/строки; `vec0` предвыделяет ~3.1 МиБ на 1024 строки, поэтому на 65
+  чанках выходит ~50 КБ/чанк, а на 434 — 11 КБ.
+- `mrl_dim`: на книгах (852 чанка, 13 запросов) 768 и 256 дают одинаковые
+  MRR@10 1.000, база 8.7 против 4.2 КБ/чанк; на синтетике (65 чанков, 60
+  запросов) 256 даже выше (0.933 против 0.750). Дефолт оставлен 768.
+- Модели на тех же корпусах: Qwen3-Embedding-0.6B (1024) — синтетика 1.000 против
+  0.750 у EmbeddingGemma, книги 0.712 против 1.000. FTS одинаков (0.375 / 0.635).
+- `max_distance` не переносится между моделями: правильные пары у EmbeddingGemma
+  лежат на L2 0.55–0.80, у Qwen3 — 0.66–1.25 («чужие» ~1.39). Порог 0.8 у Qwen3
+  отбрасывал всех соседей: MRR@10 0.000 (синтетика) и 0.077 (книги) до фикса,
+  1.000 и 0.712 после.
 - Качество (синтетика, 60 док., MRR@10): hybrid 0.750 (en 0.667 / ru 0.833), FTS 0.375.
 - Реальные книги (4 файла, 230 чанков): MRR@10 0.8 у q4 и q8; q4 на 30 % быстрее.
 - Стемминг: наш CPU индексации 0.557 → 0.144 с (3.9×) после кэша.
@@ -323,3 +338,5 @@ PDF пропускаются; нет tesseract → OCR пропускается;
   `--psm` и 150/200/300 dpi, средняя уверенность в словах 95.9–96.3; 300 dpi ≈ втрое
   медленнее 150 dpi. OSD на повёрнутой на 180° копии фикстуры не разворачивает
   (CER 0.787, «weak margin»): в фикстуре две строки, для OSD этого мало.
+- Вотчер: переиндексация одного изменённого файла вместо обхода корня —
+  185 мс → 2 мс (**86×**) на корне с 3000 файлов.

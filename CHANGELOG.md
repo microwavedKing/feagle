@@ -77,13 +77,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `feagle doctor` warns when `ocr_osd` is on but `tesseract-data-osd` is missing.
   `bench/ocr_eval.py` measures OCR throughput and quality (CER/WER, word
   confidence) across `--psm` and DPI values.
+- Qwen3-Embedding-0.6B preset (`qwen3-embedding-0.6b-q8`, 1024-dim) as a fallback
+  model: `llama-server` gets `--pooling last`, queries use the model card's
+  `Instruct: …\nQuery: …` prefix while documents take none (prompt families are now
+  part of the preset, so a new model brings its own prompts), and
+  `[embeddings].mrl_dim` accepts 1024.
+- `bench/corpus_eval.py` measures retrieval quality (MRR@10 / Recall@10/20) on a
+  corpus that is already on disk, given a JSON query file; `bench/quality_eval.py`
+  gained `--model` / `--mrl-dim` overrides and now reports the database size.
 
 ### Changed
 
+- `indexerd` re-indexes only the paths the watcher reports instead of walking the
+  enclosing root (measured 185 ms → 2 ms, **86×**, on a 3000-file root). Deletions
+  in a batch drop the file's rows directly; the periodic full rescan stays as the
+  safety net for what the watcher might miss.
+- `indexerd` re-reads the config between passes, so roots, limits, OCR settings and
+  the rescan interval apply **without a restart** (a root change restarts the
+  watcher; an invalid config is logged and the previous one is kept). `--root`
+  disables the reload, since it overrides the configured roots.
 - Media indexing now uses its own `llama-server` with `--mmproj` (coordination
   files `llama-media.*`), owned by the indexer and unloaded when idle. `queryd`
   keeps a light text-only server, so enabling images/video no longer makes the
   query daemon hold the projector (~1 GiB) for text searches.
+
+### Fixed
+
+- Switching `[embeddings].model` to another preset no longer silently disables
+  semantic results. `[search].max_distance` was tuned on EmbeddingGemma, and
+  Qwen3-Embedding puts even *correct* pairs much further apart, so the 0.8 cutoff
+  dropped every vector neighbour and the hybrid search degenerated to full-text
+  only (measured MRR@10 0.000 on the synthetic corpus and 0.077 on the books
+  corpus, against 0.75/1.000 for EmbeddingGemma). A model preset can now suggest
+  its own cutoff, applied while the config keeps the built-in default.
 
 ## [0.1.1] - 2026-10-15
 

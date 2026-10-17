@@ -92,6 +92,7 @@ class IndexerDaemon:
         sleep: Callable[[float], None] = time.sleep,
         rescan_interval_s: float | None = None,
         watch: bool = True,
+        reload_config: Callable[[], dict[str, Any] | None] | None = None,
     ) -> None:
         self.cfg = cfg
         self.conn = conn
@@ -102,11 +103,16 @@ class IndexerDaemon:
         self._on_embedder_failure = on_embedder_failure
         self.idle_hook = idle_hook
         self.pause_check = pause_check or (lambda: pause_reason(self.cfg))
+        self._pause_injected = pause_check is not None
+        self._reload = reload_config
         self.clock = clock
         self.sleep = sleep
+        self._rescan_override = rescan_interval_s
         if rescan_interval_s is None:
             rescan_interval_s = float(cfg["index"]["rescan_interval_min"]) * 60
         self.rescan_interval_s = rescan_interval_s
+        self._watcher_generation = 0
+        self._watcher_stop = threading.Event()
 
     # -- helpers -----------------------------------------------------------
 
@@ -165,6 +171,17 @@ class IndexerDaemon:
                 log.info("backfilled %d file(s) with vectors", stats.backfilled)
         return stats
 
+    def index_changes(self, paths: Iterable[Path]) -> pipeline.IndexStats:
+        """Index exactly the changed paths — no walk of the enclosing root."""
+        conn = self._ensure_conn()
+        embedder = self._get_embedder()
+        stats = pipeline.index_paths(
+            conn, self.cfg, paths, embedder=embedder, pause_check=self.pause_check
+        )
+        if embedder is not None and not stats.paused:
+            stats.backfilled = pipeline.backfill(conn, self.cfg, embedder)
+        return stats
+
     def run_once(self) -> pipeline.IndexStats:
         """One pass over all roots, honouring the pause condition upfront."""
         if not self._roots():
@@ -192,14 +209,14 @@ class IndexerDaemon:
             if self.watcher is None:
                 self.watcher = Watcher(self._roots())
             events = queue.Queue()
-            threading.Thread(
-                target=self._produce, args=(events,), name="feagle-watch", daemon=True
-            ).start()
+            self._start_watcher(events)
 
         while not self.stop_event.is_set():
             # Give an owned llama-server a chance to unload while we wait, so it
             # does not sit in RAM (~460 MiB) forever when the indexer is the owner.
             self._run_idle_hook()
+            if self._reload_config() and events is not None:
+                self._restart_watcher(events)
             now = self.clock()
             if self.rescan_interval_s and now >= next_rescan:
                 log.info("periodic rescan")
@@ -221,11 +238,53 @@ class IndexerDaemon:
 
             if changed is None:  # watcher finished
                 break
-            roots = self.roots_for(changed)
-            if roots is None:
-                continue
-            log.info("change in %d path(s); rescanning %s", len(changed), roots)
-            self.index_once(roots=roots)
+            if self.roots_for(changed) is None:
+                continue  # nothing in the batch lives under a configured root
+            log.info("change in %d path(s); reindexing them", len(changed))
+            self.index_changes(changed)
+
+    def _reload_config(self) -> bool:
+        """Re-read the config; returns True when the watched roots changed.
+
+        Roots, limits, OCR settings and the rescan interval then apply without a
+        restart. An unreadable or invalid file is logged and the current config is
+        kept, so a typo never takes the daemon down.
+        """
+        if self._reload is None:
+            return False
+        try:
+            fresh = self._reload()
+        except Exception as exc:  # noqa: BLE001 - keep running with the old config
+            log.warning("cannot reload the config; keeping the current one: %s", exc)
+            return False
+        if not fresh or fresh == self.cfg:
+            return False
+        old_roots = self._roots()
+        self.cfg = fresh
+        if not self._pause_injected:
+            self.pause_check = lambda: pause_reason(self.cfg)
+        if self._rescan_override is None:
+            self.rescan_interval_s = float(fresh["index"]["rescan_interval_min"]) * 60
+        log.info("configuration reloaded")
+        return self._roots() != old_roots
+
+    def _start_watcher(self, events: queue.Queue[set[Path] | None]) -> None:
+        self._watcher_generation += 1
+        generation = self._watcher_generation
+        self._watcher_stop = threading.Event()
+        threading.Thread(
+            target=self._produce,
+            args=(events, self._watcher_stop, generation),
+            name=f"feagle-watch-{generation}",
+            daemon=True,
+        ).start()
+
+    def _restart_watcher(self, events: queue.Queue[set[Path] | None]) -> None:
+        """Re-create the watcher after the configured roots changed."""
+        log.info("index roots changed; restarting the watcher")
+        self._watcher_stop.set()
+        self.watcher = Watcher(self._roots())
+        self._start_watcher(events)
 
     def _run_idle_hook(self) -> None:
         if self.idle_hook is None:
@@ -241,14 +300,22 @@ class IndexerDaemon:
             return now + self.rescan_interval_s
         return now
 
-    def _produce(self, events: queue.Queue[set[Path] | None]) -> None:
+    def _produce(
+        self,
+        events: queue.Queue[set[Path] | None],
+        stop: threading.Event,
+        generation: int,
+    ) -> None:
         try:
-            for paths in self.watcher.events(self.stop_event):
+            for paths in self.watcher.events(stop):
                 if paths:
                     events.put(paths)
-                if self.stop_event.is_set():
+                if stop.is_set() or self.stop_event.is_set():
                     break
         except Exception:  # noqa: BLE001 - a broken watcher must not kill the daemon
             log.exception("watcher failed")
         finally:
-            events.put(None)
+            # Only the current generation ends the run: a watcher replaced after a
+            # config reload must not stop the daemon.
+            if generation == self._watcher_generation:
+                events.put(None)

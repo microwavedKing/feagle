@@ -71,6 +71,7 @@ class EmbeddingClient:
         mrl_dim: int | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
         task: str = prompts.DEFAULT_TASK,
+        family: str = prompts.DEFAULT_FAMILY,
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
@@ -78,6 +79,7 @@ class EmbeddingClient:
         self.mrl_dim = mrl_dim
         self.batch_size = max(1, batch_size)
         self.task = task
+        self.prompts = prompts.get_family(family)
         kwargs: dict[str, object] = {"timeout": timeout}
         if transport is not None:
             kwargs["transport"] = transport
@@ -154,7 +156,7 @@ class EmbeddingClient:
         for text in texts:
             if not text.strip():
                 raise EmbeddingError("refusing to embed an empty input")
-        return self._embed_raw([prompts.format_query(text, self.task) for text in texts])
+        return self._embed_raw([self.prompts.format_query(text, self.task) for text in texts])
 
     def embed_documents(self, items: list[tuple[str, str | None]]) -> list[list[float]]:
         """Embed ``(text, title)`` pairs with the document prompt."""
@@ -162,7 +164,7 @@ class EmbeddingClient:
             if not text.strip():
                 raise EmbeddingError("refusing to embed an empty input")
         return self._embed_raw(
-            [prompts.format_doc(text, title, self.task) for text, title in items]
+            [self.prompts.format_doc(text, title, self.task) for text, title in items]
         )
 
     def embed_images(self, paths: list[Path]) -> list[list[float]]:

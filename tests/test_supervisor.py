@@ -80,7 +80,15 @@ def test_command_has_required_flags():
     assert "12345" in cmd
     for flag in ("--embeddings", "--host", "--port", "--no-webui", "--cache-ram", "--alias"):
         assert flag in cmd
-    assert "--pooling" not in cmd  # mean pooling is baked in
+    assert "--pooling" not in cmd  # mean pooling is baked in for EmbeddingGemma
+
+
+def test_command_adds_pooling_only_when_the_model_needs_it():
+    plain = build_llama_command(SupervisorConfig(model_path=Path("/m")), 1)
+    assert "--pooling" not in plain
+    cfg = SupervisorConfig(model_path=Path("/m"), pooling="last")
+    cmd = build_llama_command(cfg, 1)
+    assert cmd[cmd.index("--pooling") + 1] == "last"
 
 
 def test_command_threads_only_when_positive():

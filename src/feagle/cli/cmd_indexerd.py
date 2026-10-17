@@ -9,6 +9,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .. import config
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.service import EmbeddingService, ModelMissingError, media_enabled
 from ..indexer.daemon import IndexerDaemon
@@ -45,6 +46,15 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     stop_event = threading.Event()
     watch_roots = [root for root in roots if Path(root).expanduser().is_dir()]
     watcher = Watcher(watch_roots, poll=args.poll) if watch_roots else None
+    reload_config = None
+    if args.root:
+        # --root overrides the configured roots; reloading the file would undo it.
+        print(
+            "feagle: --root given; config hot-reload is disabled for this run",
+            file=sys.stderr,
+        )
+    else:
+        reload_config = config.load_config
     daemon = IndexerDaemon(
         cfg,
         embedder_provider=service.ensure,
@@ -53,6 +63,7 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         watcher=watcher,
         stop_event=stop_event,
         watch=bool(watch_roots),
+        reload_config=reload_config,
     )
 
     signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
