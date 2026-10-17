@@ -184,6 +184,14 @@ indexer unit: `Nice=19`, `IOSchedulingClass=idle` and a commented
 `CPUQuota=200%` (200% = two CPUs). These directives need cgroup v2, which
 `feagle doctor` verifies.
 
+A change reported by the watcher re-indexes **only the changed paths** — it does
+not walk the enclosing root (on a 3000-file root that is 2 ms instead of 185 ms,
+86×). The periodic full rescan (default every 6 h) stays as the safety net for
+deletions the watcher might miss. `indexerd` also **re-reads the config between
+passes**: roots, limits, OCR settings and the rescan interval apply without a
+restart (a root change restarts the watcher; a broken config is logged and the
+old one is kept).
+
 ## Diagnostics
 
 ```sh
@@ -512,6 +520,7 @@ as an upper bound for that class of hardware. Raw results are in
 feagle bench --files 60 --seed 1 --out bench/results/bench.json
 python bench/quality_eval.py --files 60 --seed 1
 python bench/ocr_eval.py --pages 6     # OCR speed (workers) and quality (psm/dpi)
+python bench/corpus_eval.py --corpus DIR --queries Q.json   # quality on your own corpus
 ```
 
 ### Model: q4 is the default
@@ -545,7 +554,7 @@ for.
 | `llama-server` RSS (loaded) | ~458 MiB, unloaded after 10 min idle |
 | `feagle` process during indexing | +6 MiB peak |
 | Cold start (spawn → healthy) | 1.6 s |
-| Database | ~5.6 KB/chunk once the vector page group is full; small indexes are dominated by a 3.1 MiB vec0 preallocation (see below) |
+| Database | ~8.6 KB/chunk at 1300 chunks (768-dim); small indexes are dominated by a 3.1 MiB vec0 preallocation (see below) |
 
 Query latency is dominated by the query embedding (~50 ms); the search itself
 (KNN + FTS + RRF) is ~2 ms. The model is unloaded after `idle_timeout_min` so an
@@ -556,8 +565,60 @@ idle machine uses no GPU/CPU and no model memory.
 `sqlite-vec` allocates vectors in fixed "page groups" of 1024 rows (this version
 does not expose `chunk_size`), so a fresh `chunks_vec` reserves ~3.1 MiB
 (1024 × 768 × 4 bytes) regardless of how many rows exist. That is why a
-65-chunk benchmark reports ~50 KB/chunk; the steady-state figure is ~5.6 KB per
-chunk (3 KB vector + text and FTS).
+65-chunk benchmark reports ~50 KB/chunk. Measured on a corpus that gets past the
+first group (1200 synthetic files, 1300 chunks): **8630 B/chunk** at 768 dims —
+~3 KB of vector plus the text, the FTS index and row overhead. At 256 dims the
+vector part shrinks to ~1 KB, which is what the table below shows.
+
+### Vector size: 256 dims is as good as 768, and about twice as small
+
+`[embeddings].mrl_dim` truncates the Matryoshka embedding and re-normalizes it.
+Measured with `bench/quality_eval.py` and `bench/corpus_eval.py`:
+
+| Corpus | dims | MRR@10 | English / Russian | Database |
+|---|---|---|---|---|
+| 8 books, 852 chunks, 13 queries | 768 | **1.000** | 1.000 / 1.000 | 8.7 KB/chunk |
+| 8 books, 852 chunks, 13 queries | 256 | **1.000** | 1.000 / 1.000 | 4.2 KB/chunk |
+| 60 synthetic docs, 65 chunks, 60 queries | 768 | 0.750 | 0.667 / 0.833 | 50.6 KB/chunk\* |
+| 60 synthetic docs, 65 chunks, 60 queries | 256 | **0.933** | 0.867 / 1.000 | 20.4 KB/chunk\* |
+
+\* dominated by the vec0 preallocation above, so compare the two rows, not the
+absolute number.
+
+Truncation is close to free: on the real-text corpus both sizes score identically,
+on the small synthetic corpus 256 even scores higher (60 template-like documents
+is not much to go on), and the database is roughly half the size. The default
+stays **768**: the vector part is only ~2 KB/chunk of the total, and a quality
+risk on corpora we have not measured is not worth that.
+
+### Alternative model: Qwen3-Embedding-0.6B
+
+`qwen3-embedding-0.6b-q8` (1024-dim, 639 MB) is the fallback from the research
+notes. `feagle` handles its differences automatically: the server gets
+`--pooling last`, queries use the model card's `Instruct: …\nQuery: …` prefix
+while documents take none, and the distance cutoff switches to the model's own
+scale.
+
+| Corpus | model | MRR@10 | English / Russian | Database |
+|---|---|---|---|---|
+| 8 books, 852 chunks, 13 queries | `embeddinggemma-2-q8` | **1.000** | 1.000 / 1.000 | 8.7 KB/chunk |
+| 8 books, 852 chunks, 13 queries | `qwen3-embedding-0.6b-q8` | 0.712 | 0.833 / 0.607 | 9.9 KB/chunk |
+| 60 synthetic docs, 65 chunks, 60 queries | `embeddinggemma-2-q8` | 0.750 | 0.667 / 0.833 | 50.6 KB/chunk |
+| 60 synthetic docs, 65 chunks, 60 queries | `qwen3-embedding-0.6b-q8` | **1.000** | 1.000 / 1.000 | 69.8 KB/chunk |
+
+Full-text numbers are identical (the model does not touch them): 0.375 on the
+synthetic corpus, 0.635 on the books.
+
+The two corpora disagree — Qwen3 wins on the synthetic one and loses on the
+real-text books — so **EmbeddingGemma stays the default**: it is twice as small,
+faster to load, and at least as good where it counts. Qwen3 remains a working,
+measured option for anyone who wants to try it.
+
+**Watch out:** `[search].max_distance` is model-specific. EmbeddingGemma keeps
+correct pairs at L2 0.55–0.80, Qwen3 at 0.66–1.25, so the EmbeddingGemma cutoff of
+0.8 dropped *every* Qwen3 neighbour and left full-text-only results (MRR@10 0.000
+and 0.077 before the fix). A preset's own cutoff applies while the config keeps
+the built-in default; an explicit value always wins.
 
 ### Profiling and one measured optimization
 
@@ -775,6 +836,14 @@ systemctl --user enable --now feagle-indexerd feagle-queryd
 батарее или при высокой загрузке. Лимиты — в юните индексатора: `Nice=19`,
 `IOSchedulingClass=idle` и закомментированный `CPUQuota=200%` (200% = два ядра).
 Эти директивы требуют cgroup v2 — `feagle doctor` это проверяет.
+
+Изменение, о котором сообщил вотчер, переиндексирует **только изменённые пути** —
+без обхода охватывающего корня (на корне с 3000 файлов это 2 мс вместо 185 мс,
+86×). Периодическое полное пересканирование (по умолчанию раз в 6 ч) остаётся
+страховкой от пропущенных удалений. Плюс `indexerd` **перечитывает конфиг между
+проходами**: корни, лимиты, настройки OCR и интервал rescan применяются без
+перезапуска (смена корней перезапускает вотчер; битый конфиг логируется, а старый
+продолжает работать).
 
 ## Диагностика
 
@@ -1103,6 +1172,7 @@ max_per_file = 3
 feagle bench --files 60 --seed 1 --out bench/results/bench.json
 python bench/quality_eval.py --files 60 --seed 1
 python bench/ocr_eval.py --pages 6     # OCR speed (workers) and quality (psm/dpi)
+python bench/corpus_eval.py --corpus DIR --queries Q.json   # quality on your own corpus
 ```
 
 ### Модель: по умолчанию q4
@@ -1136,7 +1206,7 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 | RSS `llama-server` (загружен) | ~458 МиБ, выгружается после 10 мин простоя |
 | Процесс `feagle` при индексации | +6 МиБ пик |
 | Холодный старт (запуск → healthy) | 1.6 с |
-| База данных | ~5.6 КБ/чанк, когда векторная «страница» заполнена; на маленьких индексах доминирует предвыделение vec0 в 3.1 МиБ (см. ниже) |
+| База данных | ~8.6 КБ/чанк на 1300 чанках (768 измерений); на маленьких индексах доминирует предвыделение vec0 в 3.1 МиБ (см. ниже) |
 
 Латентность запроса определяется эмбеддингом запроса (~50 мс); сам поиск
 (KNN + FTS + RRF) — ~2 мс. Модель выгружается после `idle_timeout_min`, поэтому
@@ -1147,8 +1217,61 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 `sqlite-vec` выделяет векторы фиксированными «группами» по 1024 строки (в этой
 версии `chunk_size` не настраивается), поэтому новая таблица `chunks_vec`
 резервирует ~3.1 МиБ (1024 × 768 × 4 байта) независимо от числа строк. Поэтому
-бенчмарк на 65 чанках показывает ~50 КБ/чанк; в установившемся режиме — ~5.6 КБ
-на чанк (3 КБ вектор + текст и FTS).
+бенчмарк на 65 чанках показывает ~50 КБ/чанк. Замер на корпусе, который выходит
+за первую группу (1200 синтетических файлов, 1300 чанков): **8630 Б/чанк** при 768
+измерениях — это ~3 КБ вектора плюс текст, FTS-индекс и накладные расходы строк.
+При 256 измерениях векторная часть сжимается до ~1 КБ — это и видно в таблице
+ниже.
+
+### Размер вектора: 256 измерений не хуже 768, а база примерно вдвое меньше
+
+`[embeddings].mrl_dim` усекает Matryoshka-эмбеддинг и заново нормирует его.
+Замерено `bench/quality_eval.py` и `bench/corpus_eval.py`:
+
+| Корпус | измерений | MRR@10 | англ. / рус. | База |
+|---|---|---|---|---|
+| 8 книг, 852 чанка, 13 запросов | 768 | **1.000** | 1.000 / 1.000 | 8.7 КБ/чанк |
+| 8 книг, 852 чанка, 13 запросов | 256 | **1.000** | 1.000 / 1.000 | 4.2 КБ/чанк |
+| 60 синтетических док., 65 чанков, 60 запросов | 768 | 0.750 | 0.667 / 0.833 | 50.6 КБ/чанк\* |
+| 60 синтетических док., 65 чанков, 60 запросов | 256 | **0.933** | 0.867 / 1.000 | 20.4 КБ/чанк\* |
+
+\* здесь доминирует предвыделение vec0 (см. выше), поэтому сравнивайте строки
+между собой, а не абсолютное число.
+
+Усечение почти бесплатно: на реальном тексте обе размерности дают одинаковый
+результат, на маленьком синтетическом корпусе 256 даже выше (60 шаблонных
+документов — слабая опора), а база примерно вдвое меньше. Дефолт остаётся **768**:
+векторная часть — это всего ~2 КБ/чанк от общего размера, и риск качества на
+неизмеренных корпусах этого не стоит.
+
+### Альтернативная модель: Qwen3-Embedding-0.6B
+
+`qwen3-embedding-0.6b-q8` (1024 измерения, 639 МБ) — запасной вариант из
+исследований. `feagle` сам учитывает его отличия: сервер получает
+`--pooling last`, запросы идут с префиксом из карточки модели
+(`Instruct: …\nQuery: …`), документы — без него, а порог отсечения переключается
+на его собственную шкалу.
+
+| Корпус | модель | MRR@10 | англ. / рус. | База |
+|---|---|---|---|---|
+| 8 книг, 852 чанка, 13 запросов | `embeddinggemma-2-q8` | **1.000** | 1.000 / 1.000 | 8.7 КБ/чанк |
+| 8 книг, 852 чанка, 13 запросов | `qwen3-embedding-0.6b-q8` | 0.712 | 0.833 / 0.607 | 9.9 КБ/чанк |
+| 60 синтетических док., 65 чанков, 60 запросов | `embeddinggemma-2-q8` | 0.750 | 0.667 / 0.833 | 50.6 КБ/чанк |
+| 60 синтетических док., 65 чанков, 60 запросов | `qwen3-embedding-0.6b-q8` | **1.000** | 1.000 / 1.000 | 69.8 КБ/чанк |
+
+Полнотекстовые числа совпадают (модель на них не влияет): 0.375 на синтетике,
+0.635 на книгах.
+
+Корпуса расходятся во мнениях — Qwen3 выигрывает на синтетике и проигрывает на
+реальном тексте книг, — поэтому **дефолт остаётся EmbeddingGemma**: она вдвое
+меньше, быстрее загружается и как минимум не хуже там, где это важно. Qwen3
+остаётся рабочей измеренной опцией, если хочется попробовать.
+
+**Важно:** `[search].max_distance` зависит от модели. EmbeddingGemma держит
+правильные пары на L2 0.55–0.80, Qwen3 — на 0.66–1.25, поэтому порог 0.8
+отбрасывал **все** соседи Qwen3 и оставлял только полнотекстовый результат
+(MRR@10 0.000 и 0.077 до исправления). Собственный порог пресета применяется,
+пока в конфиге стоит встроенное значение; явно заданное значение всегда важнее.
 
 ### Профилирование и одна измеренная оптимизация
 
