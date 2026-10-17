@@ -180,3 +180,43 @@ def test_hybrid_hit_carries_time_ms(conn):
     add(conn, "/d/clip.mp4", "", [1.0, 0.0, 0.0], time_ms=42000)
     hits = hybrid.search_hybrid(conn, "zzz", query_vector=[1.0, 0.0, 0.0], limit=5, candidates=5)
     assert hits[0].time_ms == 42000
+
+
+# ---- the distance cutoff follows the model ------------------------------
+
+
+def test_effective_max_distance_uses_an_explicit_config_value():
+    from feagle import config
+
+    cfg = config.default_config()
+    cfg["search"]["max_distance"] = 0.5
+    assert hybrid.effective_max_distance(cfg) == 0.5
+
+
+def test_effective_max_distance_uses_the_model_preset_by_default():
+    from feagle import config
+
+    cfg = config.default_config()
+    assert hybrid.effective_max_distance(cfg) == config.DEFAULT_MAX_DISTANCE
+
+    cfg["embeddings"]["model"] = "qwen3-embedding-0.6b-q8"
+    assert hybrid.effective_max_distance(cfg) == 1.3  # its own distance scale
+
+
+def test_effective_max_distance_ignores_an_unknown_model_path():
+    from feagle import config
+
+    cfg = config.default_config()
+    cfg["embeddings"]["model"] = "/tmp/custom.gguf"
+    assert hybrid.effective_max_distance(cfg) == config.DEFAULT_MAX_DISTANCE
+
+
+def test_a_model_specific_cutoff_keeps_results_the_default_would_drop():
+    """The regression behind the fix: 0.8 dropped every Qwen3 neighbour."""
+    from feagle import config
+
+    cfg = config.default_config()
+    cfg["embeddings"]["model"] = "qwen3-embedding-0.6b-q8"
+    distance = 1.2  # a correct pair under Qwen3
+    assert distance > config.DEFAULT_MAX_DISTANCE
+    assert distance <= hybrid.effective_max_distance(cfg)

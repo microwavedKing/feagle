@@ -283,7 +283,7 @@ class QueryEngine:
                     candidates=search_cfg["candidates"],
                     rrf_k=search_cfg["rrf_k"],
                     stem=stem,
-                    max_distance=search_cfg["max_distance"],
+                    max_distance=hybrid.effective_max_distance(self.cfg),
                     max_per_file=search_cfg["max_per_file"],
                 )
                 used = "hybrid"
