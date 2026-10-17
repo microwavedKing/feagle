@@ -63,7 +63,7 @@
 | `gitignore.py` | минимальный `.gitignore` | `GitIgnore(base, patterns)`, `matches_chain()` |
 | `scanner.py` | обход корней и фильтры | `Scanner.iter_files()` → `ScanCandidate`; скрытые, `exclude_dirs`, allowlist расширений, лимиты размера, симлинки не трогаем, `exclude_paths` (данные feagle) |
 | `extract.py` | текст/код/PDF/картинки | `extract()`, `Extracted(pages, kind, encoding)`; **фолбэк кодировок**; PDF через `pdftotext`; картинки — OCR (`kind="image"`) |
-| `ocr.py` | OCR страниц PDF и картинок | `ocr_pdf_page()` (pdftoppm→tesseract), `ocr_image()` (только tesseract), `ocr_pages()` с лимитами |
+| `ocr.py` | OCR страниц PDF и картинок | `ocr_pdf_page()` (pdftoppm→tesseract), `ocr_image()` (только tesseract), `ocr_pages()` с лимитами и **пулом процессов** (`ocr_workers` ≤ `MAX_OCR_WORKERS`=2, ошибка страницы изолирована, откат в один поток), `resolve_psm()` (`ocr_psm`/`ocr_osd` → `--psm` + язык `osd`) |
 | `media.py` | подготовка картинок и видео | `image_dimensions()`/`downscale_image()` (ffprobe/ffmpeg), `extract_frames()` (кадр каждые N с, ≤ `video_max_frames`), `VIDEO_SUFFIXES` |
 | `asr.py` | транскрипция аудио (whisper.cpp) | `transcribe()` (ffmpeg → 16 кГц WAV → `whisper-cli -oj`), `Segment(start_ms,end_ms,text)`, `AUDIO_SUFFIXES` |
 | `chunker.py` | чанки ~1400 симв. | `chunk_extracted()`; прилипание к границе строки (точный `line`), перекрытие 150, cap 2200, PDF не пересекает страницу, у картинок `line`/`page` = None |
@@ -258,7 +258,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 
 ## 7. Тесты
 
-- 40 файлов в `tests/`, ~535 тестов. Запуск: `.venv/bin/pytest -q`.
+- 40 файлов в `tests/`, ~559 тестов. Запуск: `.venv/bin/pytest -q`.
 - **Гейты `skipif`**: тесты, требующие `llama-server`/модели (`FEAGLE_RUN_MODEL_TESTS=1`),
   `pdftotext`, `tesseract`, `ocr_available()` — скипаются, поэтому CI проходит на
   чистом Ubuntu (без poppler/tesseract/llama).
@@ -305,6 +305,8 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 31 | Лаунчер: протокол вынесен в переиспользуемый `FeagleSearch.qml` (`QtObject`), демо `FeagleLauncher.qml` — одно окно; приложения первыми + файлы, `fts` мгновенно и `hybrid` после debounce; `icon` приложения в ответе `launcher` | «два окна» (`wofi \| feagle search --pick`) — плохой UX; один живой попап на Quickshell решает и это, а компонент позволяет встроить feagle в свой QS-лаунчер без копирования логики | `quickshell/FeagleSearch.qml`, `quickshell/FeagleLauncher.qml`, `queryd.launcher` (`icon`), `apps.App.icon` |
 | 32 | Frecency считается **на сервере** и добавляется как **ограниченный** бонус (≤ 5 к базовому скору, с полураспадом 30 дней); хранилище — JSON в `$XDG_STATE_HOME/feagle/frecency.json`, `feagle pick` пишет туда же | скоринг приложений уже живёт в `queryd`, поэтому историю видит любой клиент (включая dmenu-фолбэк), а не только QML; бонус меньше зазора между тирами (1/10/25/50/100), поэтому история не может вытеснить лучшее совпадение, но упорядочивает внутри тира и в режиме обзора | `frecency.py`, `queryd._app_bonus`/`used`, `apps.match_apps(bonus=…)`, `picker.run_pick` |
 | 33 | Превью — операция `preview` в `queryd` (текст вокруг строки ±12, маркер картинки, метаданные) + панель справа в демо; фильтр результатов (`all/apps/files`) — **на клиенте** (`Tab`), без нового запроса | превью — это чтение файла и логика, ей место рядом с индексом (любой клиент получит её даром); фильтр же не должен терять уже полученную семантическую выдачу, поэтому он клиентский и мгновенный | `queryd.preview`, `FeagleSearch.visibleResults/setFilter`, `FeagleLauncher` (панель, `Tab`) |
+| 34 | Параллельный OCR страниц PDF: `ProcessPoolExecutor` на `ocr_workers` (по умолчанию 2), **жёсткий потолок 2**; воркер — модульная функция, возвращающая `(page, text, error)`; при недоступности пула или своём `ocr_page` — один поток | `tesseract` однопоточный, поэтому единственный способ использовать несколько ядер — процессы; страница 300 dpi после декодирования — десятки МБ, поэтому потолок 2 (цель 8 ГБ); ошибка страницы не должна ронять проход, а результат пишется по номеру страницы, чтобы порядок не зависел от воркеров | `ocr.ocr_pages`/`_ocr_page_task`/`_process_pool`, `config.ocr_workers`, `extract_pdf(ocr_workers=…)`, `pipeline` |
+| 35 | Качество OCR: `ocr_psm` (`"auto"` → значение tesseract по умолчанию) и `ocr_osd` (`--psm 1` + язык `osd` в `-l`; без `osd` в списке языков OSD вообще не запускается). Текст по-прежнему берём из `txt`-вывода, а **TSV оставили только для замеров** | замер показал, что TSV-реконструкция текста нормализованно **совпадает** с `txt` на обеих фикстурах → порядок слов уже верный, переписывать рабочее нечего; а `--psm`/DPI на синтетике не меняют CER/WER (0.000), но 300 dpi втрое медленнее 150 — значит нужен замерный скрипт, а не «улучшение» вслепую | `ocr.resolve_psm`, `ocr.osd_available` (кэш), `config.ocr_psm/ocr_osd`, `doctor.check_ocr`, `bench/ocr_eval.py` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 
@@ -316,3 +318,8 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 - Качество (синтетика, 60 док., MRR@10): hybrid 0.750 (en 0.667 / ru 0.833), FTS 0.375.
 - Реальные книги (4 файла, 230 чанков): MRR@10 0.8 у q4 и q8; q4 на 30 % быстрее.
 - Стемминг: наш CPU индексации 0.557 → 0.144 с (3.9×) после кэша.
+- OCR (синтетический скан, 6 страниц, `eng`, 300 dpi): 0.97 с/страница в один
+  поток → 0.52 с/страница на двух (**1.78×**). Качество: CER/WER = 0.000 при всех
+  `--psm` и 150/200/300 dpi, средняя уверенность в словах 95.9–96.3; 300 dpi ≈ втрое
+  медленнее 150 dpi. OSD на повёрнутой на 180° копии фикстуры не разворачивает
+  (CER 0.787, «weak margin»): в фикстуре две строки, для OSD этого мало.
