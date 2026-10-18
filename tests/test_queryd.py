@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -288,6 +289,55 @@ def test_client_invalid_json(server, tmp_path):
 
 def test_is_running_false_when_absent(tmp_path):
     assert QuerydClient(tmp_path / "nope.sock").is_running() is False
+
+
+@pytest.mark.parametrize("exc", [BrokenPipeError, ConnectionResetError])
+def test_handler_ignores_a_client_that_hung_up(exc):
+    """A dropped client must not leak an exception out of the handler."""
+
+    class _Engine:
+        def dispatch(self, request):
+            return {"ok": True}
+
+    class _DeadSocket:
+        def write(self, data):
+            raise exc("client gone")
+
+        def flush(self):
+            raise exc("client gone")
+
+    handler = queryd._Handler.__new__(queryd._Handler)
+    handler.rfile = [b'{"op":"ping"}\n']
+    handler.wfile = _DeadSocket()
+    handler.server = types.SimpleNamespace(engine=_Engine(), request_hook=None)
+    handler.handle()  # must not raise
+
+
+def test_client_disconnect_mid_reply_is_not_an_error(server, tmp_path, capsys, monkeypatch):
+    """Aborting a connection while the daemon writes its reply is not an error."""
+    import socket
+    import struct
+
+    original = server.engine.dispatch
+
+    def slow_dispatch(request):
+        time.sleep(0.2)
+        return original(request)
+
+    monkeypatch.setattr(server.engine, "dispatch", slow_dispatch)
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(str(tmp_path / "q.sock"))
+    # SO_LINGER 0 → close() sends a RST, so the daemon's reply write fails.
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    sock.sendall(b'{"op":"ping"}\n')
+    sock.close()
+
+    time.sleep(0.5)  # let the daemon try (and fail) to write the reply
+
+    assert "Traceback" not in capsys.readouterr().err
+    # The daemon keeps serving other clients:
+    assert QuerydClient(tmp_path / "q.sock").request("ping")["ok"] is True
 
 
 # -- warmup / launcher -----------------------------------------------------

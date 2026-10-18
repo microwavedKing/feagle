@@ -17,15 +17,17 @@ import socketserver
 import subprocess
 import threading
 import time
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import __version__, db, frecency, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..log import get_logger
 from ..search import hybrid
 from ..search.vec import vec_count
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 log = get_logger("search.queryd")
 
@@ -515,7 +517,7 @@ class QueryEngine:
                 )
             if op == "status":
                 return self.status()
-        except Exception as exc:  # noqa: BLE001 - the protocol must never crash
+        except Exception as exc:
             log.exception("queryd operation failed: %s", op)
             return {"ok": False, "error": str(exc)}
         return {"ok": False, "error": f"unknown op: {op!r}"}
@@ -523,6 +525,15 @@ class QueryEngine:
 
 class _Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
+        # A client that hangs up mid-exchange (or resets the connection) is
+        # normal: without this, socketserver prints a traceback for every such
+        # disconnect. Swallow it and let the thread end quietly.
+        try:
+            self._pump()
+        except (BrokenPipeError, ConnectionResetError):
+            log.debug("queryd: client disconnected mid-request")
+
+    def _pump(self) -> None:
         for raw in self.rfile:
             line = raw.strip()
             if not line:
