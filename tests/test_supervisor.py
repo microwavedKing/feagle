@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -308,6 +309,34 @@ def test_dead_owner_is_not_waited_out(tmp_path):
 def test_process_alive_helper():
     assert supervisor_module._process_alive(os.getpid()) is True
     assert supervisor_module._process_alive(2147483647) is False  # no such process
+
+
+def test_terminate_reaps_a_child_that_ignores_sigterm(tmp_path, monkeypatch):
+    """SIGKILL must be followed by a wait, or the child stays a zombie."""
+    monkeypatch.setattr(supervisor_module, "_TERMINATE_TIMEOUT_S", 0.3)
+    sup, _ = make_supervisor(tmp_path, health=lambda url: True)
+    proc = subprocess.Popen(["sh", "-c", 'trap "" TERM; sleep 30'])
+    sup._proc = proc
+    sup._owned = True
+
+    sup.stop()
+
+    assert proc.returncode is not None  # reaped: kill() alone would leave None
+    stat = Path(f"/proc/{proc.pid}/stat")
+    if stat.exists():  # the pid has not been recycled yet
+        assert stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0] != "Z"
+
+
+def test_starting_a_new_server_stops_the_previous_child(tmp_path):
+    previous = FakeProc(pid=999)
+    fresh = FakeProc(pid=1000)
+    sup, _ = make_supervisor(tmp_path, health=lambda url: True, spawn=lambda cmd: fresh)
+    sup._proc = previous
+
+    sup._start_server()
+
+    assert previous.terminated is True
+    assert sup._proc is fresh
 
 
 def test_shared_touch_keeps_the_server_alive(tmp_path):
