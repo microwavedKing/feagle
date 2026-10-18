@@ -76,6 +76,25 @@ class _ResilientEmbedder:
     def embed_queries(self, texts: list[str]) -> list[list[float]]:
         return self._call("embed_queries", texts)
 
+    def __getattr__(self, name: str) -> Any:
+        """Forward anything else to the wrapped embedder, with the same retry.
+
+        Capability checks like ``getattr(embedder, "embed_images", None)`` have to
+        see through this wrapper (a text-only embedder genuinely lacks the
+        method), and the call itself must still survive a dropped server.
+        """
+        embedder = self.__dict__.get("_embedder")
+        if embedder is None:  # during __init__, before the wrapped object is set
+            raise AttributeError(name)
+        attribute = getattr(embedder, name)
+        if not callable(attribute):
+            return attribute
+
+        def forward(*args: Any) -> Any:
+            return self._call(name, *args)
+
+        return forward
+
 
 
 class IndexerDaemon:

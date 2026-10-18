@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 import pytest
 
 from feagle import config, db
 from feagle.embeddings.client import ServerUnavailable
 from feagle.indexer import pipeline
-from feagle.indexer.daemon import IndexerDaemon
+from feagle.indexer.daemon import IndexerDaemon, _ResilientEmbedder
 from feagle.indexer.watcher import Watcher
 
 
@@ -283,6 +284,66 @@ def test_embedder_restart_failure_degrades_instead_of_crashing(root, conn):
     stats = daemon.index_once()  # must not raise
     assert stats.vectors == 0
     assert embedded_of(conn, root / "a.txt") == 0
+
+
+def _wrap(embedder):
+    return _ResilientEmbedder(embedder, provider=lambda: embedder, on_failure=lambda: None)
+
+
+def test_resilient_embedder_does_not_hide_embed_images():
+    """Image search in the daemon: the wrapper must forward ``embed_images``."""
+
+    class WithImages:
+        dim = 3
+
+        def embed_documents(self, items):
+            return [[0.0]]
+
+        def embed_queries(self, texts):
+            return [[0.0]]
+
+        def embed_images(self, paths):
+            return [[1.0, 2.0, 3.0]]
+
+    class TextOnly:
+        dim = 3
+
+        def embed_documents(self, items):
+            return [[0.0]]
+
+        def embed_queries(self, texts):
+            return [[0.0]]
+
+    multimodal = _wrap(WithImages())
+    assert getattr(multimodal, "embed_images", None) is not None
+    assert multimodal.embed_images([Path("x.png")]) == [[1.0, 2.0, 3.0]]
+
+    # A text-only embedder must still look incapable, so the pipeline can skip
+    # images with a clear message instead of crashing.
+    assert getattr(_wrap(TextOnly()), "embed_images", None) is None
+
+
+def test_resilient_embedder_retries_an_image_batch_after_a_drop():
+    class Flaky:
+        calls = 0
+
+        dim = 3
+
+        def embed_documents(self, items):
+            return [[0.0]]
+
+        def embed_queries(self, texts):
+            return [[0.0]]
+
+        def embed_images(self, paths):
+            Flaky.calls += 1
+            if Flaky.calls == 1:
+                raise ServerUnavailable("server unloaded")
+            return [[9.0, 9.0, 9.0]]
+
+    resilient = _wrap(Flaky())
+    assert resilient.embed_images([Path("x.png")]) == [[9.0, 9.0, 9.0]]
+    assert Flaky.calls == 2
 
 
 def test_idle_hook_is_called_in_the_wait_loop(root, conn):
