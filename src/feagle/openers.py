@@ -1,10 +1,12 @@
 """Open a file at a position using the user's configured opener templates.
 
 Templates live under ``[openers]`` in the config. Placeholders are ``{path}``,
-``{line}``, ``{page}`` and ``{time}`` (seconds, for media). When a position is not
-given, the placeholder *and* a directly preceding flag (``--page {page}``) are
-dropped, so a template like ``zathura --page {page} {path}`` degrades to
-``zathura {path}``.
+``{line}``, ``{page}`` and ``{time}`` (seconds, for media); an optional format
+spec is honoured (``{page:>3}``). When a position is not given, the placeholder
+*and* a directly preceding flag (``--page {page}``) are dropped, so a template like
+``zathura --page {page} {path}`` degrades to ``zathura {path}``. Braces other than
+the four placeholders are left as they are, so a template may contain a literal
+``{`` (a shell or ``awk`` snippet) without breaking.
 
 Commands are split with :func:`shlex.split` and executed without a shell, so
 paths can never be interpreted as shell syntax.
@@ -12,6 +14,7 @@ paths can never be interpreted as shell syntax.
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any
@@ -25,6 +28,9 @@ if TYPE_CHECKING:
 log = get_logger("openers")
 
 _POSITION_PLACEHOLDERS = ("line", "page", "time")
+
+#: A documented placeholder, with an optional format spec (``{page:>3}``).
+_PLACEHOLDER_RE = re.compile(r"\{(?P<name>path|line|page|time)(?P<spec>:[^{}]*)?\}")
 
 
 class OpenError(Exception):
@@ -41,6 +47,25 @@ def select_template(openers: dict[str, str], path: Path) -> str:
 
 def _has_missing(token: str, missing: set[str]) -> bool:
     return any(f"{{{name}}}" in token for name in missing)
+
+
+def _expand(token: str, values: dict[str, str]) -> str:
+    """Replace the documented placeholders and leave every other brace alone.
+
+    ``str.format`` over the whole token would raise on a template that contains a
+    literal brace - an ``awk`` one-liner in ``[openers]``, a shell expansion, or a
+    typo like ``{pth}`` - and a config mistake would end as a traceback instead of
+    a message. Here only ``{path}``, ``{line}``, ``{page}`` and ``{time}`` are
+    substituted (with the usual optional format spec); anything else passes
+    through literally.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        value = values[match.group("name")]
+        spec = match.group("spec")
+        return format(value, spec[1:]) if spec else value
+
+    return _PLACEHOLDER_RE.sub(replace, token)
 
 
 def build_command(
@@ -80,7 +105,7 @@ def build_command(
             index += 1
             continue
 
-        command.append(token.format(**values))
+        command.append(_expand(token, values))
         index += 1
     return command
 

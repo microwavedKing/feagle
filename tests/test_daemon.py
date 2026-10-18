@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 import pytest
 
 from feagle import config, db
 from feagle.embeddings.client import ServerUnavailable
+from feagle.indexer import daemon as daemon_module
 from feagle.indexer import pipeline
 from feagle.indexer.daemon import IndexerDaemon, _ResilientEmbedder
 from feagle.indexer.watcher import Watcher
@@ -169,6 +171,39 @@ def test_paused_rescan_is_scheduled_sooner(root, conn):
     stats = pipeline.IndexStats(paused="on battery")
     assert daemon._next_rescan(stats) == 100.0 + 300.0
     assert daemon._next_rescan(pipeline.IndexStats()) == 100.0 + 3600
+
+
+def test_a_paused_pass_is_retried_even_without_a_rescan_interval(root, conn, monkeypatch):
+    """Disabling periodic rescans must not turn a pause into an endless stall."""
+    monkeypatch.setattr(daemon_module, "PAUSED_RETRY_S", 0.05)
+    reasons = ["busy"]
+
+    def pause_check():
+        return reasons.pop(0) if reasons else None
+
+    def source(stop_event):
+        time.sleep(0.2)
+        yield None  # end the watcher, so the loop can leave
+
+    indexer = IndexerDaemon(
+        make_cfg(root),
+        conn=conn,
+        watcher=Watcher([root], source=source),
+        pause_check=pause_check,
+        rescan_interval_s=0,
+    )
+    indexer.run()
+
+    # the initial pass was paused, the retry indexed the file
+    assert conn.execute("SELECT COUNT(*) AS n FROM files").fetchone()["n"] == 1
+
+
+def test_no_rescan_is_scheduled_when_nothing_is_configured(root, conn):
+    indexer = IndexerDaemon(
+        make_cfg(root), conn=conn, pause_check=lambda: None, rescan_interval_s=0
+    )
+    assert indexer._next_rescan(pipeline.IndexStats()) is None
+    assert indexer._next_rescan(pipeline.IndexStats(paused="busy")) is not None
 
 
 def test_producer_thread_is_daemon(root, conn):
