@@ -249,7 +249,20 @@ def check_model(cfg: dict[str, Any], *, verify_hash: bool = True) -> Check:
             "model", "fail", f"{path}: sha256 mismatch",
             "re-download the model ('feagle setup')",
         )
-    return Check("model", "ok", f"{spec.name} ({path.name})")
+
+    # An explicit [search].max_distance that disagrees with the model's own scale
+    # silently drops vector neighbours; say the measured value out loud.
+    from .search import hybrid
+
+    hint = ""
+    if spec.max_distance is not None:
+        effective = hybrid.effective_max_distance(cfg)
+        if effective != float(spec.max_distance):
+            hint = (
+                f"[search].max_distance={effective:g} is tuned for another model; "
+                f"{spec.name} measured {spec.max_distance:g}"
+            )
+    return Check("model", "ok", f"{spec.name} ({path.name})", hint)
 
 
 def check_server_health(cfg: dict[str, Any]) -> Check:
