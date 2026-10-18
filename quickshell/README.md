@@ -249,6 +249,15 @@ ranking below). Send it after running `exec`:
   `{"ok":false,"error":"not in the index: …"}`. The daemon must not become a way
   to read arbitrary files through the socket.
 
+**Limits.** A request line longer than 256 KiB is refused (`request too large`)
+instead of being buffered; `search`/`launcher` refuse a `query` longer than 4096
+characters; `embed` refuses more than 64 `texts` or a text longer than 8192
+characters. At most 16 connections are served at once (the next one gets
+`{"ok":false,"error":"too many connections"}` right away), and a connection that
+sends nothing for 120 s is closed — reconnect on a fresh connection, which is what
+the bundled clients do (`QuerydClient` per request, the QML `Socket` on
+disconnect).
+
 **Request tags.** Any request may carry a `"req"` string; the reply echoes it, so
 one connection can mix request kinds. The demo tags `"launcher"` and `"preview"`
 and routes on `req`.
