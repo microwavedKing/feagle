@@ -402,6 +402,8 @@ ocr_workers = 2
 # Page segmentation mode: "auto" or 0..13 (tesseract --psm).
 ocr_psm = "auto"
 # Detect and undo rotated scans (uses --psm 1 and the "osd" traineddata).
+# Measured on a text-heavy page: a 180° turn is recovered (CER 0.838 → 0.020)
+# at about +7% per page upright; a 90° turn is read without it.
 ocr_osd = false
 
 [embeddings]

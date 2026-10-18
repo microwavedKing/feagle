@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `README.md`: a "Privacy and security" section (EN + RU), and a matching
   "Модель безопасности" subsection in `ARCHITECTURE.md`.
+- The model section documents the measured `embed_batch_size` caveat for the
+  1024-dim alternative: on CPU a 16-chunk batch of long book chunks can exceed the
+  client's 60-second timeout and leave files without vectors (81% coverage,
+  measured); `embed_batch_size = 4` completes without timeouts.
 - A manual page, `man/feagle.1`: every command and option, the files and
   directories feagle uses, the environment variables, exit status, and the
   degradation and privacy notes.
@@ -31,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   popup) and `whisper.cpp` (audio) were missing, OCR orientation data and media
   descriptions were clarified, and the dmenu launchers are now described as the
   `feagle pick` alternative they are.
+- `bench/corpus_eval.py`: `--max-distance` to sweep the vector cutoff and `--db`
+  to reuse one database across a sweep (it refuses a database built with another
+  model or vector dimension). `bench/ocr_eval.py`: `--osd-pdf`/`--osd-page` and a
+  three-rotation OSD table with the character error rate per rotation.
 
 ### Changed
 
@@ -44,6 +52,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The database size reported by `feagle bench` (and by `bench/corpus_eval.py`,
+  `bench/quality_eval.py`) now includes the write-ahead log instead of counting
+  only the main file, so the published bytes-per-chunk figures are the real
+  ones. On the book corpus this corrects `mrl_dim = 256` from "about half the
+  size" to **28% smaller** (8.7 → 6.3 KB/chunk).
+- `feagle bench` and `bench/quality_eval.py` clear the previous synthetic corpus
+  before generating a new one. The default corpus directory is shared, so a
+  leftover 1200-document corpus made a 60-document quality run index all 1200
+  documents and report a much lower score.
 - An HTML/XML file that cannot be parsed is now reported as a file error instead
   of being indexed as raw markup: tags would dilute its embedding and nothing
   would tell you that the page text was never extracted. The rest of the run is
@@ -409,6 +426,10 @@ on Wayland.
 
 - `README.md`: раздел «Приватность и безопасность» (EN + RU) и соответствующий
   подраздел «Модель безопасности» в `ARCHITECTURE.md`.
+- В разделе про модели зафиксирован измеренный нюанс `embed_batch_size` для
+  1024-мерной альтернативы: на CPU батч из 16 длинных книжных чанков не влезает в
+  60-секундный таймаут клиента, и файлы остаются без векторов (81 % покрытия,
+  замер); с `embed_batch_size = 4` прогон идёт без таймаутов.
 - Man-страница `man/feagle.1`: все команды и опции, файлы и каталоги, переменные
   окружения, коды выхода, режим деградации и приватность.
 - Комплишены для bash (`completions/feagle.bash`), zsh (`completions/_feagle`) и fish
@@ -419,6 +440,10 @@ on Wayland.
   порядок: не хватало `quickshell` (рекомендуемый попап) и `whisper.cpp` (аудио),
   уточнены описания OCR-данных и медиа, а dmenu-лаунчеры подписаны как альтернатива
   для `feagle pick` — чем они и являются.
+- `bench/corpus_eval.py`: `--max-distance` для свипа порога и `--db` для
+  переиспользования одной базы во всём свипе (база с другой моделью или
+  размерностью отвергается). `bench/ocr_eval.py`: `--osd-pdf`/`--osd-page` и таблица
+  OSD по трём поворотам с CER на каждый.
 
 ### Изменено
 
@@ -430,6 +455,15 @@ on Wayland.
 
 ### Исправлено
 
+- Размер БД, который печатает `feagle bench` (и `bench/corpus_eval.py`,
+  `bench/quality_eval.py`), теперь считается вместе с write-ahead log, а не только
+  по главному файлу, поэтому опубликованные Б/чанк — настоящие. На корпусе книг это
+  исправляет `mrl_dim = 256` с «примерно вдвое меньше» на **на 28 % меньше**
+  (8.7 → 6.3 КБ/чанк).
+- `feagle bench` и `bench/quality_eval.py` очищают прошлый синтетический корпус перед
+  генерацией нового. Каталог корпуса по умолчанию общий, поэтому оставшийся корпус на
+  1200 документов заставлял прогон «на 60 документов» индексировать все 1200 и
+  показывать заметно худший результат.
 - HTML/XML, который не удалось разобрать, теперь помечается ошибкой файла, а не
   индексируется сырой разметкой: теги разбавляли бы его эмбеддинг, и никто бы не
   узнал, что текст страницы не извлечён. Остальной проход это не ломает — как и
@@ -438,9 +472,6 @@ on Wayland.
   (`sh -c 'awk {print $1}'`), а в пути — `{`/`}`; раньше и то и другое шло через
   `str.format` и могло упасть. Подставляются только `{path}`, `{line}`, `{page}` и
   `{time}` (формат-спецификации по-прежнему работают), остальное остаётся как есть.
-
-### Исправлено
-
 - Backfill больше не бросает всю очередь из-за одного файла: файл, содержимое
   которого не эмбеддится, остаётся с `embedded=0` до следующего прохода, а обход
   продолжается. Проход прерывается только после серии неудач — трёх подряд: так

@@ -297,9 +297,16 @@ while `tesseract-data-osd` is missing.
 **Measured** with `python bench/ocr_eval.py` (synthetic fixtures, `eng`): all
 `--psm` values and 150/200/300 dpi recognized the fixture with **CER/WER = 0**,
 mean word confidence 96; 300 dpi is ~3× slower per page than 150 dpi, so raise
-`ocr_dpi` only when the scan needs it. The 180°-rotated copy is *not* fixed by
-OSD on this fixture (CER 0.79): it holds two lines, and OSD reports a weak margin
-and refuses to rotate.
+`ocr_dpi` only when the scan needs it. The committed fixture (two lines) is too
+short for OSD: it reports a weak margin and refuses to rotate.
+
+**Measured** on a text-heavy page instead (`think-python.pdf`, page 8, 478 words,
+300 dpi, `eng`): OSD does recover a 180°-rotated scan — **CER 0.839 → 0.020**,
+exactly the 0.020 of the upright page. A 90° turn is read correctly without OSD
+(CER 0.020), so only the upside-down case needs it. It is not free: 2.29 s →
+2.82 s per page upright (**+23%**) and 2.34 s → 2.86 s on the rotated one, which is
+why it stays off by default. Reproduce it with
+`python bench/ocr_eval.py --osd-pdf testdata/books/think-python.pdf --osd-page 8`.
 
 **Images.** With `[index].ocr_images = true`, `feagle` indexes `png`, `jpg`,
 `jpeg`, `webp` and `tiff` files by OCR'ing them directly with `tesseract`. No
@@ -568,6 +575,13 @@ returned even for a query that appears nowhere. `max_distance` is the knob that
 separates "related" from "nearest of a bad lot"; raise it if good matches are
 being filtered out, lower it for stricter results.
 
+**Measured** on the 8-file, 852-chunk book corpus (13 queries, q4, `mrl_dim 768`,
+hybrid MRR@10 / Recall@10): `0.6` → **0.635 / 0.692**, which is exactly the
+full-text score — every vector neighbour was cut, and only the OR fallback above
+kept the list from going blank. `0.8` (the default), `1.0` and `0` (disabled) →
+**1.000 / 1.000**. The default therefore sits right at the edge of useful; going
+lower trades away the semantic side, going higher changes nothing on this corpus.
+
 ## Measured performance
 
 Measured on this development machine: Intel i7-8565U (4 cores / 8 threads),
@@ -591,15 +605,16 @@ python bench/corpus_eval.py --corpus DIR --queries Q.json   # quality on your ow
 | Indexing | **2.30 chunks/s** | 1.81 chunks/s |
 | `llama-server` RSS | **458 MiB** | 523 MiB |
 | Cold start | 1.55 s | 1.59 s |
-| MRR@10 (hybrid) | 0.750 | 0.750 |
-| MRR@10 (English / Russian) | 0.667 / 0.833 | 0.667 / 0.833 |
-| Recall@20 (hybrid) | 0.750 | 0.750 |
+| MRR@10 (hybrid) | 0.778 | 0.778 |
+| MRR@10 (English / Russian) | 0.722 / 0.833 | 0.722 / 0.833 |
+| Recall@20 (hybrid) | 0.833 | 0.833 |
 | p50 hybrid query | **52 ms** | 62 ms |
 
 The lighter quant is ~27 % faster to index and ~65 MiB smaller with **identical
 measured retrieval quality**, so it is the default; `q8` (official ggml-org
 repository) stays available via `[embeddings].model`. The same ranking held on a
-real-text check (4 books, 230 chunks, MRR 0.8 for both, q4 indexing 30 % faster).
+real-text check (8 files, 852 chunks, 13 queries) gives MRR@10 1.000 for both, and
+q4 indexes faster (see the throughput row above).
 Full-text metrics are model-independent: MRR@10 0.375, Recall@20 0.500 — exact
 matching alone is weak on paraphrased queries, which is what the semantic side is
 for.
@@ -614,7 +629,7 @@ for.
 | `llama-server` RSS (loaded) | ~458 MiB, unloaded after 10 min idle |
 | `feagle` process during indexing | +6 MiB peak |
 | Cold start (spawn → healthy) | 1.6 s |
-| Database | ~8.6 KB/chunk at 1300 chunks (768-dim); small indexes are dominated by a 3.1 MiB vec0 preallocation (see below) |
+| Database | ~8.7 KB/chunk at 1300 chunks (768-dim); small indexes are dominated by a 3.1 MiB vec0 preallocation (see below) |
 
 Query latency is dominated by the query embedding (~50 ms); the search itself
 (KNN + FTS + RRF) is ~2 ms. The model is unloaded after `idle_timeout_min` so an
@@ -625,31 +640,33 @@ idle machine uses no GPU/CPU and no model memory.
 `sqlite-vec` allocates vectors in fixed "page groups" of 1024 rows (this version
 does not expose `chunk_size`), so a fresh `chunks_vec` reserves ~3.1 MiB
 (1024 × 768 × 4 bytes) regardless of how many rows exist. That is why a
-65-chunk benchmark reports ~50 KB/chunk. Measured on a corpus that gets past the
-first group (1200 synthetic files, 1300 chunks): **8630 B/chunk** at 768 dims —
+65-chunk benchmark reports ~54 KB/chunk. Measured on a corpus that gets past the
+first group (1200 synthetic files, 1300 chunks): **8655 B/chunk** at 768 dims —
 ~3 KB of vector plus the text, the FTS index and row overhead. At 256 dims the
 vector part shrinks to ~1 KB, which is what the table below shows.
 
-### Vector size: 256 dims is as good as 768, and about twice as small
+### Vector size: 256 dims is as good as 768, and 28% smaller on disk
 
 `[embeddings].mrl_dim` truncates the Matryoshka embedding and re-normalizes it.
-Measured with `bench/quality_eval.py` and `bench/corpus_eval.py`:
+Measured with `bench/quality_eval.py` and `bench/corpus_eval.py` (the real-text
+rows are `embeddinggemma-2-q4`):
 
 | Corpus | dims | MRR@10 | English / Russian | Database |
 |---|---|---|---|---|
-| 8 books, 852 chunks, 13 queries | 768 | **1.000** | 1.000 / 1.000 | 8.7 KB/chunk |
-| 8 books, 852 chunks, 13 queries | 256 | **1.000** | 1.000 / 1.000 | 4.2 KB/chunk |
-| 60 synthetic docs, 65 chunks, 60 queries | 768 | 0.750 | 0.667 / 0.833 | 50.6 KB/chunk\* |
-| 60 synthetic docs, 65 chunks, 60 queries | 256 | **0.933** | 0.867 / 1.000 | 20.4 KB/chunk\* |
+| 8 files, 852 chunks, 13 queries | 768 | **1.000** | 1.000 / 1.000 | 8.7 KB/chunk |
+| 8 files, 852 chunks, 13 queries | 256 | **1.000** | 1.000 / 1.000 | 6.3 KB/chunk |
+| 60 synthetic docs, 65 chunks, 60 queries | 768 | 0.778 | 0.722 / 0.833 | 54.2 KB/chunk\* |
+| 60 synthetic docs, 65 chunks, 60 queries | 256 | **0.933** | 0.867 / 1.000 | 21.9 KB/chunk\* |
 
 \* dominated by the vec0 preallocation above, so compare the two rows, not the
 absolute number.
 
 Truncation is close to free: on the real-text corpus both sizes score identically,
 on the small synthetic corpus 256 even scores higher (60 template-like documents
-is not much to go on), and the database is roughly half the size. The default
-stays **768**: the vector part is only ~2 KB/chunk of the total, and a quality
-risk on corpora we have not measured is not worth that.
+is not much to go on), and the database gets 28% smaller (8.7 → 6.3 KB/chunk; an
+earlier "about half" came from measuring the main database file without its
+write-ahead log). The default stays **768**: the win is a quarter, and a quality
+risk on corpora we have not measured is not worth more than that.
 
 ### Alternative model: Qwen3-Embedding-0.6B
 
@@ -661,10 +678,18 @@ scale.
 
 | Corpus | model | MRR@10 | English / Russian | Database |
 |---|---|---|---|---|
-| 8 books, 852 chunks, 13 queries | `embeddinggemma-2-q8` | **1.000** | 1.000 / 1.000 | 8.7 KB/chunk |
-| 8 books, 852 chunks, 13 queries | `qwen3-embedding-0.6b-q8` | 0.712 | 0.833 / 0.607 | 9.9 KB/chunk |
-| 60 synthetic docs, 65 chunks, 60 queries | `embeddinggemma-2-q8` | 0.750 | 0.667 / 0.833 | 50.6 KB/chunk |
-| 60 synthetic docs, 65 chunks, 60 queries | `qwen3-embedding-0.6b-q8` | **1.000** | 1.000 / 1.000 | 69.8 KB/chunk |
+| 8 files, 852 chunks, 13 queries | `embeddinggemma-2-q8` | **1.000** | 1.000 / 1.000 | 8.7 KB/chunk |
+| 4 files, 230 chunks (earlier corpus) | `qwen3-embedding-0.6b-q8` | 0.712 | 0.833 / 0.607 | 9.9 KB/chunk |
+| 60 synthetic docs, 65 chunks, 60 queries | `embeddinggemma-2-q8` | 0.778 | 0.722 / 0.833 | 54.2 KB/chunk |
+| 60 synthetic docs, 65 chunks, 60 queries | `qwen3-embedding-0.6b-q8` | **1.000** | 1.000 / 1.000 | 70.4 KB/chunk |
+
+On CPU the 1024-dim model needs a smaller `[index].embed_batch_size`: with the
+default 16, a batch of long book chunks can exceed the client's 60-second
+timeout and the affected files stay at `embedded = 0` (measured on the
+852-chunk corpus: 81% of the chunks got vectors, two requests timed out). With
+`embed_batch_size = 4` the same run produced no timeouts and 100% coverage on
+the first seven files before it was stopped. The default stays 16 because
+EmbeddingGemma is much faster; lower it if you switch to Qwen3 on CPU.
 
 Full-text numbers are identical (the model does not touch them): 0.375 on the
 synthetic corpus, 0.635 on the books.
@@ -1032,9 +1057,17 @@ OCR по умолчанию выключен (тяжёлый: примерно �
 **Замеры** (`python bench/ocr_eval.py`, синтетические фикстуры, `eng`): при всех
 значениях `--psm` и 150/200/300 dpi фикстура распознана с **CER/WER = 0**, средняя
 уверенность в словах 96; 300 dpi примерно втрое медленнее на страницу, чем 150
-dpi, поэтому поднимайте `ocr_dpi` только если скан этого требует. Копию,
-повёрнутую на 180°, OSD на этой фикстуре **не** исправляет (CER 0.79): в ней две
-строки, OSD сообщает о слабом запасе и отказывается разворачивать.
+dpi, поэтому поднимайте `ocr_dpi` только если скан этого требует. Закоммиченная
+фикстура (две строки) для OSD слишком коротка: он сообщает о слабом запасе и
+разворачивать отказывается.
+
+**Замеры** уже на текстоёмкой странице (`think-python.pdf`, стр. 8, 478 слов,
+300 dpi, `eng`): поворот на 180° OSD **исправляет** — CER **0.839 → 0.020**, ровно
+как у неповёрнутой страницы (0.020). Поворот на 90° читается и без OSD
+(CER 0.020), то есть нужен он только для «вверх ногами». Бесплатным он не бывает:
+2.29 → 2.82 с на страницу для нормальной (**+23 %**) и 2.34 → 2.86 с для повёрнутой —
+поэтому по умолчанию выключен. Воспроизвести:
+`.venv/bin/python bench/ocr_eval.py --osd-pdf testdata/books/think-python.pdf --osd-page 8`.
 
 **Картинки.** При `[index].ocr_images = true` `feagle` индексирует `png`, `jpg`,
 `jpeg`, `webp` и `tiff`, распознавая их напрямую через `tesseract`. Рендер не
@@ -1304,6 +1337,13 @@ max_per_file = 3
 «ближайшего из плохих»: увеличьте, если отсекаются хорошие совпадения,
 уменьшите для строгости.
 
+**Замер** на корпусе из 8 файлов (852 чанка, 13 запросов, q4, `mrl_dim 768`,
+гибридные MRR@10 / Recall@10): `0.6` → **0.635 / 0.692**, то есть ровно
+полнотекстовый результат — все векторные соседи отсеклись, и список спас только
+OR-фолбэк (см. выше). `0.8` (дефолт), `1.0` и `0` (выключено) → **1.000 / 1.000**.
+То есть дефолт стоит ровно на границе полезного: ниже — теряем семантику, выше —
+на этом корпусе уже без разницы.
+
 ## Измеренная производительность
 
 Замеры на этой машине: Intel i7-8565U (4 ядра / 8 потоков), **16 ГБ RAM**, NVMe,
@@ -1326,16 +1366,16 @@ python bench/corpus_eval.py --corpus DIR --queries Q.json   # quality on your ow
 | Индексация | **2.30 чанка/с** | 1.81 чанка/с |
 | RSS `llama-server` | **458 МиБ** | 523 МиБ |
 | Холодный старт | 1.55 с | 1.59 с |
-| MRR@10 (hybrid) | 0.750 | 0.750 |
-| MRR@10 (англ. / рус.) | 0.667 / 0.833 | 0.667 / 0.833 |
-| Recall@20 (hybrid) | 0.750 | 0.750 |
+| MRR@10 (hybrid) | 0.778 | 0.778 |
+| MRR@10 (англ. / рус.) | 0.722 / 0.833 | 0.722 / 0.833 |
+| Recall@20 (hybrid) | 0.833 | 0.833 |
 | p50 гибридного запроса | **52 мс** | 62 мс |
 
 Лёгкий квант примерно на 27 % быстрее индексирует и на ~65 МиБ меньше, при
 **одинаковом измеренном качестве** — поэтому он дефолт; `q8` (официальный
 репозиторий ggml-org) доступен через `[embeddings].model`. То же соотношение
-подтвердилось на реальных книгах (4 книги, 230 чанков, MRR 0.8 у обоих, q4
-индексирует на 30 % быстрее). Полнотекстовые метрики не зависят от модели:
+подтвердилось на реальных книгах (8 файлов, 852 чанка, 13 запросов): MRR@10 1.000 у
+обоих, а q4 индексирует быстрее (см. строку про скорость выше). Полнотекстовые метрики не зависят от модели:
 MRR@10 0.375, Recall@20 0.500 — точного совпадения мало на перефразированных
 запросах, для этого и нужна семантика.
 
@@ -1349,7 +1389,7 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 | RSS `llama-server` (загружен) | ~458 МиБ, выгружается после 10 мин простоя |
 | Процесс `feagle` при индексации | +6 МиБ пик |
 | Холодный старт (запуск → healthy) | 1.6 с |
-| База данных | ~8.6 КБ/чанк на 1300 чанках (768 измерений); на маленьких индексах доминирует предвыделение vec0 в 3.1 МиБ (см. ниже) |
+| База данных | ~8.7 КБ/чанк на 1300 чанках (768 измерений); на маленьких индексах доминирует предвыделение vec0 в 3.1 МиБ (см. ниже) |
 
 Латентность запроса определяется эмбеддингом запроса (~50 мс); сам поиск
 (KNN + FTS + RRF) — ~2 мс. Модель выгружается после `idle_timeout_min`, поэтому
@@ -1360,32 +1400,34 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 `sqlite-vec` выделяет векторы фиксированными «группами» по 1024 строки (в этой
 версии `chunk_size` не настраивается), поэтому новая таблица `chunks_vec`
 резервирует ~3.1 МиБ (1024 × 768 × 4 байта) независимо от числа строк. Поэтому
-бенчмарк на 65 чанках показывает ~50 КБ/чанк. Замер на корпусе, который выходит
-за первую группу (1200 синтетических файлов, 1300 чанков): **8630 Б/чанк** при 768
+бенчмарк на 65 чанках показывает ~54 КБ/чанк. Замер на корпусе, который выходит
+за первую группу (1200 синтетических файлов, 1300 чанков): **8655 Б/чанк** при 768
 измерениях — это ~3 КБ вектора плюс текст, FTS-индекс и накладные расходы строк.
 При 256 измерениях векторная часть сжимается до ~1 КБ — это и видно в таблице
 ниже.
 
-### Размер вектора: 256 измерений не хуже 768, а база примерно вдвое меньше
+### Размер вектора: 256 измерений не хуже 768, а база на 28 % меньше
 
 `[embeddings].mrl_dim` усекает Matryoshka-эмбеддинг и заново нормирует его.
-Замерено `bench/quality_eval.py` и `bench/corpus_eval.py`:
+Замерено `bench/quality_eval.py` и `bench/corpus_eval.py` (строки с реальным
+текстом — на `embeddinggemma-2-q4`):
 
 | Корпус | измерений | MRR@10 | англ. / рус. | База |
 |---|---|---|---|---|
-| 8 книг, 852 чанка, 13 запросов | 768 | **1.000** | 1.000 / 1.000 | 8.7 КБ/чанк |
-| 8 книг, 852 чанка, 13 запросов | 256 | **1.000** | 1.000 / 1.000 | 4.2 КБ/чанк |
-| 60 синтетических док., 65 чанков, 60 запросов | 768 | 0.750 | 0.667 / 0.833 | 50.6 КБ/чанк\* |
-| 60 синтетических док., 65 чанков, 60 запросов | 256 | **0.933** | 0.867 / 1.000 | 20.4 КБ/чанк\* |
+| 8 файлов, 852 чанка, 13 запросов | 768 | **1.000** | 1.000 / 1.000 | 8.7 КБ/чанк |
+| 8 файлов, 852 чанка, 13 запросов | 256 | **1.000** | 1.000 / 1.000 | 6.3 КБ/чанк |
+| 60 синтетических док., 65 чанков, 60 запросов | 768 | 0.778 | 0.722 / 0.833 | 54.2 КБ/чанк\* |
+| 60 синтетических док., 65 чанков, 60 запросов | 256 | **0.933** | 0.867 / 1.000 | 21.9 КБ/чанк\* |
 
 \* здесь доминирует предвыделение vec0 (см. выше), поэтому сравнивайте строки
 между собой, а не абсолютное число.
 
 Усечение почти бесплатно: на реальном тексте обе размерности дают одинаковый
 результат, на маленьком синтетическом корпусе 256 даже выше (60 шаблонных
-документов — слабая опора), а база примерно вдвое меньше. Дефолт остаётся **768**:
-векторная часть — это всего ~2 КБ/чанк от общего размера, и риск качества на
-неизмеренных корпусах этого не стоит.
+документов — слабая опора), а база меньше на 28 % (8.7 → 6.3 КБ/чанк; прежнее
+«примерно вдвое» получалось из замера, который считал главный файл БД без WAL).
+Дефолт остаётся **768**: выигрыш — четверть, и риск качества на неизмеренных
+корпусах этого не стоит.
 
 ### Альтернативная модель: Qwen3-Embedding-0.6B
 
@@ -1397,10 +1439,18 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 
 | Корпус | модель | MRR@10 | англ. / рус. | База |
 |---|---|---|---|---|
-| 8 книг, 852 чанка, 13 запросов | `embeddinggemma-2-q8` | **1.000** | 1.000 / 1.000 | 8.7 КБ/чанк |
-| 8 книг, 852 чанка, 13 запросов | `qwen3-embedding-0.6b-q8` | 0.712 | 0.833 / 0.607 | 9.9 КБ/чанк |
-| 60 синтетических док., 65 чанков, 60 запросов | `embeddinggemma-2-q8` | 0.750 | 0.667 / 0.833 | 50.6 КБ/чанк |
-| 60 синтетических док., 65 чанков, 60 запросов | `qwen3-embedding-0.6b-q8` | **1.000** | 1.000 / 1.000 | 69.8 КБ/чанк |
+| 8 файлов, 852 чанка, 13 запросов | `embeddinggemma-2-q8` | **1.000** | 1.000 / 1.000 | 8.7 КБ/чанк |
+| 4 файла, 230 чанков (прежний корпус) | `qwen3-embedding-0.6b-q8` | 0.712 | 0.833 / 0.607 | 9.9 КБ/чанк |
+| 60 синтетических док., 65 чанков, 60 запросов | `embeddinggemma-2-q8` | 0.778 | 0.722 / 0.833 | 54.2 КБ/чанк |
+| 60 синтетических док., 65 чанков, 60 запросов | `qwen3-embedding-0.6b-q8` | **1.000** | 1.000 / 1.000 | 70.4 КБ/чанк |
+
+На CPU 1024-мерной модели нужен меньший `[index].embed_batch_size`: при дефолтных
+16 батч из длинных книжных чанков не влезает в 60-секундный таймаут клиента, и
+затронутые файлы остаются с `embedded = 0` (замер на корпусе из 852 чанков: векторы
+получили 81 % чанков, два запроса упали по таймауту). С `embed_batch_size = 4` тот же
+прогон шёл без таймаутов: 100 % покрытия на первых семи файлах, пока не был
+остановлен. Дефолт остаётся 16, потому что EmbeddingGemma заметно быстрее; для
+Qwen3 на CPU его стоит уменьшить.
 
 Полнотекстовые числа совпадают (модель на них не влияет): 0.375 на синтетике,
 0.635 на книгах.
