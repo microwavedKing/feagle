@@ -136,7 +136,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Recall@20 1.000 vs 0.917). The two still tie on the 60-document corpus (0.750
   each) and on the real book corpus (1.000 each). The latency rows were
   re-measured on an idle machine: hybrid p50/p95 58/81 ms (embedding 55 ms,
-  search 2.7 ms), full-text 1.8/6.7 ms.
+  search 2.7 ms), full-text 1.8/6.7 ms. The Qwen3 book row stays from the earlier
+  230-chunk corpus: a full re-measure at a batch of 4 was stopped on purpose, as
+  the corpora already disagree and EmbeddingGemma is ahead on real text.
 
 ## [0.3.0] - 2026-10-18
 
@@ -588,7 +590,9 @@ on Wayland.
   утверждает **одинаковое** качество q4 и q8: на этом корпусе q8 выше (MRR@10 0.938
   против 0.856, Recall@20 1.000 против 0.917). На 60 документах оба дают 0.750, на
   реальных книгах — 1.000. Строки латентности перемерены на простое: гибрид p50/p95
-  58/81 мс (эмбеддинг 55 мс, поиск 2.7 мс), полнотекст 1.8/6.7 мс.
+  58/81 мс (эмбеддинг 55 мс, поиск 2.7 мс), полнотекст 1.8/6.7 мс. Строка Qwen3 по
+  книгам остаётся с прежнего корпуса (230 чанков): полный перемер при батче 4
+  остановлен — корпуса и так расходятся, а на реальном тексте впереди EmbeddingGemma.
 
 ## 0.3.0 (по-русски) — 2026-10-18
 

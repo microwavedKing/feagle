@@ -696,8 +696,13 @@ default 16, a batch of long book chunks can exceed the client's 60-second
 timeout and the affected files stay at `embedded = 0` (measured on the
 852-chunk corpus: 81% of the chunks got vectors, two requests timed out). With
 `embed_batch_size = 4` the same run produced no timeouts and 100% coverage on
-the first seven files before it was stopped. The default stays 16 because
-EmbeddingGemma is much faster; lower it if you switch to Qwen3 on CPU.
+the first seven files. The default stays 16 because EmbeddingGemma is much
+faster; lower it if you switch to Qwen3 on CPU.
+
+The Qwen3 book row above is the earlier 230-chunk corpus on purpose: a full
+re-measure on the current 852-chunk one was stopped — the two corpora already
+disagree with EmbeddingGemma ahead on real text, so another row would not change
+the default. Qwen3 stays a measured option, not the recommendation.
 
 Full-text numbers are identical (the model does not touch them): 0.375 on the
 synthetic corpus, 0.635 on the books.
@@ -1472,9 +1477,13 @@ python bench/corpus_eval.py --corpus DIR --queries Q.json   # quality on your ow
 16 батч из длинных книжных чанков не влезает в 60-секундный таймаут клиента, и
 затронутые файлы остаются с `embedded = 0` (замер на корпусе из 852 чанков: векторы
 получили 81 % чанков, два запроса упали по таймауту). С `embed_batch_size = 4` тот же
-прогон шёл без таймаутов: 100 % покрытия на первых семи файлах, пока не был
-остановлен. Дефолт остаётся 16, потому что EmbeddingGemma заметно быстрее; для
-Qwen3 на CPU его стоит уменьшить.
+прогон шёл без таймаутов: 100 % покрытия на первых семи файлах. Дефолт остаётся 16,
+потому что EmbeddingGemma заметно быстрее; для Qwen3 на CPU его стоит уменьшить.
+
+Строка Qwen3 по книгам выше — намеренно с прежнего корпуса (230 чанков): полный
+перемер на текущем (852 чанка) остановлен — корпуса и так расходятся, а на реальном
+тексте впереди EmbeddingGemma, поэтому ещё одна строка дефолт не изменит. Qwen3
+остаётся измеренной опцией, а не рекомендацией.
 
 Полнотекстовые числа совпадают (модель на них не влияет): 0.375 на синтетике,
 0.635 на книгах.
