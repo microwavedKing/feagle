@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `queryd` now previews **only files that are in the index**. The `preview`
+  operation used to read whatever path it was handed, so any local process able to
+  open the 0600 socket could read any file of the account. The path is normalised
+  the way the indexer stores it and must be a row in `files`; a symlink is refused
+  while `[index].follow_symlinks = false` (the default).
+
+### Added
+
+- `README.md`: a "Privacy and security" section (EN + RU), and a matching
+  "Модель безопасности" subsection in `ARCHITECTURE.md`.
+
 ## [0.3.0] - 2026-10-18
 
 Quality and release tooling, plus two search bugs found by using the thing. No
@@ -336,6 +349,19 @@ on Wayland.
 ---
 
 ## Unreleased (по-русски)
+
+### Безопасность
+
+- `queryd` отдаёт превью **только файлов из индекса**. Операция `preview` читала любой
+  переданный путь, поэтому любой локальный процесс, открывший сокет 0600, мог
+  прочитать любой файл учётной записи. Теперь путь нормализуется так же, как его
+  хранит индексатор, и обязан быть строкой в `files`; симлинк отвергается, пока
+  `[index].follow_symlinks = false` (значение по умолчанию).
+
+### Добавлено
+
+- `README.md`: раздел «Приватность и безопасность» (EN + RU) и соответствующий
+  подраздел «Модель безопасности» в `ARCHITECTURE.md`.
 
 ## 0.3.0 (по-русски) — 2026-10-18
 

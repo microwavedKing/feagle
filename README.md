@@ -37,6 +37,7 @@ to install for the semantic side.
 [Russian text and OCR](#russian-text-and-ocr) ·
 [Launcher and hotkeys](#launcher-and-hotkeys) · [Search quality](#search-quality) ·
 [Measured performance](#measured-performance) ·
+[Privacy and security](#privacy-and-security) ·
 [Known limitations](#known-limitations) · [License](#license)
 
 The same document in Russian follows the English part, starting at
@@ -671,6 +672,31 @@ calls for 130 chunks, 0.45 s of 0.56 s. Stemming results are now cached
 (`functools.lru_cache`), which cut our indexing CPU to 0.14 s for the same
 corpus (**3.9× faster**, `stem_text` 7.8×, only 285 real stemmer calls). Search
 (~1.8 ms) is dominated by SQLite itself, so nothing was changed there.
+
+## Privacy and security
+
+Everything stays on the machine. There are no accounts, no telemetry and no
+network calls except the one-shot model download that you start yourself
+(`feagle setup`, `feagle model`).
+
+- **Local only.** The index is a single SQLite file (`0600`, directory `0700`)
+  under `$XDG_DATA_HOME/feagle`. `queryd` listens on a Unix socket in
+  `$XDG_RUNTIME_DIR` (`0600`) — never a TCP port.
+- **`preview` is scoped to the index.** The daemon returns the text of a file only
+  if that path is already a row in the index — the same files `search` can return.
+  Being able to open the socket therefore is not a way to read arbitrary files of
+  your account. A symlink is refused while `[index].follow_symlinks = false` (the
+  default). A preview never reads more than 2 MiB, and one PDF page is rendered
+  with a 20 s limit.
+- **`llama-server` is loopback-only.** It listens on `127.0.0.1` with no API key,
+  so a process running as *you* can reach it. That is deliberate: a key would not
+  stop such a process and would break the one-command setup. Nothing leaves the
+  machine. `[embeddings].server_url` is yours to point at another host — do that
+  only if you accept that the text then goes to that server.
+- **What this is not.** This protects against *other users* and against a *stray*
+  client, not against a malicious process running as the same user: such a process
+  can read the same files directly anyway. The isolation is file permissions, not
+  a sandbox.
 
 ## Known limitations
 
@@ -1362,6 +1388,30 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 кэшируются (`functools.lru_cache`), что сократило наш CPU на том же корпусе до
 0.14 с (**в 3.9 раза быстрее**, `stem_text` — в 7.8 раза, реальных вызовов
 стеммера 285). Поиск (~1.8 мс) упирается в сам SQLite — там ничего не менялось.
+
+## Приватность и безопасность
+
+Всё остаётся на машине. Нет ни аккаунтов, ни телеметрии, ни сетевых обращений,
+кроме разового скачивания модели, которое вы запускаете сами (`feagle setup`,
+`feagle model`).
+
+- **Только локально.** Индекс — один файл SQLite (`0600`, каталог `0700`) в
+  `$XDG_DATA_HOME/feagle`. `queryd` слушает unix-сокет в `$XDG_RUNTIME_DIR`
+  (`0600`), а не TCP-порт.
+- **`preview` ограничен индексом.** Демон отдаёт текст файла только если этот путь
+  уже есть в индексе — тот же набор файлов, что может вернуть `search`. Поэтому
+  доступ к сокету не превращается в доступ к произвольным файлам вашей учётной
+  записи. Симлинк отвергается, пока `[index].follow_symlinks = false` (значение по
+  умолчанию). Превью читает не больше 2 МиБ, а на отрисовку страницы PDF есть лимит
+  20 с.
+- **`llama-server` слушает только loopback.** Это `127.0.0.1` без API-ключа — до
+  него может дотянуться процесс, запущенный от *вашего* имени. Так и задумано: ключ
+  от такого процесса не спасёт, зато сломал бы настройку «одной командой». Наружу
+  трафик не уходит. `[embeddings].server_url` вы вправе указать на другой хост — но
+  только если согласны, что тексты уйдут на тот сервер.
+- **Чего это не делает.** Защита — от *других пользователей* и от *случайного*
+  клиента, а не от вредоносного процесса **под тем же** пользователем: такой процесс
+  и так читает те же файлы напрямую. Изоляция — файловые права, а не песочница.
 
 ## Известные ограничения
 
