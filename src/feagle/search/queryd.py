@@ -4,6 +4,11 @@ One request per line, one response per line. The socket lives in
 ``$XDG_RUNTIME_DIR/feagle/`` (0700) and is created 0600. Each connection is
 handled on its own thread and opens its own read-only database connection, so
 no SQLite object is shared across threads.
+
+Everything the daemon can reach comes from the index: ``preview`` refuses a
+path that is not a row in ``files``, so being able to talk to the socket does
+not turn into being able to read any file of the user (see ``ARCHITECTURE.md``,
+"Модель безопасности").
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import os
 import shutil
 import socket
 import socketserver
+import sqlite3
 import subprocess
 import threading
 import time
@@ -226,6 +232,30 @@ class QueryEngine:
         self._frecency.record(key)
         return {"ok": True}
 
+    def _indexed(self, target: Path) -> bool:
+        """Whether ``target`` is a file the index knows about.
+
+        ``preview`` followed the path it was handed, so any local process that
+        could open the 0600 socket could read *any* file of the user through it.
+        The index is the natural allowlist: every path that can show up in a
+        reply was put there by the indexer, and nothing else is reachable.
+        """
+        try:
+            conn = self._connect()
+        except (FileNotFoundError, sqlite3.Error) as exc:
+            log.warning("preview: cannot consult the index: %s", exc)
+            return False
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM files WHERE path = ? LIMIT 1", (str(target),)
+            ).fetchone()
+        except sqlite3.Error as exc:
+            log.warning("preview: index lookup failed: %s", exc)
+            return False
+        finally:
+            conn.close()
+        return row is not None
+
     def preview(
         self,
         path: str,
@@ -243,10 +273,19 @@ class QueryEngine:
         A PDF has no line numbers (a chunk carries only its page), so with
         ``page`` the page is rendered and the window is anchored on the chunk's
         own text when ``chunk_id`` is given.
+
+        Only files present in the index are served (see ``_indexed``); the path
+        is normalised the same way the indexer stores it (``abspath`` +
+        ``expanduser``, no symlink resolution).
         """
         from ..indexer import extract
 
-        target = Path(path)
+        target = Path(os.path.abspath(os.path.expanduser(str(path))))
+        if not self._indexed(target):
+            return {"ok": False, "error": f"not in the index: {path}"}
+        if target.is_symlink() and not self.cfg.get("index", {}).get("follow_symlinks", False):
+            # The indexer would not have indexed this path as a symlink.
+            return {"ok": False, "error": f"not in the index: {path}"}
         try:
             stat = target.stat()
         except OSError as exc:
