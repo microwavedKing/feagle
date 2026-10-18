@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1024-dim alternative: on CPU a 16-chunk batch of long book chunks can exceed the
   client's 60-second timeout and leave files without vectors (81% coverage,
   measured); `embed_batch_size = 4` completes without timeouts.
+- `feagle doctor` says the same thing as a warning when it sees a wide model
+  (1024 dimensions) with a large `[index].embed_batch_size`, so the advice is not
+  only in the README.
 - A manual page, `man/feagle.1`: every command and option, the files and
   directories feagle uses, the environment variables, exit status, and the
   degradation and privacy notes.
@@ -126,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config is loaded, and `feagle doctor` reports it (info for `https://`, warn for
   plain `http://`). Every query and every indexed document goes there; that is
   the owner's choice, but it should not be a surprise.
+- The model comparison in the README is now measured on one corpus (400
+  synthetic documents, 434 chunks, 400 queries) instead of mixing runs of
+  different sizes, and it no longer claims that q4 and q8 have **identical**
+  retrieval quality: on that corpus q8 scores higher (MRR@10 0.938 vs 0.856,
+  Recall@20 1.000 vs 0.917). The two still tie on the 60-document corpus (0.750
+  each) and on the real book corpus (1.000 each). The latency rows were
+  re-measured on an idle machine: hybrid p50/p95 58/81 ms (embedding 55 ms,
+  search 2.7 ms), full-text 1.8/6.7 ms.
 
 ## [0.3.0] - 2026-10-18
 
@@ -473,6 +484,9 @@ on Wayland.
   1024-мерной альтернативы: на CPU батч из 16 длинных книжных чанков не влезает в
   60-секундный таймаут клиента, и файлы остаются без векторов (81 % покрытия,
   замер); с `embed_batch_size = 4` прогон идёт без таймаутов.
+- `feagle doctor` говорит то же самое предупреждением, когда видит широкую модель
+  (1024 измерения) с большим `[index].embed_batch_size` — совет теперь не только в
+  README.
 - Man-страница `man/feagle.1`: все команды и опции, файлы и каталоги, переменные
   окружения, коды выхода, режим деградации и приватность.
 - Комплишены для bash (`completions/feagle.bash`), zsh (`completions/_feagle`) и fish
@@ -569,6 +583,12 @@ on Wayland.
   загрузке конфига, а `feagle doctor` показывает это отдельной строкой (info для
   `https://`, warn для обычного `http://`). Туда уходит каждый запрос и каждый
   документ при индексации — это осознанный выбор владельца, но не сюрприз.
+- Сравнение моделей в README теперь измерено на одном корпусе (400 синтетических
+  документов, 434 чанка, 400 запросов), а не на прогонах разного размера, и больше не
+  утверждает **одинаковое** качество q4 и q8: на этом корпусе q8 выше (MRR@10 0.938
+  против 0.856, Recall@20 1.000 против 0.917). На 60 документах оба дают 0.750, на
+  реальных книгах — 1.000. Строки латентности перемерены на простое: гибрид p50/p95
+  58/81 мс (эмбеддинг 55 мс, поиск 2.7 мс), полнотекст 1.8/6.7 мс.
 
 ## 0.3.0 (по-русски) — 2026-10-18
 
