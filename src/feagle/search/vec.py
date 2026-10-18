@@ -8,10 +8,13 @@ reclaims space).
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import sqlite_vec
+
+if TYPE_CHECKING:
+    import sqlite3
 
 
 @dataclass(frozen=True)

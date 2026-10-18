@@ -8,10 +8,9 @@ place.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .. import paths
 from ..log import get_logger
@@ -19,6 +18,9 @@ from . import prompts
 from .client import EmbeddingClient, EmbeddingError, ServerUnavailable
 from .presets import MMPROJ_PRESETS, ModelSpec, spec_for
 from .supervisor import LlamaSupervisor, SupervisorConfig
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 log = get_logger("embeddings.service")
 

@@ -16,17 +16,14 @@ from __future__ import annotations
 
 import hashlib
 import os
-import sqlite3
 import tempfile
 import time
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
-from ..embeddings.service import Embedder
 from ..log import get_logger
 from . import asr
 from .chunker import MAX_CHARS, Chunk, chunk_extracted
@@ -41,6 +38,12 @@ from .media import (
 )
 from .ocr import IMAGE_SUFFIXES, OcrError, image_ocr_available, ocr_image
 from .scanner import ScanCandidate, Scanner
+
+if TYPE_CHECKING:
+    import sqlite3
+    from collections.abc import Callable, Iterable
+
+    from ..embeddings.service import Embedder
 
 log = get_logger("indexer.pipeline")
 

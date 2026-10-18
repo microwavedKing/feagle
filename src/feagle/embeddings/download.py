@@ -11,12 +11,16 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
 from ..log import get_logger
-from .presets import ModelSpec
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .presets import ModelSpec
 
 log = get_logger("embeddings.download")
 

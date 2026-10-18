@@ -15,9 +15,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 STDOUT_LAUNCHER = "stdout"
 

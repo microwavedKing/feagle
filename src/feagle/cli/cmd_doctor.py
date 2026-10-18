@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import doctor
+
+if TYPE_CHECKING:
+    import argparse
 
 _SYMBOL = {"ok": "OK  ", "warn": "WARN", "fail": "FAIL", "info": "--  "}
 

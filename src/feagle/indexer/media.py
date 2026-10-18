@@ -155,4 +155,4 @@ def extract_frames(
         raise MediaError(f"ffmpeg exited {proc.returncode}: {detail[:200]}")
 
     frames = sorted(dest_dir.glob("frame_*.png"))
-    return [(int(round(index * seconds * 1000)), path) for index, path in enumerate(frames)]
+    return [(round(index * seconds * 1000), path) for index, path in enumerate(frames)]

@@ -34,7 +34,7 @@ def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     page = args.page
     time_ms = None
     if getattr(args, "time", None) is not None:
-        time_ms = int(round(args.time * 1000))
+        time_ms = round(args.time * 1000)
     if args.position is not None:
         suffix = path.suffix.lower()
         if suffix == ".pdf":

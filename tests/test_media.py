@@ -62,7 +62,7 @@ def test_downscale_caps_the_longest_side(tmp_path, monkeypatch):
     dest = tmp_path / "out.png"
 
     assert media.downscale_image(src, dest, max_dim=1024) == dest
-    ffmpeg = [c for c in calls if c[0].endswith("ffmpeg")][0]
+    ffmpeg = next(c for c in calls if c[0].endswith("ffmpeg"))
     assert "scale=1024:-1" in ffmpeg  # landscape -> cap the width
 
 
@@ -75,7 +75,7 @@ def test_downscale_caps_the_height_for_portrait(tmp_path, monkeypatch):
     dest = tmp_path / "out.png"
 
     assert media.downscale_image(src, dest, max_dim=1024) == dest
-    ffmpeg = [c for c in calls if c[0].endswith("ffmpeg")][0]
+    ffmpeg = next(c for c in calls if c[0].endswith("ffmpeg"))
     assert "scale=-1:1024" in ffmpeg
 
 

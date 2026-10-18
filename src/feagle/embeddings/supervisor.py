@@ -15,16 +15,18 @@ import os
 import socket
 import subprocess
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from .. import paths
 from ..log import get_logger
 from .client import ServerUnavailable
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 log = get_logger("embeddings.supervisor")
 

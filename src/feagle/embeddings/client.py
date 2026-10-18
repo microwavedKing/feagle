@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import base64
 import math
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
 from . import prompts
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: Placeholder title used when a document has no name.
 DEFAULT_BATCH_SIZE = 16

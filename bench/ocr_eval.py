@@ -243,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {'dpi':>4}  {'psm':>5}  {'seconds':>7}  {'CER':>6}  {'WER':>6}  {'conf':>5}")
     for row in report["quality"]:
         conf = "-" if row["confidence"] is None else f"{row['confidence']:.1f}"
-        print(f"  {row['dpi']:>4}  {str(row['psm']):>5}  {row['seconds']:>7.3f}  "
+        print(f"  {row['dpi']:>4}  {row['psm']!s:>5}  {row['seconds']:>7.3f}  "
               f"{row['cer']:>6.3f}  {row['wer']:>6.3f}  {conf:>5}")
     print("\nOSD on a rotated page:")
     osd = report["osd"]

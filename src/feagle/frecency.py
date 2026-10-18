@@ -18,12 +18,15 @@ import contextlib
 import json
 import os
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import paths
 from .log import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 log = get_logger("frecency")
 

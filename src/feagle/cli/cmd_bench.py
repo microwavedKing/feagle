@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import bench
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def print_report(result: dict[str, Any], corpus: Path) -> None:

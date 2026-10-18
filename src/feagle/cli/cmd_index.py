@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.service import EmbeddingService, ModelMissingError, media_enabled
 from ..indexer import pipeline
+
+if TYPE_CHECKING:
+    import argparse
 
 _DEGRADE_ERRORS = (ModelMissingError, ServerUnavailable, EmbeddingError, OSError)
 

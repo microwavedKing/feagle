@@ -9,8 +9,10 @@ lost. PDF pages are never merged: each chunk belongs to exactly one page.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from .extract import Extracted
+if TYPE_CHECKING:
+    from .extract import Extracted
 
 #: Default sizing, in characters.
 TARGET_CHARS = 1400

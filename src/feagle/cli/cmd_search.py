@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
@@ -14,6 +13,9 @@ from ..embeddings.service import EmbeddingService, ModelMissingError
 from ..picker import app_items, hit_key, run_pick
 from ..search import hybrid
 from ..search.queryd import QuerydClient
+
+if TYPE_CHECKING:
+    import argparse
 
 _DEGRADE_ERRORS = (ModelMissingError, ServerUnavailable, EmbeddingError, OSError)
 

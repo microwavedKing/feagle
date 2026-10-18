@@ -350,7 +350,7 @@ def test_ocr_pages_with_one_worker_stays_in_process(monkeypatch):
 def test_ocr_pages_custom_page_callable_disables_the_pool(monkeypatch):
     monkeypatch.setattr(ocr, "ocr_available", lambda: True)
     seen = []
-    texts, count = ocr.ocr_pages(
+    _texts, count = ocr.ocr_pages(
         Path("x.pdf"), ["", ""], workers=2,
         ocr_page=lambda pdf, page, **kwargs: (seen.append(page), "text")[1],
         executor_factory=lambda workers: pytest.fail("must not pool a custom callable"),

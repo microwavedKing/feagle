@@ -9,13 +9,15 @@ their side), so this is keyword/fuzzy matching over paths and snippets; pass
 
 from __future__ import annotations
 
-import argparse
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import db, paths
 from ..picker import app_items, hit_key, run_pick
 from .cmd_search import _location, search_best_effort
+
+if TYPE_CHECKING:
+    import argparse
 
 SNIPPET_CHARS = 120
 

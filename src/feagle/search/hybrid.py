@@ -11,13 +11,15 @@ the semantic side did not consider relevant.
 
 from __future__ import annotations
 
-import sqlite3
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..config import DEFAULT_MAX_DISTANCE
 from ..embeddings import presets
 from .fts import SearchHit, _snippet, search_fts, search_fts_stemmed
 from .vec import knn
+
+if TYPE_CHECKING:
+    import sqlite3
 
 DEFAULT_RRF_K = 60
 
