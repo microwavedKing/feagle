@@ -157,6 +157,10 @@ def search_hybrid(
     ``max_distance`` drops vector neighbours that are too far away, so an
     unrelated query does not return a page of weak matches. With
     ``query_vector=None`` this degrades to a full-text search.
+
+    The result is never *worse* than the plain keyword search: the launcher
+    renders the full-text pass first and the semantic reply replaces it, so an
+    empty hybrid would wipe results the user can already see.
     """
     rankings = _text_rankings(conn, query, candidates, stem=stem, fallback_or=False)
 
@@ -168,6 +172,14 @@ def search_hybrid(
         ]
         if vec_ids:
             rankings.append(vec_ids)
+
+    if not rankings:
+        # Nothing survived: every vector neighbour was filtered (the model found
+        # no close match) and the AND-only text ranking is empty. Fall back to
+        # the OR ranking used by the pure full-text search. Only here — while
+        # the semantic side has an opinion its exact ranking is the one that
+        # matters (see the module docstring).
+        rankings = _text_rankings(conn, query, candidates, stem=stem, fallback_or=True)
 
     if not rankings:
         return []

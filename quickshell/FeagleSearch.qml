@@ -217,6 +217,17 @@ QtObject {
         send(msg);
     }
 
+    /// The list to show for a launcher reply. The keyword pass runs first and
+    /// the semantic pass replaces it, so an *empty* semantic reply must not
+    /// blank the hits already on screen (a tight `max_distance` can filter
+    /// every vector neighbour).
+    function resultsFor(msg): var {
+        var incoming = msg.results || [];
+        if (incoming.length === 0 && root.results.length > 0 && msg.mode !== "fts")
+            return root.results;
+        return incoming;
+    }
+
     function applyPreview(msg): void {
         if (msg.ok) {
             root.preview = msg;
@@ -242,7 +253,7 @@ QtObject {
         }
         root.busy = false;
         if (msg && msg.ok) {
-            root.results = msg.results || [];
+            root.results = root.resultsFor(msg);
             root.mode = msg.mode || "";
             root.tookMs = msg.took_ms || 0;
             root.error = "";

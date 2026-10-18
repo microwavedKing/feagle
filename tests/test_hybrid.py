@@ -140,6 +140,28 @@ def test_hybrid_no_matches_returns_empty(conn):
     assert hybrid.search_hybrid(conn, "zzz", query_vector=None, limit=5, candidates=5) == []
 
 
+def test_hybrid_never_returns_less_than_the_keyword_search(conn):
+    """The regression behind the fix: an empty hybrid wiped the keyword hits."""
+    add(conn, "/d/notes.txt", "my favourite soup", [0.0, 0.0, 1.0], line=3)
+
+    # Pure keyword search finds it through the OR fallback ("soup", not "recipe").
+    keyword = hybrid.search_text(conn, "soup recipe", limit=5, candidates=5)
+    assert [h.path for h in keyword] == ["/d/notes.txt"]
+
+    # Hybrid: the AND-only text ranking is empty ("soup" and "recipe" never
+    # co-occur) and the only vector neighbour is filtered out, so this used to
+    # come back empty and the launcher's list went blank.
+    hits = hybrid.search_hybrid(
+        conn,
+        "soup recipe",
+        query_vector=[1.0, 0.0, 0.0],
+        limit=5,
+        candidates=5,
+        max_distance=0.5,
+    )
+    assert [h.path for h in hits] == ["/d/notes.txt"]
+
+
 def test_snippet_is_flattened(conn):
     add(conn, "/d/a.txt", "first line\nsecond line", [1.0, 0.0, 0.0])
     hits = hybrid.search_hybrid(conn, "first", query_vector=None, limit=5, candidates=5)
