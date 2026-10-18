@@ -223,9 +223,12 @@ def extract_markup(path: Path, *, max_bytes: int | None = None) -> Extracted:
     try:
         parser.feed(text)
         parser.close()
-    except Exception as exc:  # noqa: BLE001 - a malformed page must not fail the run
-        log.warning("could not parse the markup in %s: %s", path, exc)
-        return Extracted(pages=(text,), kind="text", encoding=encoding)
+    except Exception as exc:  # surfaced as a file error, not a crash
+        # Indexing the raw markup instead would put tags into the embedding and
+        # dilute it, and nobody would learn that the page was never parsed. The
+        # pipeline turns an ExtractionError into ``state='error'`` for this file
+        # only and keeps going, so the run does not fail either.
+        raise ExtractionError(f"cannot parse the markup in {path}: {exc}") from exc
     return Extracted(pages=(parser.text,), kind="text", encoding=encoding)
 
 

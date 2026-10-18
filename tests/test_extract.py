@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from feagle.indexer import extract as extract_module
 from feagle.indexer.extract import (
     ExtractionError,
     UnsupportedFile,
@@ -49,6 +50,19 @@ def test_extracts_text_from_broken_markup(tmp_path):
     path = tmp_path / "broken.html"
     path.write_text("<html><body>some text <b>bold</body>", encoding="utf-8")
     assert "some text" in extract(path).pages[0]
+
+
+def test_unparseable_markup_is_an_error_not_raw_text(tmp_path, monkeypatch):
+    """Raw markup must not be indexed silently as if it were the page text."""
+    path = tmp_path / "page.html"
+    path.write_text("<html><body>content</body></html>", encoding="utf-8")
+
+    def boom(self, data):
+        raise ValueError("broken parser")
+
+    monkeypatch.setattr(extract_module._MarkupText, "feed", boom)
+    with pytest.raises(ExtractionError, match="cannot parse the markup"):
+        extract(path)
 
 
 def test_extracts_utf8_text(tmp_path):
