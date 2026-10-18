@@ -239,13 +239,13 @@ class IndexerDaemon:
             if self._reload_config() and events is not None:
                 self._restart_watcher(events)
             now = self.clock()
-            if self.rescan_interval_s and now >= next_rescan:
+            if next_rescan is not None and now >= next_rescan:
                 log.info("periodic rescan")
                 next_rescan = self._next_rescan(self.run_once())
                 continue
 
             timeout = QUEUE_TIMEOUT_S
-            if self.rescan_interval_s:
+            if next_rescan is not None:
                 timeout = max(0.1, min(timeout, next_rescan - now))
 
             if events is None:
@@ -313,13 +313,19 @@ class IndexerDaemon:
         with contextlib.suppress(Exception):
             self.idle_hook()
 
-    def _next_rescan(self, stats: pipeline.IndexStats) -> float:
+    def _next_rescan(self, stats: pipeline.IndexStats) -> float | None:
+        """When the next pass is due, or ``None`` when nothing schedules one.
+
+        A *paused* pass is not a finished one: it is retried after
+        ``PAUSED_RETRY_S`` even when periodic rescans are disabled, so a busy
+        machine cannot stall the queue until the next file change.
+        """
         now = self.clock()
         if stats.paused:
             return now + PAUSED_RETRY_S
         if self.rescan_interval_s:
             return now + self.rescan_interval_s
-        return now
+        return None
 
     def _produce(
         self,

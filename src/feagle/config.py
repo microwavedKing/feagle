@@ -381,6 +381,7 @@ max_chunks_per_file = 1000
 rescan_interval_min = 360
 pause_on_battery = true
 # Pause indexing when the 1-minute load average exceeds this (0 disables).
+# A paused pass is retried in 5 minutes, not at the next rescan.
 pause_on_loadavg = 4.0
 embed_batch_size = 16
 follow_symlinks = false
