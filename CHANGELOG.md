@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-18
+
+Polish release: the launcher grew a real result list and a PDF preview, and the
+documentation gained a quick start.
+
+### Added
+
+- The launcher groups results under `Applications` / `Files`, shows a thin
+  scrollbar with an "*N* more below" hint, and has clickable `All` / `Apps` /
+  `Files` filter chips next to the search field (the same as `Tab`).
+- The launcher preview pane scrolls with the wheel, wraps long lines and
+  emphasises **every** query word in the shown lines (source HTML is escaped).
+- Launcher keys: `Ctrl+U` / `Ctrl+W` / `Ctrl+A` for line editing, `Ctrl+N` /
+  `Ctrl+P` to move, `Ctrl+C` to copy the file's path (or the application's
+  command) with a confirmation in the footer, and `Ctrl+Enter` to open the folder
+  that contains the file.
+- Launcher theming and layout are now configurable: `lightTheme`, `cardWidth`,
+  `cardPreviewWidth`, `cardHeight`, `cardPreviewHeight`, `previewWidth`,
+  `topMarginRatio`; displayed paths use `~` for `$HOME` and the card resizes with
+  an animation.
+- `queryd`'s `preview` renders a **PDF page** (`page` plus `chunk_id` to anchor
+  the window on the text that matched), caching rendered pages per
+  (file, mtime, page); without poppler the reply degrades to file metadata.
+- README: a three-command quick start and a contents list (both language halves).
+
+### Changed
+
+- `quickshell/README.md`, `docs/INSTALL.ru.md` and the README launcher sections
+  document the hotkey table, the new UI and the PDF preview.
+
 ## [0.2.0] - 2026-10-18
 
 Feature release: opt-in media search (images, video, audio), image OCR, a
@@ -259,6 +289,35 @@ on Wayland.
 ---
 
 ## Unreleased (по-русски)
+
+## 0.2.1 (по-русски) — 2026-10-18
+
+Релиз-полировка: у лаунчера появился настоящий список результатов и превью
+страниц PDF, а в документации — быстрый старт.
+
+### Добавлено
+
+- Лаунчер группирует результаты под заголовками `Applications` / `Files`,
+  показывает тонкую полосу прокрутки с подсказкой «ещё *N* ниже» и кликабельные
+  чипы фильтра `All` / `Apps` / `Files` рядом с полем поиска (то же, что `Tab`).
+- Панель превью прокручивается колесом, переносит длинные строки и подсвечивает
+  **все** слова запроса в показанных строках (HTML из исходника экранируется).
+- Клавиши лаунчера: `Ctrl+U` / `Ctrl+W` / `Ctrl+A` для правки строки, `Ctrl+N` /
+  `Ctrl+P` для перемещения, `Ctrl+C` — скопировать путь файла (или команду
+  приложения) с подтверждением в футере, `Ctrl+Enter` — открыть каталог файла.
+- Тема и размеры лаунчера настраиваются: `lightTheme`, `cardWidth`,
+  `cardPreviewWidth`, `cardHeight`, `cardPreviewHeight`, `previewWidth`,
+  `topMarginRatio`; в путях `$HOME` показывается как `~`, карточка меняет размер
+  с анимацией.
+- `preview` в `queryd` рендерит **страницу PDF** (`page` и `chunk_id`, чтобы
+  привязаться к совпавшему тексту), кэшируя отрендеренные страницы по
+  (файл, mtime, страница); без poppler ответ деградирует до метаданных файла.
+- README: быстрый старт из трёх команд и оглавление (в обеих языковых частях).
+
+### Изменено
+
+- `quickshell/README.md`, `docs/INSTALL.ru.md` и разделы README про лаунчер
+  описывают таблицу клавиш, новый интерфейс и превью PDF.
 
 ## 0.2.0 (по-русски) — 2026-10-18
 
