@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,22 @@ def to_toml(cfg: dict[str, Any]) -> str:
     return "\n\n".join(blocks) + "\n"
 
 
+def _backup_path(path: Path, *, now: str | None = None) -> Path:
+    """A free ``<name>.bak-YYYYmmdd-HHMMSS`` path next to ``path``.
+
+    A fixed ``.bak`` name meant a second ``feagle setup`` overwrote the first
+    backup; the timestamp keeps every revision, and a numeric suffix covers two
+    runs inside the same second.
+    """
+    stamp = now or time.strftime("%Y%m%d-%H%M%S")
+    candidate = path.with_name(f"{path.name}.bak-{stamp}")
+    counter = 2
+    while candidate.exists():
+        candidate = path.with_name(f"{path.name}.bak-{stamp}-{counter}")
+        counter += 1
+    return candidate
+
+
 def write_config(
     cfg: dict[str, Any], path: Path | None = None, *, backup: bool = True
 ) -> tuple[Path, Path | None]:
@@ -72,7 +89,7 @@ def write_config(
 
     backup_path: Path | None = None
     if path.exists() and backup:
-        backup_path = path.with_name(f"{path.name}.bak")
+        backup_path = _backup_path(path)
         shutil.copy2(path, backup_path)
 
     path.write_text(HEADER + "\n" + to_toml(cfg), encoding="utf-8")

@@ -32,9 +32,26 @@ def test_write_config_creates_backup(tmp_path):
 
     written, backup = setup.write_config(cfg, path)
     assert written == path
-    assert backup == path.with_name("config.toml.bak")
+    assert backup is not None
+    assert backup.name.startswith("config.toml.bak-")
     assert backup.read_text(encoding="utf-8").startswith("[index]")
     assert tomllib.loads(path.read_text(encoding="utf-8"))["index"]["roots"] == ["/docs"]
+
+    # A second run keeps the first backup (it used to overwrite it).
+    _, second = setup.write_config(cfg, path)
+    assert second is not None and second != backup
+    assert backup.read_text(encoding="utf-8").startswith("[index]")
+
+
+def test_backup_names_do_not_collide_in_the_same_second(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[index]\n", encoding="utf-8")
+    first = setup._backup_path(path, now="20261019-120000")
+    first.write_text("taken", encoding="utf-8")
+    second = setup._backup_path(path, now="20261019-120000")
+
+    assert first.name == "config.toml.bak-20261019-120000"
+    assert second.name == "config.toml.bak-20261019-120000-2"
 
 
 def test_apply_plan_expands_and_dedupes(tmp_path, monkeypatch):

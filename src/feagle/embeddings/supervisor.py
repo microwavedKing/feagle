@@ -110,6 +110,9 @@ def _free_port() -> int:
 #: ``_free_port``: the port can be taken between the probe and the bind).
 _SPAWN_ATTEMPTS = 3
 
+#: How long SIGTERM gets before SIGKILL (and how long the reap may take).
+_TERMINATE_TIMEOUT_S = 10.0
+
 
 def _default_health(url: str, timeout: float = 1.0) -> bool:
     try:
@@ -278,6 +281,7 @@ class LlamaSupervisor:
         failure (a bad model or flags) and is reported after one attempt, so a
         broken setup does not pay the health timeout several times over.
         """
+        self._stop_previous()
         for attempt in range(1, _SPAWN_ATTEMPTS + 1):
             port = _free_port()
             url = f"http://127.0.0.1:{port}"
@@ -372,13 +376,35 @@ class LlamaSupervisor:
         self._url = None
 
     def _terminate(self) -> None:
+        """Stop the process and reap it, so it does not stay a zombie.
+
+        The ``wait`` after ``kill`` matters: a child that ignores SIGTERM and
+        needs SIGKILL would otherwise keep its entry in the process table until
+        this process exits, and the pid file keeps pointing at it.
+        """
         proc = self._proc
         if proc is None:
             return
         with contextlib.suppress(Exception):
             proc.terminate()
-        with contextlib.suppress(Exception):
-            proc.wait(timeout=10)
+        try:
+            proc.wait(timeout=_TERMINATE_TIMEOUT_S)
             return
+        except Exception as exc:  # noqa: BLE001 - any failure means "kill it"
+            log.warning("llama-server did not stop within %.0fs (%s); killing it",
+                        _TERMINATE_TIMEOUT_S, exc)
         with contextlib.suppress(Exception):
             proc.kill()
+        with contextlib.suppress(Exception):
+            proc.wait(timeout=_TERMINATE_TIMEOUT_S)
+
+    def _stop_previous(self) -> None:
+        """Stop and reap a child this supervisor no longer tracks, if any.
+
+        A server that exited on its own is never reaped until someone waits for
+        it, and one that stayed alive is never terminated when it is replaced;
+        both would leave a process behind while a new one starts.
+        """
+        if self._proc is not None:
+            self._terminate()
+            self._proc = None

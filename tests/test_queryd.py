@@ -678,6 +678,40 @@ def test_preview_outside_the_index_is_refused(db_path, tmp_path):
     assert "not in the index" in result["error"]
 
 
+@pytest.mark.parametrize(
+    ("payload", "fragment"),
+    [
+        ({"op": "search", "query": "x", "limit": "abc"}, "limit must be an integer"),
+        ({"op": "search", "query": "x", "limit": "0"}, "limit must be >= 1"),
+        ({"op": "search", "query": "x", "limit": -3}, "limit must be >= 1"),
+        ({"op": "search", "query": "x", "mode": 5}, "mode must be one of"),
+        ({"op": "search", "query": "x", "mode": "everything"}, "mode must be one of"),
+        ({"op": "embed", "texts": "hello"}, "texts must be a list of strings"),
+        ({"op": "embed", "texts": [1, 2]}, "texts must be a list of strings"),
+        ({"op": "embed", "texts": ["x"], "titles": "T"}, "titles must be a list of strings"),
+        ({"op": "preview", "path": "/x", "line": "abc"}, "line must be an integer"),
+        ({"op": "preview", "path": "/x", "page": 0}, "page must be >= 1"),
+        ({"op": "launcher", "query": "x", "apps_limit": "many"}, "apps_limit must be an integer"),
+    ],
+)
+def test_bad_request_fields_are_answered_not_crashed(engine, payload, fragment):
+    """A buggy client must get a clear refusal, not a traceback or silent junk."""
+    result = engine.dispatch(payload)
+    assert result["ok"] is False
+    assert fragment in result["error"]
+
+
+def test_numeric_strings_are_accepted(engine):
+    """A client that sends ``"5"`` instead of ``5`` still works."""
+    assert engine.dispatch({"op": "search", "query": "x", "limit": "5"})["ok"] is True
+
+
+def test_embed_list_is_not_split_into_characters(engine):
+    """``texts`` as a bare string used to become a list of its characters."""
+    result = engine.dispatch({"op": "embed", "texts": "hello"})
+    assert result["ok"] is False
+
+
 def test_preview_of_a_sibling_file_is_refused(db_path, tmp_path):
     """A sibling of an indexed file is still not indexed."""
     indexed = tmp_path / "note.txt"
@@ -717,6 +751,23 @@ def test_preview_allows_a_symlink_when_follow_symlinks_is_on(db_path, tmp_path):
     result = engine.dispatch({"op": "preview", "path": str(link)})
     assert result["ok"] is True
     assert "payload" in result["text"]
+
+
+def test_preview_accepts_the_indexers_normalization(db_path, tmp_path):
+    """A root given as a symlink is stored resolved; a preview must still match."""
+    real = tmp_path / "real"
+    real.mkdir()
+    target = real / "note.txt"
+    target.write_text("hello\n", encoding="utf-8")
+    register_file(db_path, target)  # the indexer stores the realpath
+
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(link / "note.txt")})
+    assert result["ok"] is True
+    assert "hello" in result["text"]
 
 
 def test_preview_without_a_database_is_refused(db_path, tmp_path):

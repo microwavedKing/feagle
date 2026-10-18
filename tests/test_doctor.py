@@ -104,6 +104,24 @@ def test_check_model_size_mismatch_fails(env):
     assert "size" in check.message
 
 
+def test_check_embeddings_url_is_info_when_local(env):
+    cfg = config.default_config()
+    assert doctor.check_embeddings_url(cfg).status == "info"
+    cfg["embeddings"]["server_url"] = "http://127.0.0.1:8080"
+    assert doctor.check_embeddings_url(cfg).status == "info"
+
+
+def test_check_embeddings_url_warns_for_a_remote_host(env):
+    cfg = config.default_config()
+    cfg["embeddings"]["server_url"] = "http://gpu-box.lan:8080"
+    check = doctor.check_embeddings_url(cfg)
+    assert check.status == "warn"
+    assert "unencrypted" in check.hint
+
+    cfg["embeddings"]["server_url"] = "https://gpu-box.lan"
+    assert doctor.check_embeddings_url(cfg).status == "info"
+
+
 def test_check_config_roots_status(env):
     cfg = config.default_config()
     assert doctor.check_config(cfg).status == "warn"

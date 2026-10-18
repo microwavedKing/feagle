@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import tomllib
+import urllib.parse
 from typing import TYPE_CHECKING, Any
 
 from . import paths
@@ -308,7 +309,52 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     _warn_unknown(user, DEFAULTS)
     validate(cfg, source=path)
     _warn_model_knobs(user, cfg, path)
+    _warn_server_url(cfg, path)
     return cfg
+
+
+#: Hosts that mean "this machine"; everything else is a remote embedding server.
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def embeddings_host(url: str) -> str | None:
+    """The remote host of ``[embeddings].server_url``, or ``None`` when it is local.
+
+    A value without a scheme (``host:port``) is accepted, because
+    ``urllib.parse`` would otherwise read ``host`` as the scheme.
+    """
+    raw = str(url or "").strip()
+    if not raw:
+        return None
+    if "//" not in raw:
+        raw = "//" + raw
+    host = (urllib.parse.urlsplit(raw).hostname or "").lower()
+    if not host or host in _LOCAL_HOSTS or host.startswith("127."):
+        return None
+    return host
+
+
+def _warn_server_url(cfg: dict[str, Any], source: Path) -> None:
+    """Warn when the embedding server is not on this machine.
+
+    The text of every query, and of every document while indexing, is sent
+    there; over plain HTTP it also travels unencrypted. Pointing
+    ``[embeddings].server_url`` somewhere is the owner's choice (see the README),
+    but a line in the log beats wondering later where the documents went.
+    """
+    url = str(cfg["embeddings"].get("server_url") or "")
+    host = embeddings_host(url)
+    if host is None:
+        return
+    encrypted = urllib.parse.urlsplit(url if "//" in url else "//" + url).scheme == "https"
+    log.warning(
+        "%s: [embeddings].server_url=%s sends the text of every query and document to %s%s; "
+        "keep it on a machine you trust",
+        source,
+        url.strip(),
+        host,
+        "" if encrypted else " unencrypted (http)",
+    )
 
 
 def _warn_model_knobs(user: dict[str, Any], cfg: dict[str, Any], source: Path) -> None:

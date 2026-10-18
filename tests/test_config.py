@@ -59,6 +59,33 @@ def _warned(caplog, needle: str) -> bool:
     return any(needle in rec.message for rec in caplog.records)
 
 
+def test_remote_embeddings_server_warns(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[embeddings]\nserver_url = "http://gpu-box.lan:8080"\n', encoding="utf-8"
+    )
+    with caplog.at_level(logging.WARNING, logger="feagle.config"):
+        config.load_config(path)
+    assert _warned(caplog, "server_url")
+    assert _warned(caplog, "unencrypted")
+
+
+def test_local_embeddings_server_does_not_warn(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text('[embeddings]\nserver_url = "http://127.0.0.1:8080"\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="feagle.config"):
+        config.load_config(path)
+    assert not _warned(caplog, "server_url")
+
+
+def test_embeddings_host_normalisation():
+    assert config.embeddings_host("") is None
+    assert config.embeddings_host("http://localhost:8080") is None
+    assert config.embeddings_host("http://127.0.0.1:8080") is None
+    assert config.embeddings_host("https://box.lan") == "box.lan"
+    assert config.embeddings_host("box.lan:8080") == "box.lan"
+
+
 def test_max_distance_from_another_model_warns(tmp_path, caplog):
     path = tmp_path / "config.toml"
     path.write_text(

@@ -133,6 +133,27 @@ def test_launch_command_wraps_terminal(monkeypatch):
     assert apps.launch_command(app) == ["foot", "htop"]
 
 
+@pytest.mark.parametrize(
+    ("terminal", "expected"),
+    [
+        ("kitty", ["kitty", "htop"]),
+        ("foot", ["foot", "htop"]),
+        ("xterm", ["xterm", "-e", "htop"]),
+        ("alacritty", ["alacritty", "-e", "htop"]),
+        ("konsole", ["konsole", "-e", "htop"]),
+        ("gnome-terminal", ["gnome-terminal", "--", "htop"]),
+        ("wezterm", ["wezterm", "start", "--", "htop"]),
+        ("something-else", ["something-else", "htop"]),
+    ],
+)
+def test_terminal_takes_the_command_the_way_its_manual_says(monkeypatch, terminal, expected):
+    """A ``Terminal=true`` entry must actually run the command in the terminal."""
+    monkeypatch.setattr(apps.shutil, "which", lambda name: None)
+    monkeypatch.setattr(apps, "default_terminal", lambda: terminal)
+    app = apps.App("t.desktop", "T", "htop", True, Path("/t.desktop"))
+    assert apps.launch_command(app) == expected
+
+
 def test_launch_uses_injected_spawn(monkeypatch):
     monkeypatch.setattr(apps.shutil, "which", lambda name: None)
     calls = []

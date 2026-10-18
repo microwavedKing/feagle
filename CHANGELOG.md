@@ -100,6 +100,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The indexer reacts to a changed root list right away: dropping a directory from
   `[index].roots` while the daemon is running now runs the pass that removes its
   files, instead of waiting for the next periodic rescan (six hours by default).
+- `feagle setup` keeps every backup: a fixed `config.toml.bak` meant the second
+  run overwrote the backup of the first. The copy is now named
+  `config.toml.bak-YYYYmmdd-HHMMSS` (with a suffix if two runs share a second).
+- A `Terminal=true` desktop entry now starts through its terminal's own syntax:
+  `konsole -e`, `gnome-terminal --`, `wezterm start --`, `xterm`/`alacritty -e`,
+  and kitty/foot take the command positionally. Before, only `xterm` and
+  `alacritty` got the `-e`, so konsole and gnome-terminal opened without the
+  command at all.
+- The query protocol checks the fields it is given instead of trusting them: a
+  `limit` that is not a number, a `mode` outside the three known ones, `texts`
+  as a bare string (which used to be turned into a list of single characters) or
+  a `line`/`page`/`apps_limit` of the wrong type now answer `ok:false` with a
+  reason. Numeric strings are still accepted, so nothing a normal client sends
+  changed.
+- `preview` accepts a path in the form the indexer stored (the resolved one) as
+  well as the literal one, so a file indexed through a symlinked root can be
+  previewed. The allowlist is unchanged: only files that are rows in the index
+  are served.
+- A `llama-server` that had to be killed is now reaped (and one the supervisor
+  no longer tracks is stopped before a new one is spawned). Without the extra
+  `wait` the process stayed a zombie until the daemon exited, and the pid file
+  kept pointing at it.
+- Pointing `[embeddings].server_url` at another machine now warns when the
+  config is loaded, and `feagle doctor` reports it (info for `https://`, warn for
+  plain `http://`). Every query and every indexed document goes there; that is
+  the owner's choice, but it should not be a surprise.
 
 ## [0.3.0] - 2026-10-18
 
@@ -519,6 +545,30 @@ on Wayland.
 - Индексатор реагирует на смену набора корней сразу: удаление каталога из
   `[index].roots` на работающем демоне запускает проход, который убирает его файлы,
   а не ждёт планового рескана (по умолчанию шесть часов).
+- `feagle setup` сохраняет **все** бэкапы: из-за фиксированного имени
+  `config.toml.bak` второй прогон затирал копию первого. Теперь бэкап называется
+  `config.toml.bak-ГГГГММДД-ЧЧММСС` (при двух прогонах в одну секунду — с суффиксом).
+- Запись `.desktop` с `Terminal=true` запускается так, как требует её терминал:
+  `konsole -e`, `gnome-terminal --`, `wezterm start --`, `xterm`/`alacritty -e`,
+  а kitty/foot принимают команду позиционно. Раньше `-e` получали только `xterm` и
+  `alacritty`, поэтому `konsole` и `gnome-terminal` открывались **без** команды.
+- Протокол запросов проверяет типы полей, а не доверяет им: `limit` не числом,
+  `mode` вне трёх известных, `texts` одной строкой (она превращалась в список
+  отдельных символов) или `line`/`page`/`apps_limit` не того типа теперь получают
+  `ok:false` с причиной. Числовые строки по-прежнему принимаются, так что для
+  обычного клиента ничего не изменилось.
+- `preview` принимает путь и в том виде, в каком его хранит индексатор
+  (разрешённый), и в исходном, поэтому файл, проиндексированный через
+  симлинкованный корень, превьюится. Allowlist не изменился: отдаются только файлы
+  из индекса.
+- Убитый `llama-server` теперь ещё и собирается reap'ом (а процесс, который
+  супервизор больше не отслеживает, останавливается перед запуском нового). Без
+  второго `wait` процесс оставался зомби до выхода демона, и pid-файл продолжал на
+  него указывать.
+- Указание чужой машины в `[embeddings].server_url` теперь предупреждает при
+  загрузке конфига, а `feagle doctor` показывает это отдельной строкой (info для
+  `https://`, warn для обычного `http://`). Туда уходит каждый запрос и каждый
+  документ при индексации — это осознанный выбор владельца, но не сюрприз.
 
 ## 0.3.0 (по-русски) — 2026-10-18
 
