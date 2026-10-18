@@ -16,17 +16,14 @@ from __future__ import annotations
 
 import hashlib
 import os
-import sqlite3
 import tempfile
 import time
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import db, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
-from ..embeddings.service import Embedder
 from ..log import get_logger
 from . import asr
 from .chunker import MAX_CHARS, Chunk, chunk_extracted
@@ -41,6 +38,12 @@ from .media import (
 )
 from .ocr import IMAGE_SUFFIXES, OcrError, image_ocr_available, ocr_image
 from .scanner import ScanCandidate, Scanner
+
+if TYPE_CHECKING:
+    import sqlite3
+    from collections.abc import Callable, Iterable, Sequence
+
+    from ..embeddings.service import Embedder
 
 log = get_logger("indexer.pipeline")
 
@@ -156,7 +159,7 @@ def _write_chunks(conn: sqlite3.Connection, file_id: int, chunks: list[Any]) -> 
 
 def _embed(
     embedder: Embedder, items: list[tuple[str, str | None]]
-) -> list[list[float] | None] | None:
+) -> Sequence[Sequence[float] | None] | None:
     """Embed documents, degrading gracefully instead of failing the file.
 
     Returns a list aligned with ``items`` (``None`` marks a chunk that could not
@@ -254,7 +257,7 @@ def _index_video_frames(
     allow_image: bool,
     ocr: bool = False,
     ocr_langs: str = "rus+eng",
-) -> tuple[list[Chunk], list[list[float]] | None]:
+) -> tuple[list[Chunk], Sequence[Sequence[float] | None] | None]:
     """Extract frames and build one chunk per frame (with its timestamp).
 
     With ``ocr`` each frame's text becomes the chunk body (so it is searchable
@@ -273,7 +276,7 @@ def _index_video_frames(
             Chunk(seq=index, page=None, line=None, body=bodies[index], time_ms=time_ms)
             for index, (time_ms, _frame) in enumerate(frames)
         ]
-        vectors: list[list[float]] | None = None
+        vectors: Sequence[Sequence[float] | None] | None = None
         if embedder is not None and chunks and allow_image:
             vectors = _embed_prepared(embedder, [frame for _time, frame in frames])
         return chunks, vectors
@@ -351,7 +354,7 @@ def index_file(
     ) * 1024 * 1024
 
     chunks: list[Chunk] = []
-    vectors: list[list[float]] | None = None
+    vectors: Sequence[Sequence[float] | None] | None = None
     try:
         if is_video and media_video:
             if not (ffmpeg_available() and ffprobe_available()):
@@ -458,7 +461,7 @@ def index_file(
 
 # Indirections keep the indexer's coupling to sqlite-vec in one place and make
 # the pipeline easy to test with a stub.
-def vec_insert(conn: sqlite3.Connection, items: list[tuple[int, list[float]]]) -> int:
+def vec_insert(conn: sqlite3.Connection, items: Sequence[tuple[int, Sequence[float]]]) -> int:
     from ..search import vec
 
     return vec.insert_vectors(conn, items)

@@ -8,12 +8,11 @@ non-interactively with flags and ``--yes``.
 
 from __future__ import annotations
 
-import argparse
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import config, db, paths, setup, units
 from ..embeddings import presets
@@ -27,6 +26,9 @@ from ..embeddings.service import (
     resolve_model,
 )
 from ..indexer import pipeline
+
+if TYPE_CHECKING:
+    import argparse
 
 _DEGRADE_ERRORS = (ModelMissingError, ServerUnavailable, EmbeddingError, OSError)
 LAUNCHER_CHOICES = ("auto", "fuzzel", "wofi", "rofi", "tofi", "walker", "stdout")

@@ -17,15 +17,17 @@ import socketserver
 import subprocess
 import threading
 import time
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .. import __version__, db, frecency, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..log import get_logger
 from ..search import hybrid
 from ..search.vec import vec_count
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 log = get_logger("search.queryd")
 
@@ -365,12 +367,8 @@ class QueryEngine:
         conn = self._connect()
         try:
             embedder = self._ensure_embedder()
-            use_hybrid = (
-                mode in ("auto", "hybrid")
-                and embedder is not None
-                and db.has_vec_table(conn)
-            )
-            if use_hybrid:
+            vector: list[float] | None = None
+            if mode in ("auto", "hybrid") and embedder is not None and db.has_vec_table(conn):
                 try:
                     vector = embedder.embed_queries([query])[0]
                 except (ServerUnavailable, EmbeddingError) as exc:
@@ -383,10 +381,8 @@ class QueryEngine:
                         except (ServerUnavailable, EmbeddingError) as retry_exc:
                             log.warning("still unavailable (%s); text search only", retry_exc)
                             self._drop_embedder()
-                            embedder = None
-                    if embedder is None:
-                        use_hybrid = False
-            if use_hybrid:
+                            vector = None
+            if vector is not None:
                 hits = hybrid.search_hybrid(
                     conn,
                     query,
@@ -515,7 +511,7 @@ class QueryEngine:
                 )
             if op == "status":
                 return self.status()
-        except Exception as exc:  # noqa: BLE001 - the protocol must never crash
+        except Exception as exc:
             log.exception("queryd operation failed: %s", op)
             return {"ok": False, "error": str(exc)}
         return {"ok": False, "error": f"unknown op: {op!r}"}
@@ -523,6 +519,15 @@ class QueryEngine:
 
 class _Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
+        # A client that hangs up mid-exchange (or resets the connection) is
+        # normal: without this, socketserver prints a traceback for every such
+        # disconnect. Swallow it and let the thread end quietly.
+        try:
+            self._pump()
+        except (BrokenPipeError, ConnectionResetError):
+            log.debug("queryd: client disconnected mid-request")
+
+    def _pump(self) -> None:
         for raw in self.rfile:
             line = raw.strip()
             if not line:
@@ -532,7 +537,7 @@ class _Handler(socketserver.StreamRequestHandler):
             except json.JSONDecodeError as exc:
                 response: dict[str, Any] = {"ok": False, "error": f"invalid JSON: {exc}"}
             else:
-                response = self.server.engine.dispatch(request)
+                response = cast("_UnixServer", self.server).engine.dispatch(request)
                 # Echo the client's optional tag so it can route the reply.
                 tag = request.get("req")
                 if isinstance(tag, str):
@@ -605,13 +610,14 @@ class QuerydServer:
             self.shutdown()
 
     def _start_idle_loop(self) -> None:
-        if self.idle_hook is None:
+        hook = self.idle_hook
+        if hook is None:
             return
 
         def loop() -> None:
             while not self._stop_idle.wait(30.0):
                 with contextlib.suppress(Exception):
-                    self.idle_hook()
+                    hook()
 
         threading.Thread(target=loop, name="feagle-idle", daemon=True).start()
 

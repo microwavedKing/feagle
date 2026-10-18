@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import base64
 import math
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
 from . import prompts
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: Placeholder title used when a document has no name.
 DEFAULT_BATCH_SIZE = 16
@@ -80,10 +83,10 @@ class EmbeddingClient:
         self.batch_size = max(1, batch_size)
         self.task = task
         self.prompts = prompts.get_family(family)
-        kwargs: dict[str, object] = {"timeout": timeout}
         if transport is not None:
-            kwargs["transport"] = transport
-        self._client = httpx.Client(**kwargs)
+            self._client = httpx.Client(timeout=timeout, transport=transport)
+        else:
+            self._client = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
         self._client.close()

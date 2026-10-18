@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-import argparse
 import signal
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import config
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..embeddings.service import EmbeddingService, ModelMissingError, media_enabled
 from ..indexer.daemon import IndexerDaemon
 from ..indexer.watcher import Watcher
+
+if TYPE_CHECKING:
+    import argparse
 
 _DEGRADE_ERRORS = (ModelMissingError, ServerUnavailable, EmbeddingError, OSError)
 

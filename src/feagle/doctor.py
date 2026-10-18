@@ -456,7 +456,7 @@ def check_disk(min_free_mb: int = 512) -> Check:
 
 
 def run_checks(cfg: dict[str, Any], *, verify_model_hash: bool = True) -> list[Check]:
-    checks = [
+    return [
         check_python(),
         check_config(cfg),
         check_xdg(),
@@ -479,4 +479,3 @@ def run_checks(cfg: dict[str, Any], *, verify_model_hash: bool = True) -> list[C
         check_cgroup(),
         check_disk(),
     ]
-    return checks

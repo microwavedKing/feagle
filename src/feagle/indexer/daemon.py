@@ -13,9 +13,8 @@ import os
 import queue
 import threading
 import time
-from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import db
 from ..embeddings.client import ServerUnavailable
@@ -23,6 +22,9 @@ from ..log import get_logger
 from ..power import pause_reason
 from . import pipeline
 from .watcher import Watcher
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 log = get_logger("indexer.daemon")
 
@@ -63,7 +65,7 @@ class _ResilientEmbedder:
                 self._on_failure()
             try:
                 self._embedder = self._provider()
-            except Exception as new_exc:  # noqa: BLE001 - degrade instead of crashing
+            except Exception as new_exc:
                 log.warning("could not restart embeddings: %s", new_exc)
                 raise ServerUnavailable(str(new_exc)) from new_exc
             return getattr(self._embedder, method)(*args)
@@ -306,13 +308,15 @@ class IndexerDaemon:
         stop: threading.Event,
         generation: int,
     ) -> None:
+        watcher = self.watcher
+        assert watcher is not None  # set before the producer thread starts
         try:
-            for paths in self.watcher.events(stop):
+            for paths in watcher.events(stop):
                 if paths:
                     events.put(paths)
                 if stop.is_set() or self.stop_event.is_set():
                     break
-        except Exception:  # noqa: BLE001 - a broken watcher must not kill the daemon
+        except Exception:
             log.exception("watcher failed")
         finally:
             # Only the current generation ends the run: a watcher replaced after a

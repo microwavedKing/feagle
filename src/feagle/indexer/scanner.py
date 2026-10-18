@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import os
 import stat
-from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..log import get_logger
 from .gitignore import GitIgnore, matches_chain
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
 
 log = get_logger("indexer.scanner")
 

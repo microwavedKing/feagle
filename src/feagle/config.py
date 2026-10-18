@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import copy
 import tomllib
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import paths
 from .embeddings import presets
 from .indexer.ocr import MAX_OCR_WORKERS
 from .log import get_logger
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 log = get_logger("config")
 

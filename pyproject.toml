@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11"]
 
 [project.scripts]
 feagle = "feagle.cli.__main__:main"
@@ -57,4 +57,41 @@ target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+select = [
+  "E", "F", "W",   # pycodestyle / pyflakes
+  "I",             # import sorting
+  "UP",            # pyupgrade
+  "B", "BLE",      # bugbear / blind except
+  "SIM",           # simplify
+  "RUF", "PERF",   # ruff-specific / performance
+  "RET", "TCH",    # return statements / type-checking imports
+]
+ignore = [
+  # Ambiguous unicode (Russian text, typographic quotes/dashes) is intentional.
+  "RUF001", "RUF002", "RUF003",
+]
+
+[tool.coverage.run]
+source = ["src/feagle"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/feagle"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+# These dependencies ship no type information (no py.typed).
+[[tool.mypy.overrides]]
+module = ["snowballstemmer", "sqlite_vec"]
+ignore_missing_imports = true

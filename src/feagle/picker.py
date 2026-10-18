@@ -74,7 +74,7 @@ def run_pick(
         return 0
     time_ms = None
     if hit is not None and hit.get("time") is not None:
-        time_ms = int(round(hit["time"] * 1000))
+        time_ms = round(hit["time"] * 1000)
     try:
         open_result(
             cfg["openers"],

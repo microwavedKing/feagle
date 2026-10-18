@@ -28,10 +28,14 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      - name: Type check
+        run: mypy
+
       - name: Test
         # Tests that need llama-server, a model, poppler or tesseract skip
-        # themselves; nothing here needs network or a GUI.
-        run: pytest -q
+        # themselves; nothing here needs network or a GUI. Coverage is a gate
+        # (branch coverage, currently ~85%).
+        run: pytest -q --cov=feagle --cov-report=term-missing --cov-fail-under=84
 
       - name: CLI smoke test
         run: |

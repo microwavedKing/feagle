@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .log import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 log = get_logger("openers")
 

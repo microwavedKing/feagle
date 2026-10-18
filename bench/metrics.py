@@ -3,7 +3,7 @@ run directly (with the package importable) without duplicating the helpers."""
 
 from __future__ import annotations
 
-from feagle.metrics import (  # noqa: F401
+from feagle.metrics import (
     current_rss_mb,
     llama_server_pid,
     peak_rss_mb,

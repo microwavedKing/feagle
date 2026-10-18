@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import db, paths
 from ..search.vec import vec_count
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:

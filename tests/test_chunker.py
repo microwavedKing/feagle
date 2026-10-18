@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 from feagle.indexer.chunker import Chunk, _spans, chunk_extracted
 from feagle.indexer.extract import Extracted
 
@@ -37,7 +39,7 @@ def test_spans_cover_text_without_gaps():
     assert spans[0][0] == 0
     assert spans[-1][1] == len(text)
     assert all(end - start <= 2200 for start, end in spans)
-    for (_, prev_end), (next_start, _) in zip(spans, spans[1:], strict=False):
+    for (_, prev_end), (next_start, _) in itertools.pairwise(spans):
         assert next_start <= prev_end  # overlap or adjacency, never a gap
 
 

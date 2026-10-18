@@ -16,12 +16,14 @@ import os
 import shlex
 import shutil
 import subprocess
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .log import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 log = get_logger("apps")
 
@@ -132,8 +134,7 @@ def default_terminal() -> str | None:
 
 def exec_argv(app: App) -> list[str]:
     """The ``Exec`` line as an argv list with field codes removed."""
-    tokens = [token for token in shlex.split(app.exec_line) if token not in _FIELD_CODES]
-    return tokens
+    return [token for token in shlex.split(app.exec_line) if token not in _FIELD_CODES]
 
 
 def launch_command(app: App) -> list[str]:
