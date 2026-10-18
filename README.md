@@ -591,7 +591,7 @@ as an upper bound for that class of hardware. Raw results are in
 `bench/results/`. Reproduce with:
 
 ```sh
-feagle bench --files 60 --seed 1 --out bench/results/bench.json
+feagle bench --files 400 --seed 1 --out bench/results/bench.json
 python bench/quality_eval.py --files 60 --seed 1
 python bench/ocr_eval.py --pages 6     # OCR speed (workers) and quality (psm/dpi)
 python bench/corpus_eval.py --corpus DIR --queries Q.json   # quality on your own corpus
@@ -602,37 +602,44 @@ python bench/corpus_eval.py --corpus DIR --queries Q.json   # quality on your ow
 | | `embeddinggemma-2-q4` (default) | `embeddinggemma-2-q8` |
 |---|---|---|
 | File size | 169 MB | 310 MB |
-| Indexing | **2.30 chunks/s** | 1.81 chunks/s |
-| `llama-server` RSS | **458 MiB** | 523 MiB |
-| Cold start | 1.55 s | 1.59 s |
-| MRR@10 (hybrid) | 0.778 | 0.778 |
-| MRR@10 (English / Russian) | 0.722 / 0.833 | 0.722 / 0.833 |
-| Recall@20 (hybrid) | 0.833 | 0.833 |
-| p50 hybrid query | **52 ms** | 62 ms |
+| Indexing | **2.22 chunks/s** | 1.54 chunks/s |
+| `llama-server` RSS | **463 MiB** | 528 MiB |
+| Cold start | 1.58 s | 1.59 s |
+| MRR@10 (hybrid) | 0.856 | **0.938** |
+| MRR@10 (English / Russian) | 0.876 / 0.835 | 0.876 / 1.000 |
+| Recall@20 (hybrid) | 0.917 | **1.000** |
+| p50 hybrid query | **58 ms** | 69 ms |
 
-The lighter quant is ~27 % faster to index and ~65 MiB smaller with **identical
-measured retrieval quality**, so it is the default; `q8` (official ggml-org
-repository) stays available via `[embeddings].model`. The same ranking held on a
-real-text check (8 files, 852 chunks, 13 queries) gives MRR@10 1.000 for both, and
-q4 indexes faster (see the throughput row above).
-Full-text metrics are model-independent: MRR@10 0.375, Recall@20 0.500 — exact
-matching alone is weak on paraphrased queries, which is what the semantic side is
-for.
+Measured with 400 synthetic documents (434 chunks, 400 queries); the latency and
+quality rows come from the same pair of runs.
+
+The lighter quant indexes 44% faster on this corpus and is 65 MiB smaller.
+Retrieval is a tie where it matters most — 1.000 for both on the real book corpus
+(8 files, 852 chunks, 13 queries) and 0.750 for both on the smaller 60-document
+corpus — but on the 400-document corpus above `q8` pulled ahead (0.938 vs 0.856),
+so the default rests on size and speed; `q8` (official ggml-org repository) is a
+one-line switch in `[embeddings].model` if you want the extra margin.
+Full-text metrics are model-independent: MRR@10 0.383, Recall@20 0.500 on this
+corpus (0.375 / 0.500 on the 60-document one) — exact matching alone is weak on
+paraphrased queries, which is what the semantic side is for.
 
 ### Latency, memory, size
 
+The default model (`embeddinggemma-2-q4`) on the 400-document corpus above
+(1200 timed runs per mode: 400 queries × 3 repetitions):
+
 | Metric | Result |
 |---|---|
-| Hybrid query, p50 / p95 | 52 ms / 63 ms (embedding 50 ms, search 2 ms) |
-| Full-text query, p50 / p95 | 1.4 ms / 3.8 ms |
-| Indexing throughput | 2.3 chunks/s (~1.7 files/s) — compute-bound on CPU prompt processing |
-| `llama-server` RSS (loaded) | ~458 MiB, unloaded after 10 min idle |
-| `feagle` process during indexing | +6 MiB peak |
+| Hybrid query, p50 / p95 | 58 ms / 81 ms (embedding 55 ms, search 2.7 ms) |
+| Full-text query, p50 / p95 | 1.8 ms / 6.7 ms |
+| Indexing throughput | 2.2 chunks/s (~2.05 files/s) — compute-bound on CPU prompt processing |
+| `llama-server` RSS (loaded) | ~463 MiB, unloaded after 10 min idle |
+| `feagle` process during indexing | +6.7 MiB peak |
 | Cold start (spawn → healthy) | 1.6 s |
-| Database | ~8.7 KB/chunk at 1300 chunks (768-dim); small indexes are dominated by a 3.1 MiB vec0 preallocation (see below) |
+| Database | ~8.7 KB/chunk at 1300 chunks (768-dim); the 434-chunk run reports 11.3 KB/chunk for the same reason (see the preallocation below) |
 
-Query latency is dominated by the query embedding (~50 ms); the search itself
-(KNN + FTS + RRF) is ~2 ms. The model is unloaded after `idle_timeout_min` so an
+Query latency is dominated by the query embedding (~55 ms); the search itself
+(KNN + FTS + RRF) is ~2.7 ms. The model is unloaded after `idle_timeout_min` so an
 idle machine uses no GPU/CPU and no model memory.
 
 ### Database size caveat
@@ -640,7 +647,8 @@ idle machine uses no GPU/CPU and no model memory.
 `sqlite-vec` allocates vectors in fixed "page groups" of 1024 rows (this version
 does not expose `chunk_size`), so a fresh `chunks_vec` reserves ~3.1 MiB
 (1024 × 768 × 4 bytes) regardless of how many rows exist. That is why a
-65-chunk benchmark reports ~54 KB/chunk. Measured on a corpus that gets past the
+65-chunk benchmark reports ~54 KB/chunk and the 434-chunk run above ~11.3 KB/chunk
+(the same 3.1 MiB spread over fewer rows). Measured on a corpus that gets past the
 first group (1200 synthetic files, 1300 chunks): **8655 B/chunk** at 768 dims —
 ~3 KB of vector plus the text, the FTS index and row overhead. At 256 dims the
 vector part shrinks to ~1 KB, which is what the table below shows.
@@ -688,8 +696,13 @@ default 16, a batch of long book chunks can exceed the client's 60-second
 timeout and the affected files stay at `embedded = 0` (measured on the
 852-chunk corpus: 81% of the chunks got vectors, two requests timed out). With
 `embed_batch_size = 4` the same run produced no timeouts and 100% coverage on
-the first seven files before it was stopped. The default stays 16 because
-EmbeddingGemma is much faster; lower it if you switch to Qwen3 on CPU.
+the first seven files. The default stays 16 because EmbeddingGemma is much
+faster; lower it if you switch to Qwen3 on CPU.
+
+The Qwen3 book row above is the earlier 230-chunk corpus on purpose: a full
+re-measure on the current 852-chunk one was stopped — the two corpora already
+disagree with EmbeddingGemma ahead on real text, so another row would not change
+the default. Qwen3 stays a measured option, not the recommendation.
 
 Full-text numbers are identical (the model does not touch them): 0.375 on the
 synthetic corpus, 0.635 on the books.
@@ -1359,7 +1372,7 @@ OR-фолбэк (см. выше). `0.8` (дефолт), `1.0` и `0` (выклю
 Сырые результаты — в `bench/results/`. Повторить:
 
 ```sh
-feagle bench --files 60 --seed 1 --out bench/results/bench.json
+feagle bench --files 400 --seed 1 --out bench/results/bench.json
 python bench/quality_eval.py --files 60 --seed 1
 python bench/ocr_eval.py --pages 6     # OCR speed (workers) and quality (psm/dpi)
 python bench/corpus_eval.py --corpus DIR --queries Q.json   # quality on your own corpus
@@ -1370,36 +1383,44 @@ python bench/corpus_eval.py --corpus DIR --queries Q.json   # quality on your ow
 | | `embeddinggemma-2-q4` (по умолчанию) | `embeddinggemma-2-q8` |
 |---|---|---|
 | Размер файла | 169 МБ | 310 МБ |
-| Индексация | **2.30 чанка/с** | 1.81 чанка/с |
-| RSS `llama-server` | **458 МиБ** | 523 МиБ |
-| Холодный старт | 1.55 с | 1.59 с |
-| MRR@10 (hybrid) | 0.778 | 0.778 |
-| MRR@10 (англ. / рус.) | 0.722 / 0.833 | 0.722 / 0.833 |
-| Recall@20 (hybrid) | 0.833 | 0.833 |
-| p50 гибридного запроса | **52 мс** | 62 мс |
+| Индексация | **2.22 чанка/с** | 1.54 чанка/с |
+| RSS `llama-server` | **463 МиБ** | 528 МиБ |
+| Холодный старт | 1.58 с | 1.59 с |
+| MRR@10 (hybrid) | 0.856 | **0.938** |
+| MRR@10 (англ. / рус.) | 0.876 / 0.835 | 0.876 / 1.000 |
+| Recall@20 (hybrid) | 0.917 | **1.000** |
+| p50 гибридного запроса | **58 мс** | 69 мс |
 
-Лёгкий квант примерно на 27 % быстрее индексирует и на ~65 МиБ меньше, при
-**одинаковом измеренном качестве** — поэтому он дефолт; `q8` (официальный
-репозиторий ggml-org) доступен через `[embeddings].model`. То же соотношение
-подтвердилось на реальных книгах (8 файлов, 852 чанка, 13 запросов): MRR@10 1.000 у
-обоих, а q4 индексирует быстрее (см. строку про скорость выше). Полнотекстовые метрики не зависят от модели:
-MRR@10 0.375, Recall@20 0.500 — точного совпадения мало на перефразированных
-запросах, для этого и нужна семантика.
+Замер на 400 синтетических документах (434 чанка, 400 запросов); строки скорости и
+качества — из одной и той же пары прогонов.
+
+Лёгкий квант индексирует на этом корпусе на 44 % быстрее и на 65 МиБ меньше. Качество
+совпадает там, где оно важнее всего — 1.000 у обоих на реальных книгах (8 файлов,
+852 чанка, 13 запросов) и 0.750 у обоих на меньшем корпусе из 60 документов, — но на
+400 документах `q8` вышел вперёд (0.938 против 0.856), поэтому дефолт держится на
+размере и скорости, а `q8` (официальный репозиторий ggml-org) — переключатель в одну
+строку `[embeddings].model`, если хочется запаса.
+Полнотекстовые метрики не зависят от модели: MRR@10 0.383, Recall@20 0.500 на этом
+корпусе (0.375 / 0.500 на корпусе из 60 документов) — точного совпадения мало на
+перефразированных запросах, для этого и нужна семантика.
 
 ### Латентность, память, размер
 
+Модель по умолчанию (`embeddinggemma-2-q4`) на корпусе из 400 документов выше
+(по 1200 замеров на режим: 400 запросов × 3 повтора):
+
 | Метрика | Результат |
 |---|---|
-| Гибридный запрос, p50 / p95 | 52 мс / 63 мс (эмбеддинг 50 мс, поиск 2 мс) |
-| Полнотекстовый запрос, p50 / p95 | 1.4 мс / 3.8 мс |
-| Скорость индексации | 2.3 чанка/с (~1.7 файла/с) — упор в CPU на обработке промпта |
-| RSS `llama-server` (загружен) | ~458 МиБ, выгружается после 10 мин простоя |
-| Процесс `feagle` при индексации | +6 МиБ пик |
+| Гибридный запрос, p50 / p95 | 58 мс / 81 мс (эмбеддинг 55 мс, поиск 2.7 мс) |
+| Полнотекстовый запрос, p50 / p95 | 1.8 мс / 6.7 мс |
+| Скорость индексации | 2.2 чанка/с (~2.05 файла/с) — упор в CPU на обработке промпта |
+| RSS `llama-server` (загружен) | ~463 МиБ, выгружается после 10 мин простоя |
+| Процесс `feagle` при индексации | +6.7 МиБ пик |
 | Холодный старт (запуск → healthy) | 1.6 с |
-| База данных | ~8.7 КБ/чанк на 1300 чанках (768 измерений); на маленьких индексах доминирует предвыделение vec0 в 3.1 МиБ (см. ниже) |
+| База данных | ~8.7 КБ/чанк на 1300 чанках (768 измерений); прогон на 434 чанках даёт 11.3 КБ/чанк по той же причине (см. предвыделение ниже) |
 
-Латентность запроса определяется эмбеддингом запроса (~50 мс); сам поиск
-(KNN + FTS + RRF) — ~2 мс. Модель выгружается после `idle_timeout_min`, поэтому
+Латентность запроса определяется эмбеддингом запроса (~55 мс); сам поиск
+(KNN + FTS + RRF) — ~2.7 мс. Модель выгружается после `idle_timeout_min`, поэтому
 простаивающая машина не тратит ни CPU, ни память под модель.
 
 ### О размере БД
@@ -1407,11 +1428,12 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 `sqlite-vec` выделяет векторы фиксированными «группами» по 1024 строки (в этой
 версии `chunk_size` не настраивается), поэтому новая таблица `chunks_vec`
 резервирует ~3.1 МиБ (1024 × 768 × 4 байта) независимо от числа строк. Поэтому
-бенчмарк на 65 чанках показывает ~54 КБ/чанк. Замер на корпусе, который выходит
-за первую группу (1200 синтетических файлов, 1300 чанков): **8655 Б/чанк** при 768
-измерениях — это ~3 КБ вектора плюс текст, FTS-индекс и накладные расходы строк.
-При 256 измерениях векторная часть сжимается до ~1 КБ — это и видно в таблице
-ниже.
+бенчмарк на 65 чанках показывает ~54 КБ/чанк, а прогон на 434 чанках выше —
+~11.3 КБ/чанк (те же 3.1 МиБ, размазанные по меньшему числу строк). Замер на корпусе,
+который выходит за первую группу (1200 синтетических файлов, 1300 чанков):
+**8655 Б/чанк** при 768 измерениях — это ~3 КБ вектора плюс текст, FTS-индекс и
+накладные расходы строк. При 256 измерениях векторная часть сжимается до ~1 КБ — это
+и видно в таблице ниже.
 
 ### Размер вектора: 256 измерений не хуже 768, а база на 28 % меньше
 
@@ -1455,9 +1477,13 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
 16 батч из длинных книжных чанков не влезает в 60-секундный таймаут клиента, и
 затронутые файлы остаются с `embedded = 0` (замер на корпусе из 852 чанков: векторы
 получили 81 % чанков, два запроса упали по таймауту). С `embed_batch_size = 4` тот же
-прогон шёл без таймаутов: 100 % покрытия на первых семи файлах, пока не был
-остановлен. Дефолт остаётся 16, потому что EmbeddingGemma заметно быстрее; для
-Qwen3 на CPU его стоит уменьшить.
+прогон шёл без таймаутов: 100 % покрытия на первых семи файлах. Дефолт остаётся 16,
+потому что EmbeddingGemma заметно быстрее; для Qwen3 на CPU его стоит уменьшить.
+
+Строка Qwen3 по книгам выше — намеренно с прежнего корпуса (230 чанков): полный
+перемер на текущем (852 чанка) остановлен — корпуса и так расходятся, а на реальном
+тексте впереди EmbeddingGemma, поэтому ещё одна строка дефолт не изменит. Qwen3
+остаётся измеренной опцией, а не рекомендацией.
 
 Полнотекстовые числа совпадают (модель на них не влияет): 0.375 на синтетике,
 0.635 на книгах.
