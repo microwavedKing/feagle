@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,7 +35,7 @@ ROOT = Path(__file__).resolve().parent.parent
 INIT = Path("src/feagle/__init__.py")
 PKGBUILD = Path("PKGBUILD")
 SRCINFO = Path(".SRCINFO")
-DOCS = ("README.md", "ARCHITECTURE.md", "quickshell/README.md")
+DOCS = ("README.md", "ARCHITECTURE.md", "quickshell/README.md", "man/feagle.1")
 ARCHIVE_URL = "https://github.com/microwavedKing/feagle/archive/refs/tags/v{version}.tar.gz"
 
 _VERSION_RE = re.compile(r'(?m)^__version__ = "([^"]+)"$')
@@ -42,6 +43,7 @@ _PKGVER_RE = re.compile(r"(?m)^pkgver=.*$")
 _SHA_RE = re.compile(r"(?m)^sha256sums=\('[^']*'\)$")
 _STATUS_RE = re.compile(r"(?m)^(> \*\*(?:Status|Статус):\*\*[^`\n]*`)[^`]+(`)")
 _PING_RE = re.compile(r'"version":"[^"]+"')
+_TH_RE = re.compile(r'(?m)^\.TH FEAGLE 1 "[^"]*" "feagle [^"]*"')
 
 
 def read_version(root: Path = ROOT) -> str:
@@ -72,10 +74,18 @@ def set_sha256(text: str, digest: str) -> str:
     return _sub_once(_SHA_RE, f"sha256sums=('{digest}')", text, "sha256sums")
 
 
-def set_doc_versions(text: str, version: str) -> str:
-    """Update the status line and any ``ping`` example (both are optional)."""
+def set_doc_versions(text: str, version: str, stamp: str | None = None) -> str:
+    """Update the status line, any ``ping`` example and the man page header.
+
+    All three are optional: a file simply does not have to contain them. The man
+    page's ``.TH`` line takes the release date (today, unless given).
+    """
     text = _STATUS_RE.sub(rf"\g<1>{version}\g<2>", text)
-    return _PING_RE.sub(f'"version":"{version}"', text)
+    text = _PING_RE.sub(f'"version":"{version}"', text)
+    if _TH_RE.search(text):
+        when = stamp or date.today().isoformat()
+        text = _TH_RE.sub(f'.TH FEAGLE 1 "{when}" "feagle {version}"', text)
+    return text
 
 
 def write_srcinfo(root: Path = ROOT) -> None:

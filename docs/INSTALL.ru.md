@@ -36,7 +36,8 @@ feagle setup           # первичная настройка, см. шаг 3
 Что важно знать:
 
 - `python-sqlite-vec` — тоже пакет из AUR, хелпер соберёт его автоматически.
-- Пакет ставит бинарь `/usr/bin/feagle` и юниты в `/usr/lib/systemd/user/`.
+- Пакет ставит бинарь `/usr/bin/feagle`, юниты в `/usr/lib/systemd/user/`,
+  man-страницу `feagle(1)` и комплишены для bash, zsh и fish.
 
 ### Вариант B: через uv или pipx (без AUR)
 

@@ -19,6 +19,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `README.md`: a "Privacy and security" section (EN + RU), and a matching
   "Модель безопасности" subsection in `ARCHITECTURE.md`.
+- A manual page, `man/feagle.1`: every command and option, the files and
+  directories feagle uses, the environment variables, exit status, and the
+  degradation and privacy notes.
+- Shell completions for bash (`completions/feagle.bash`), zsh
+  (`completions/_feagle`) and fish (`completions/feagle.fish`). The AUR package
+  installs them, and `tests/test_cli_docs.py` fails when one of them (or the man
+  page) misses a command or an option that `feagle --help` knows.
+- The AUR package now installs the manual page and the completions, and its
+  optional dependencies were brought up to date: `quickshell` (the recommended
+  popup) and `whisper.cpp` (audio) were missing, OCR orientation data and media
+  descriptions were clarified, and the dmenu launchers are now described as the
+  `feagle pick` alternative they are.
+
+### Changed
+
+- Development status is beta (`pyproject.toml`, the README status line).
+- `scripts/release.py bump` also updates the version and the date in the man
+  page header.
 
 ### Fixed
 
@@ -379,6 +397,21 @@ on Wayland.
 
 - `README.md`: раздел «Приватность и безопасность» (EN + RU) и соответствующий
   подраздел «Модель безопасности» в `ARCHITECTURE.md`.
+- Man-страница `man/feagle.1`: все команды и опции, файлы и каталоги, переменные
+  окружения, коды выхода, режим деградации и приватность.
+- Комплишены для bash (`completions/feagle.bash`), zsh (`completions/_feagle`) и fish
+  (`completions/feagle.fish`). AUR-пакет ставит их, а `tests/test_cli_docs.py` падает,
+  если в них (или в man-странице) нет команды или опции, которая есть в `feagle
+  --help`.
+- AUR-пакет теперь ставит man-страницу и комплишены, а его optdepends приведены в
+  порядок: не хватало `quickshell` (рекомендуемый попап) и `whisper.cpp` (аудио),
+  уточнены описания OCR-данных и медиа, а dmenu-лаунчеры подписаны как альтернатива
+  для `feagle pick` — чем они и являются.
+
+### Изменено
+
+- Статус разработки — бета (`pyproject.toml`, строка статуса в README).
+- `scripts/release.py bump` обновляет также версию и дату в заголовке man-страницы.
 
 ### Исправлено
 

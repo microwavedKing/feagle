@@ -61,6 +61,12 @@ def test_set_doc_versions_updates_status_and_ping():
     assert "0.1.0" not in out
 
 
+def test_set_doc_versions_updates_the_man_page_header():
+    text = '.TH FEAGLE 1 "2026-01-02" "feagle 0.1.0"\n'
+    out = release.set_doc_versions(text, "0.2.0", stamp="2026-03-04")
+    assert out == '.TH FEAGLE 1 "2026-03-04" "feagle 0.2.0"\n'
+
+
 @pytest.mark.parametrize("pattern", ["__version__", "pkgver", "sha256sums"])
 def test_a_missing_target_fails_loudly(pattern):
     with pytest.raises(SystemExit):

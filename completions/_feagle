@@ -1,0 +1,134 @@
+#compdef feagle
+#
+# zsh completion for feagle.
+#
+# Installed by the AUR package as /usr/share/zsh/site-functions/_feagle; for a
+# manual setup copy it to a directory in $fpath (for example
+# ~/.local/share/zsh/site-functions/_feagle).
+#
+# The list of commands and options mirrors `feagle --help`;
+# tests/test_cli_docs.py fails when something is missing.
+
+_feagle() {
+    local -a commands
+    commands=(
+        'index:scan and index the configured roots'
+        'search:search the index'
+        'status:show index statistics'
+        'doctor:check the environment and dependencies'
+        'setup:first-run interactive setup'
+        'open:open a file at a line or page'
+        'pick:open a launcher with applications and indexed files'
+        'queryd:run the query daemon in the foreground'
+        'indexerd:run the indexing daemon in the foreground'
+        'bench:run synthetic indexing and query benchmarks'
+    )
+
+    _arguments -C \
+        '--version[print the version and exit]' \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '1:command:->command' \
+        '*::arg:->args'
+
+    case $state in
+        (command)
+            _describe -t commands 'feagle command' commands
+            ;;
+        (args)
+            case $words[1] in
+                (index)
+                    _arguments \
+                        '*--root[index this directory]:directory:_directories' \
+                        '--full[re-extract and re-embed every file]' \
+                        '--rebuild[wipe the index and rebuild it]' \
+                        '--no-embed[full-text indexing only]' \
+                        '--backfill[embed files that still lack vectors]' \
+                        '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+                (search)
+                    _arguments \
+                        '--limit[maximum number of results]:N:' \
+                        '--mode[search mode]:mode:(auto hybrid fts)' \
+                        '--json[emit JSON]' \
+                        '--pick[choose a result in a launcher]' \
+                        '--with-apps[also list desktop applications]' \
+                        '1:query:' \
+                        '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+                (status)
+                    _arguments \
+                        '--json[emit JSON]' \
+                        '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+                (doctor)
+                    _arguments \
+                        '--json[emit JSON]' \
+                        '--fast[skip hashing the model file]' \
+                        '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+                (setup)
+                    _arguments \
+                        '*--root[directories to index]:directory:_directories' \
+                        '--model[model preset or GGUF path]:preset or path:' \
+                        '--mrl-dim[truncate embeddings to N dimensions]:dimension:(128 256 512 768 1024)' \
+                        '--launcher[launcher for feagle pick]:launcher:(auto fuzzel wofi rofi tofi walker stdout)' \
+                        '--yes[accept defaults]' \
+                        '--no-download[skip the model download]' \
+                        '--no-units[skip the systemd units]' \
+                        '--no-enable[install the units but do not start them]' \
+                        '--no-index[skip the first index]' \
+                        '--no-backup[do not back up the config]' \
+                        '--media-images[enable image search]' \
+                        '--media-video[enable video frame indexing]' \
+                        '--media-audio[enable audio transcription]' \
+                        '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+                (open)
+                    _arguments \
+                        '--line[line number]:N:' \
+                        '--page[page number]:N:' \
+                        '--time[start time in seconds]:seconds:' \
+                        '--dry-run[print the command instead of running it]' \
+                        '1:file:_files' \
+                        '2:position:' \
+                        '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+                (pick)
+                    _arguments \
+                        '--query[rank the files for this query]:text:' \
+                        '--limit[number of results]:N:' \
+                        '--files[how many indexed files to list]:N:' \
+                        '--no-apps[only list files]' \
+                        '--no-files[only list applications]' \
+                        '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+                (queryd)
+                    _arguments '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+                (indexerd)
+                    _arguments \
+                        '*--root[watch this directory]:directory:_directories' \
+                        '--once[do a single pass and exit]' \
+                        '--poll[poll instead of using inotify]' \
+                        '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+                (bench)
+                    _arguments \
+                        '--files[documents to generate]:N:' \
+                        '--seed[random seed]:N:' \
+                        '--corpus[corpus directory]:directory:_directories' \
+                        '--queries[how many queries to time]:N:' \
+                        '--repeats[timing repetitions]:N:' \
+                        '--limit[results per query]:N:' \
+                        '--no-embed[full-text only]' \
+                        '--keep-db[keep the throwaway database]' \
+                        '--json[print JSON]' \
+                        '--out[write the result to a file]:file:_files' \
+                        '(-h --help)'{-h,--help}'[show help]'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_feagle "$@"

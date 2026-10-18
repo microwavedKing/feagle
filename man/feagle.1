@@ -1,0 +1,324 @@
+.\" Manual page for feagle. Keep it in sync with `feagle --help`: the test
+.\" `tests/test_cli_docs.py` fails when a subcommand or an option is missing here.
+.TH FEAGLE 1 "2026-10-18" "feagle 0.3.0" "User Commands"
+.SH NAME
+feagle \- local semantic file search for Arch Linux and Wayland
+.SH SYNOPSIS
+.B feagle
+[\fB\-\-version\fR]
+\fICOMMAND\fR
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B feagle
+indexes the files under the configured roots and searches them in two ways: by
+keywords (SQLite FTS5, BM25 ranking) and by meaning (vector embeddings from
+.B llama-server
+combined with the keyword hits through reciprocal rank fusion). Results carry a
+position \- a line for text, a page for PDF, a timecode for media \- so that
+.BR "feagle open" ,
+or a launcher, can jump straight to the match.
+.PP
+Everything stays on the machine: there are no accounts, no telemetry and no
+network traffic, except the model download that the user starts explicitly.
+When
+.B llama-server
+or the model is missing, search degrades to the keyword index and
+.B feagle doctor
+says what to install for the semantic side.
+.PP
+A directory is watched by
+.B feagle\-indexerd
+and searched through the daemon
+.BR feagle\-queryd ;
+both are systemd user units. The command line talks to the search daemon when
+it is running, and opens the database directly otherwise.
+.SH COMMANDS
+.SS index [\fIOPTIONS\fR]
+Scan the configured roots and bring the index up to date. Unchanged files are
+not re-read: size and modification time are compared first, then a hash.
+.TP
+.BR \-\-root " " PATH
+Index this directory instead of the configured roots. Repeatable.
+.TP
+.B \-\-full
+Re-extract and re-embed every file, even if it looks unchanged.
+.TP
+.B \-\-rebuild
+Wipe the index (including stored vectors) and rebuild it from scratch.
+.TP
+.B \-\-no\-embed
+Index text only; no embeddings are requested.
+.TP
+.B \-\-backfill
+Embed the chunks of files that still lack vectors, for example after enabling
+semantic search on an existing index.
+.SS search [\fIOPTIONS\fR] \fIQUERY\fR
+Search the index for
+.IR QUERY .
+.TP
+.BR \-\-limit " " N
+Return at most
+.I N
+results (default: from the configuration).
+.TP
+.BR \-\-mode " " MODE
+One of
+.BR auto ,
+.B hybrid
+or
+.BR fts .
+The default comes from the configuration.
+.TP
+.B \-\-json
+Print the raw JSON reply instead of the human\-readable list.
+.TP
+.B \-\-pick
+Choose one of the results in a dmenu\-compatible launcher and open it.
+.TP
+.B \-\-with\-apps
+Above the file results, also list matching desktop applications. Requires
+.BR \-\-pick .
+.SS status
+Print what is in the index: files, chunks, vectors, coverage and the embedding
+model.
+.TP
+.B \-\-json
+Print the report as JSON.
+.SS doctor [\fIOPTIONS\fR]
+Check the environment and dependencies (llama.cpp, the model file, poppler,
+tesseract, the daemons, permissions) and print what to fix. It never changes
+anything.
+.TP
+.B \-\-json
+Print the report as JSON.
+.TP
+.B \-\-fast
+Skip hashing the model file (it is a few hundred MiB).
+.SS setup [\fIOPTIONS\fR]
+Interactive first\-run setup: choose the roots, the launcher and the
+performance profile, download and verify the model, write the configuration and
+install the systemd user units.
+.TP
+.BR \-\-root " " PATH
+Corpus directory to index. Repeatable; skips the interactive question.
+.TP
+.BR \-\-model " " PRESET|PATH
+Model preset name, or a path to a GGUF file.
+.TP
+.BR \-\-mrl\-dim " " N
+Truncate embeddings to
+.I N
+dimensions (Matryoshka models). One of 128, 256, 512, 768, 1024.
+.TP
+.BR \-\-launcher " " PROGRAM
+Launcher for
+.BR "feagle pick" :
+.BR auto ,
+.BR fuzzel ,
+.BR wofi ,
+.BR rofi ,
+.BR tofi ,
+.B walker
+or
+.BR stdout .
+.TP
+.B \-\-yes
+Accept the defaults and do not ask anything.
+.TP
+.B \-\-no\-download
+Do not download the model.
+.TP
+.B \-\-no\-units
+Do not install the systemd user units.
+.TP
+.B \-\-no\-enable
+Install the units but do not enable or start them.
+.TP
+.B \-\-no\-index
+Skip the first indexing run.
+.TP
+.B \-\-no\-backup
+Do not back up an existing configuration file before rewriting it.
+.TP
+.B \-\-media\-images
+Enable image search (downloads the multimodal projector, about 530 MiB).
+.TP
+.B \-\-media\-video
+Enable video frame indexing.
+.TP
+.B \-\-media\-audio
+Enable audio transcription with whisper.cpp (downloads a model, about 148 MiB).
+.SS open [\fIOPTIONS\fR] \fIPATH\fR [\fIPOSITION\fR]
+Open a file with the opener configured for its extension, at the given position.
+.I POSITION
+is
+.I +N
+for a line in text, or a page in a PDF.
+.TP
+.BR \-\-line " " N
+Line number.
+.TP
+.BR \-\-page " " N
+Page number (PDF).
+.TP
+.BR \-\-time " " SECONDS
+Start time in seconds (audio, video).
+.TP
+.B \-\-dry\-run
+Print the command that would be run instead of running it.
+.SS pick [\fIOPTIONS\fR]
+Open a dmenu\-compatible launcher listing desktop applications and indexed
+files. Applications come first. Without a configured launcher the list is
+printed to stdout as
+.IR key ", tab, description" .
+.TP
+.BR \-\-query " " TEXT
+Rank the files semantically for this query instead of listing them by recency.
+.TP
+.BR \-\-limit " " N
+How many results to show when
+.B \-\-query
+is given.
+.TP
+.BR \-\-files " " N
+How many indexed files to list when there is no query (default: 500).
+.TP
+.B \-\-no\-apps
+List files only.
+.TP
+.B \-\-no\-files
+List applications only.
+.SS queryd
+Run the query daemon in the foreground; normally started by its systemd user
+unit. It listens on a Unix socket and speaks line\-delimited JSON.
+.SS indexerd [\fIOPTIONS\fR]
+Run the indexing daemon in the foreground; normally started by its systemd user
+unit. It does an initial pass, then follows inotify events and rescans
+periodically.
+.TP
+.BR \-\-root " " PATH
+Watch this directory instead of the configured roots. Repeatable.
+.TP
+.B \-\-once
+Do a single indexing pass and exit.
+.TP
+.B \-\-poll
+Poll the filesystem instead of using inotify (for network mounts and other
+filesystems that do not deliver events).
+.SS bench [\fIOPTIONS\fR]
+Run synthetic indexing and query benchmarks in an isolated runtime directory and
+report throughput, latency, memory and database size.
+.TP
+.BR \-\-files " " N
+Number of documents to generate (default: 60).
+.TP
+.BR \-\-seed " " N
+Random seed for the generated corpus.
+.TP
+.BR \-\-corpus " " DIR
+Use a real corpus directory instead of the synthetic one.
+.TP
+.BR \-\-queries " " N
+Time at most
+.I N
+queries (0 means all of them).
+.TP
+.BR \-\-repeats " " N
+Timing repetitions per query (default: 3).
+.TP
+.BR \-\-limit " " N
+Results per query (default: 10).
+.TP
+.B \-\-no\-embed
+Full\-text benchmark only.
+.TP
+.B \-\-keep\-db
+Keep the throwaway database for inspection.
+.TP
+.B \-\-json
+Print the result as JSON.
+.TP
+.BR \-\-out " " FILE
+Write the result to
+.I FILE
+as JSON.
+.SH OPTIONS
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print the help for a command and exit.
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/feagle/config.toml
+Configuration: roots, limits, model, search knobs, launcher and openers. Every
+key is documented in the file itself.
+.TP
+.I $XDG_DATA_HOME/feagle/feagle.sqlite
+The index: one SQLite database (file mode 0600, directory 0700) with the file
+table, the full\-text index and the vectors.
+.TP
+.I $XDG_DATA_HOME/feagle/models/
+Downloaded GGUF models and the multimodal projector.
+.TP
+.I $XDG_STATE_HOME/feagle/
+Frecency history, llama\-server logs and other user state.
+.TP
+.I $XDG_RUNTIME_DIR/feagle/queryd.sock
+Unix socket of the query daemon (0600). The same runtime directory holds the
+coordination files of the shared
+.B llama-server
+(port, pid, lock and activity stamp).
+.SH ENVIRONMENT
+.TP
+.B FEAGLE_LOG_LEVEL
+Log level for this process:
+.BR DEBUG ", " INFO ", " WARNING
+or
+.BR ERROR .
+Interactive commands default to
+.BR WARNING ,
+the daemons to
+.BR INFO .
+.TP
+.B XDG_CONFIG_HOME ", " XDG_DATA_HOME ", " XDG_STATE_HOME ", " XDG_RUNTIME_DIR
+Respected for every file above; nothing is hard\-coded to a home directory.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+A runtime failure: the index is missing, the daemon is not running, a file
+cannot be opened, and so on. The message goes to standard error.
+.TP
+.B 2
+A configuration or usage error: an unreadable or invalid configuration file, or
+bad arguments.
+.SH NOTES
+.SS Degradation
+Without
+.B llama-server
+or a model, search uses the full\-text index only, and
+.B feagle doctor
+lists what is missing. Optional extractors degrade the same way: no poppler
+means PDF files are skipped, no tesseract means OCR is skipped, no whisper.cpp
+means audio is left unsupported.
+.SS Privacy
+The index and the socket belong to the user (0600/0700). The
+.B preview
+operation of the query daemon serves only files that are in the index, so access
+to the socket does not become access to arbitrary files.
+.B llama-server
+listens on 127.0.0.1 only.
+.SH SEE ALSO
+.BR systemctl (1),
+.BR systemd.exec (5),
+.BR pdftotext (1),
+.BR tesseract (1)
+.PP
+The full documentation, with launcher and compositor examples, is in the project
+README (the AUR package installs it as
+.IR /usr/share/doc/feagle/README.md )
+and in the configuration file itself.
