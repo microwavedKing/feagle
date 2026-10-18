@@ -1,6 +1,6 @@
 pkgbase = feagle
 	pkgdesc = Local semantic file search for Arch Linux + Wayland, fully offline
-	pkgver = 0.2.1
+	pkgver = 0.3.0
 	pkgrel = 1
 	url = https://github.com/microwavedKing/feagle
 	install = feagle.install
@@ -28,7 +28,7 @@ pkgbase = feagle
 	optdepends = rofi: launcher for "feagle pick" (Wayland support included since 2.0)
 	optdepends = tofi: launcher for "feagle pick" (AUR)
 	optdepends = walker: launcher for "feagle pick" (AUR)
-	source = feagle-0.2.1.tar.gz::https://github.com/microwavedKing/feagle/archive/refs/tags/v0.2.1.tar.gz
+	source = feagle-0.3.0.tar.gz::https://github.com/microwavedKing/feagle/archive/refs/tags/v0.3.0.tar.gz
 	sha256sums = b1ed201a03db7bfd5fdd20cdf1ae5c782679a9cc22a0932b4c464b6db2a4fd41
 
 pkgname = feagle

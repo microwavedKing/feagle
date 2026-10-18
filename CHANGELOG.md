@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-18
+
+Quality and release tooling, plus two search bugs found by using the thing. No
+breaking changes; existing configs keep their own `include_ext` list.
+
+### Added
+
+- `.html`, `.htm`, `.xml` and `.log` are indexed by default. HTML and XML are
+  reduced to their visible text first (markup dropped, `<script>`/`<style>`/
+  `<head>` ignored), so tags no longer dilute the embeddings.
+- `scripts/release.py`: `bump X.Y.Z` writes the version into `PKGBUILD`,
+  `.SRCINFO` and the documentation examples, `sum X.Y.Z` downloads the tag
+  archive and pins its checksum. `pyproject.toml` now reads the version from
+  `src/feagle/__init__.py` through hatchling, so the wheel, the package and
+  `feagle --version` can no longer disagree.
+- Configuration warnings: an explicit `[search].max_distance` that disagrees
+  with the model preset's measured distance scale, and an `mrl_dim` larger than
+  the model's own dimension. `feagle doctor` reports the same mismatch as a hint
+  on the model check.
+- `pytest-cov` with a coverage gate in CI (~85%), a test for `metrics.py`, and
+  `mypy` over `src/` and `scripts/` as a CI step.
+- A semantic CI job (weekly + manual) that builds `llama-server` from llama.cpp
+  master, downloads the model and runs the end-to-end test for real.
+
+### Fixed
+
+- Hybrid search could return **less** than the keyword search: when every vector
+  neighbour was filtered by `max_distance` and the AND-only text ranking was
+  empty, it returned nothing where the full-text pass had found hits — the
+  launcher's list then went blank. It now falls back to the OR ranking, but only
+  when nothing else survived, so the semantic side still decides whenever it has
+  an opinion.
+- The launcher no longer replaces a non-empty result list with an empty semantic
+  reply.
+- Image and video search never worked in `indexerd`: the wrapper that restarts a
+  dropped embeddings server did not forward `embed_images`, so every image was
+  indexed without a vector. `feagle index` was unaffected, which is why it went
+  unnoticed.
+- `queryd` no longer prints a traceback when a client disconnects mid-reply.
+
+### Changed
+
+- `ruff` also runs `BLE`, `RUF`, `PERF`, `RET` and `TCH` (with `RUF001-003`
+  ignored: the Russian text and typography are intentional).
+- Documentation: README gained a quick start and a contents list; the launcher,
+  install and architecture documents were refreshed.
+
 ## [0.2.1] - 2026-10-18
 
 Polish release: the launcher grew a real result list and a PDF preview, and the
@@ -289,6 +336,52 @@ on Wayland.
 ---
 
 ## Unreleased (по-русски)
+
+## 0.3.0 (по-русски) — 2026-10-18
+
+Качество и релиз-инструменты плюс два бага поиска, найденных на практике. Ломающих
+изменений нет; в существующих конфигах свой список `include_ext` остаётся как есть.
+
+### Добавлено
+
+- По умолчанию индексируются `.html`, `.htm`, `.xml` и `.log`. У HTML/XML сначала
+  снимается разметка (`<script>`/`<style>`/`<head>` игнорируются), поэтому теги
+  больше не разбавляют эмбеддинги.
+- `scripts/release.py`: `bump X.Y.Z` вписывает версию в `PKGBUILD`, `.SRCINFO` и
+  примеры в документации, `sum X.Y.Z` скачивает архив тега и закрепляет его
+  контрольную сумму. `pyproject.toml` теперь читает версию из
+  `src/feagle/__init__.py` через hatchling, поэтому колесо, пакет и
+  `feagle --version` не могут разойтись.
+- Предупреждения конфига: явный `[search].max_distance`, не сходящийся с измеренной
+  шкалой дистанций пресета модели, и `mrl_dim` больше размерности модели.
+  `feagle doctor` показывает ту же нестыковку подсказкой к проверке модели.
+- `pytest-cov` с порогом покрытия в CI (~85%), тест на `metrics.py` и `mypy` по
+  `src/` и `scripts/` отдельным шагом CI.
+- Задание семантического CI (раз в неделю + вручную): собирает `llama-server` из
+  master llama.cpp, качает модель и прогоняет сквозной тест по-настоящему.
+
+### Исправлено
+
+- Гибридный поиск мог вернуть **меньше**, чем поиск по словам: когда все векторные
+  соседи отсекались `max_distance`, а AND-ранжирование по тексту было пустым, он
+  возвращал ничего там, где полнотекстовая фаза находила совпадения — список в
+  лаунчере при этом пустел. Теперь он добирает OR-ранжирование, но только если
+  ничего другого не осталось, поэтому семантика по-прежнему решает, когда у неё
+  есть мнение.
+- Лаунчер больше не заменяет непустой список результатов пустым ответом семантики.
+- Поиск картинок и видео в `indexerd` не работал никогда: обёртка, перезапускающая
+  упавший сервер эмбеддингов, не пробрасывала `embed_images`, поэтому каждая
+  картинка индексировалась без вектора. `feagle index` был не затронут — потому
+  баг и не всплывал.
+- `queryd` больше не печатает трассировку, когда клиент обрывает соединение в
+  момент ответа.
+
+### Изменено
+
+- `ruff` дополнительно включает `BLE`, `RUF`, `PERF`, `RET` и `TCH` (с
+  `ignore RUF001-003`: русский текст и типографика намеренны).
+- Документация: в README появились быстрый старт и оглавление; разделы про лаунчер,
+  установку и архитектуру обновлены.
 
 ## 0.2.1 (по-русски) — 2026-10-18
 
