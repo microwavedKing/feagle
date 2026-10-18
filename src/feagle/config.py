@@ -306,7 +306,49 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     cfg = _merge(default_config(), user)
     _warn_unknown(user, DEFAULTS)
     validate(cfg, source=path)
+    _warn_model_knobs(user, cfg, path)
     return cfg
+
+
+def _warn_model_knobs(user: dict[str, Any], cfg: dict[str, Any], source: Path) -> None:
+    """Warn when a search knob disagrees with the configured model preset.
+
+    ``[search].max_distance`` is tuned on EmbeddingGemma, and another model can
+    put its distances on a different scale — a cutoff that is too tight silently
+    drops every vector neighbour. ``hybrid.effective_max_distance`` falls back to
+    the preset while the config keeps the built-in default, so only an *explicit*
+    value can disagree; saying so is cheaper than debugging empty results.
+    """
+    spec = presets.spec_for(str(cfg["embeddings"]["model"]))
+    if spec is None:
+        return
+
+    search = user.get("search") or {}
+    if spec.max_distance is not None and "max_distance" in search:
+        configured = float(cfg["search"]["max_distance"])
+        # Same rule as hybrid.effective_max_distance: a value equal to the
+        # built-in default is replaced by the preset's scale, so it cannot
+        # disagree with it.
+        if configured != DEFAULT_MAX_DISTANCE and configured != float(spec.max_distance):
+            log.warning(
+                "%s: [search].max_distance=%s is tuned for another model; "
+                "%s measured %s on its distance scale",
+                source,
+                configured,
+                spec.name,
+                spec.max_distance,
+            )
+
+    embeddings = user.get("embeddings") or {}
+    if "mrl_dim" in embeddings and int(cfg["embeddings"]["mrl_dim"]) > spec.dim:
+        log.warning(
+            "%s: [embeddings].mrl_dim=%s is larger than %s's %d dimensions; "
+            "it has no effect",
+            source,
+            cfg["embeddings"]["mrl_dim"],
+            spec.name,
+            spec.dim,
+        )
 
 
 def render_defaults() -> str:

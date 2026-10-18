@@ -1,0 +1,72 @@
+name: Semantic integration
+
+# The default CI run skips everything that needs llama-server, a model or a
+# tool like poppler, so the semantic path is only exercised here: it builds
+# llama.cpp from master (the project targets a fast-moving llama.cpp-git) and
+# runs the end-to-end test against the real model. Nightly + on demand, never
+# on push, so a breakage upstream does not block normal development.
+
+on:
+  schedule:
+    - cron: "17 4 * * 1" # Mondays, 04:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: semantic-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  semantic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install feagle
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Read the model checksum (cache key)
+        id: model
+        run: |
+          echo "sha=$(python -c 'from feagle.embeddings.presets import get_preset as g; print(g("embeddinggemma-2-q8").sha256)')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the model
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/feagle/models
+          key: model-embeddinggemma-2-q8-${{ steps.model.outputs.sha }}
+
+      - name: Build llama.cpp (llama-server)
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp
+          cmake -S llama.cpp -B llama.cpp/build -DCMAKE_BUILD_TYPE=Release
+          # Build just the server; fall back to everything if the target is
+          # ever renamed upstream (slower, but still lands in build/bin).
+          cmake --build llama.cpp/build --config Release -j "$(nproc)" --target llama-server \
+            || cmake --build llama.cpp/build --config Release -j "$(nproc)"
+          test -x llama.cpp/build/bin/llama-server
+          echo "$PWD/llama.cpp/build/bin" >> "$GITHUB_PATH"
+
+      - name: Download the model (SHA256-verified)
+        run: |
+          python - <<'PY'
+          from feagle import paths
+          from feagle.embeddings import download, presets
+
+          spec = presets.get_preset("embeddinggemma-2-q8")
+          print("model:", download.ensure_model(spec, paths.models_dir()))
+          PY
+
+      - name: End-to-end semantic search
+        env:
+          FEAGLE_RUN_MODEL_TESTS: "1"
+        run: pytest tests/test_integration_model.py -v

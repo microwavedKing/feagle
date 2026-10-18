@@ -55,6 +55,75 @@ def test_custom_opener_extensions_do_not_warn(tmp_path, caplog):
     assert not any("unknown config key" in rec.message for rec in caplog.records)
 
 
+def _warned(caplog, needle: str) -> bool:
+    return any(needle in rec.message for rec in caplog.records)
+
+
+def test_max_distance_from_another_model_warns(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[embeddings]\nmodel = "qwen3-embedding-0.6b-q8"\n\n[search]\nmax_distance = 0.5\n',
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING, logger="feagle.config"):
+        config.load_config(path)
+    assert _warned(caplog, "max_distance")
+
+
+def test_max_distance_equal_to_the_default_does_not_warn(tmp_path, caplog):
+    # 0.8 is the built-in default, so the preset's scale wins at query time.
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[embeddings]\nmodel = "qwen3-embedding-0.6b-q8"\n\n[search]\nmax_distance = 0.8\n',
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING, logger="feagle.config"):
+        config.load_config(path)
+    assert not _warned(caplog, "max_distance")
+
+
+def test_matching_max_distance_does_not_warn(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[embeddings]\nmodel = "qwen3-embedding-0.6b-q8"\n\n[search]\nmax_distance = 1.3\n',
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING, logger="feagle.config"):
+        config.load_config(path)
+    assert not _warned(caplog, "max_distance")
+
+
+def test_default_max_distance_with_a_preset_does_not_warn(tmp_path, caplog):
+    # The built-in default is replaced by the preset's own scale at query time,
+    # so it is not a mismatch.
+    path = tmp_path / "config.toml"
+    path.write_text('[embeddings]\nmodel = "qwen3-embedding-0.6b-q8"\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="feagle.config"):
+        config.load_config(path)
+    assert not _warned(caplog, "max_distance")
+
+
+def test_gemma_has_no_suggested_cutoff_so_any_value_is_fine(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[embeddings]\nmodel = "embeddinggemma-2-q8"\n\n[search]\nmax_distance = 0.5\n',
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING, logger="feagle.config"):
+        config.load_config(path)
+    assert not _warned(caplog, "max_distance")
+
+
+def test_mrl_dim_above_the_model_dimension_warns(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[embeddings]\nmodel = "embeddinggemma-2-q8"\nmrl_dim = 1024\n', encoding="utf-8"
+    )
+    with caplog.at_level(logging.WARNING, logger="feagle.config"):
+        config.load_config(path)
+    assert _warned(caplog, "mrl_dim")
+
+
 @pytest.mark.parametrize(
     ("snippet", "expected_key"),
     [

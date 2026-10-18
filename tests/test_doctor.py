@@ -53,6 +53,41 @@ def test_check_model_explicit_path_without_preset_ok(env, tmp_path):
     assert "custom.gguf" in check.message
 
 
+def test_check_model_hints_a_mismatched_cutoff(env, tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    from feagle.embeddings import presets
+
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"weights")
+    spec = replace(presets.get_preset("qwen3-embedding-0.6b-q8"), size=len(b"weights"))
+    monkeypatch.setattr(doctor, "resolve_model", lambda cfg: (model, spec))
+
+    cfg = config.default_config()
+    cfg["embeddings"]["model"] = spec.name
+    cfg["search"]["max_distance"] = 0.5  # explicit, and too tight for this model
+    check = doctor.check_model(cfg, verify_hash=False)
+    assert check.status == "ok"
+    assert "max_distance" in check.hint
+
+
+def test_check_model_no_hint_when_the_cutoff_fits(env, tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    from feagle.embeddings import presets
+
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"weights")
+    spec = replace(presets.get_preset("qwen3-embedding-0.6b-q8"), size=len(b"weights"))
+    monkeypatch.setattr(doctor, "resolve_model", lambda cfg: (model, spec))
+
+    cfg = config.default_config()  # keeps the built-in default: the preset's 1.3 wins
+    cfg["embeddings"]["model"] = spec.name
+    check = doctor.check_model(cfg, verify_hash=False)
+    assert check.status == "ok"
+    assert check.hint == ""
+
+
 def test_check_model_size_mismatch_fails(env):
     from feagle import paths
     from feagle.embeddings import presets
