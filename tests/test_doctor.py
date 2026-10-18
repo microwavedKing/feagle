@@ -104,6 +104,20 @@ def test_check_model_size_mismatch_fails(env):
     assert "size" in check.message
 
 
+def test_check_embed_batch_follows_the_model_and_the_batch(env):
+    cfg = config.default_config()
+    assert doctor.check_embed_batch(cfg).status == "info"  # 768-dim, batch 16
+
+    cfg["embeddings"]["model"] = "qwen3-embedding-0.6b-q8"  # 1024-dim
+    check = doctor.check_embed_batch(cfg)
+    assert check.status == "warn"
+    assert "embed_batch_size" in check.hint
+    assert "4" in check.hint
+
+    cfg["index"]["embed_batch_size"] = 4
+    assert doctor.check_embed_batch(cfg).status == "info"
+
+
 def test_check_embeddings_url_is_info_when_local(env):
     cfg = config.default_config()
     assert doctor.check_embeddings_url(cfg).status == "info"

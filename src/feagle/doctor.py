@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config, db, paths, units
+from .embeddings import presets
 from .embeddings.client import EmbeddingClient
 from .embeddings.service import resolve_model
 from .indexer.extract import pdftotext_available
@@ -288,6 +289,36 @@ def check_embeddings_url(cfg: dict[str, Any]) -> Check:
     )
 
 
+#: Models at least this wide are slow enough on CPU that a large embedding
+#: batch can outlive the client's timeout (measured with qwen3-embedding-0.6b).
+_LARGE_MODEL_DIM = 1024
+#: The batch size measured to finish long book chunks without a timeout.
+_SAFE_CPU_BATCH = 4
+
+
+def check_embed_batch(cfg: dict[str, Any]) -> Check:
+    """Warn when a wide model is paired with a large embedding batch.
+
+    ``pipeline`` sends one batch per request and the client gives the server 60
+    seconds. Measured with ``qwen3-embedding-0.6b-q8`` (1024 dimensions) on the
+    book corpus: a 16-chunk batch of long chunks exceeded that timeout, the
+    affected files kept ``embedded = 0`` (81% coverage), and ``backfill`` with
+    the same batch timed out again. A batch of 4 finished without one timeout.
+    The narrow default model is fast enough for the default batch.
+    """
+    spec = presets.spec_for(str(cfg["embeddings"]["model"]))
+    dim = spec.dim if spec is not None else 0
+    batch = int(cfg["index"]["embed_batch_size"])
+    if dim < _LARGE_MODEL_DIM or batch <= _SAFE_CPU_BATCH:
+        return Check("embed batch", "info", f"{batch} chunk(s) per request")
+    return Check(
+        "embed batch", "warn", f"{batch} chunks per request with a {dim}-dim model",
+        "on CPU a batch this large can exceed the 60 s client timeout on long "
+        f"documents and leave files with embedded=0; [index].embed_batch_size = "
+        f"{_SAFE_CPU_BATCH} completed the measured corpus",
+    )
+
+
 def check_server_health(cfg: dict[str, Any]) -> Check:
     url = _server_base_url(cfg)
     if url is None:
@@ -504,6 +535,7 @@ def run_checks(cfg: dict[str, Any], *, verify_model_hash: bool = True) -> list[C
         check_llama_server(),
         check_llama_devices(),
         check_model(cfg, verify_hash=verify_model_hash),
+        check_embed_batch(cfg),
         check_embeddings_url(cfg),
         check_server_health(cfg),
         check_embedding_dim(cfg),
