@@ -739,7 +739,8 @@ network calls except the one-shot model download that you start yourself
   so a process running as *you* can reach it. That is deliberate: a key would not
   stop such a process and would break the one-command setup. Nothing leaves the
   machine. `[embeddings].server_url` is yours to point at another host — do that
-  only if you accept that the text then goes to that server.
+  only if you accept that the text then goes to that server; feagle warns when the
+  config is loaded and `feagle doctor` reports the host and whether it is https.
 - **What this is not.** This protects against *other users* and against a *stray*
   client, not against a malicious process running as the same user: such a process
   can read the same files directly anyway. The isolation is file permissions, not
@@ -1505,7 +1506,8 @@ Qwen3 на CPU его стоит уменьшить.
   него может дотянуться процесс, запущенный от *вашего* имени. Так и задумано: ключ
   от такого процесса не спасёт, зато сломал бы настройку «одной командой». Наружу
   трафик не уходит. `[embeddings].server_url` вы вправе указать на другой хост — но
-  только если согласны, что тексты уйдут на тот сервер.
+  только если согласны, что тексты уйдут на тот сервер; feagle предупреждает об этом при
+  загрузке конфига, а `feagle doctor` показывает хост и то, https это или нет.
 - **Чего это не делает.** Защита — от *других пользователей* и от *случайного*
   клиента, а не от вредоносного процесса **под тем же** пользователем: такой процесс
   и так читает те же файлы напрямую. Изоляция — файловые права, а не песочница.

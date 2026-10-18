@@ -89,13 +89,13 @@
 | `fts.py` | BM25 | `search_fts()` (колонка `body`), `search_fts_stemmed()` (колонка `stem`), санитизация, `fallback_or` |
 | `vec.py` | KNN | `knn()`, `insert/delete/clear_vectors()` |
 | `hybrid.py` | RRF | `rrf()`, `search_text()` (точный+стем), `search_hybrid()` (+KNN), `max_distance`, `max_per_file` |
-| `queryd.py` | демон на сокете | NDJSON, `QueryEngine` (восстановление эмбеддера, `warmup()`, `launcher()`), `QuerydServer/Client` |
+| `queryd.py` | демон на сокете | NDJSON, `QueryEngine` (восстановление эмбеддера, `warmup()`, `launcher()`), `QuerydServer/Client`; валидация типов запроса и `preview` по allowlist из индекса (решения 45, 56) |
 
 ### Приложения, лаунчеры, открытие
 
 | Файл | Ответственность | Ключевое |
 |---|---|---|
-| `apps.py` | XDG `.desktop` | `discover_apps()`, `parse_desktop_file()` (в т.ч. `Icon=` → `App.icon`), `launch()` (gtk-launch→gio→Exec), `match_apps()`/`score_app()` (+ опциональный `bonus`) для лаунчера |
+| `apps.py` | XDG `.desktop` | `discover_apps()`, `parse_desktop_file()` (в т.ч. `Icon=` → `App.icon`), `launch()` (gtk-launch→gio→Exec, флаг терминала по карте, решение 57), `match_apps()`/`score_app()` (+ опциональный `bonus`) для лаунчера |
 | `frecency.py` | история запусков | `FrecencyStore` (JSON в `$XDG_STATE_HOME/feagle/`), скор = count × полураспад 30 дней, обрезка/лимит, атомарная запись |
 | `launchers.py` | dmenu-адаптеры | fuzzel/wofi/rofi/tofi/walker/stdout; формат `key\tdisplay`; fuzzel с `--with-nth/--accept-nth` |
 | `picker.py` | общий выбор | `app_items()`, `run_pick()` (приложения → запуск + запись в frecency, файлы → `open_result`) |
@@ -364,6 +364,9 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 53 | Размер БД считается **вместе с WAL** и после `wal_checkpoint(TRUNCATE)`; у `corpus_eval.py` появились `--max-distance` и `--db` (переиспользование БД со сверкой модели и размерности), у `ocr_eval.py` — `--osd-pdf/--osd-page` и три поворота | главный файл без WAL на маленькой базе недосчитывает почти всю свежую запись: отсюда и взялось «`mrl_dim = 256` даёт базу вдвое меньше» вместо реальных −28 % (8735 → 6274 Б/чанк). Без переиспользования БД свип порогов стоил бы полную индексацию корпуса на каждую ячейку вместо секунд | `bench._db_size/_db_size_after_checkpoint`, `bench/corpus_eval.py`, `bench/ocr_eval.py` |
 | 54 | Дефолты `max_distance = 0.8` и `mrl_dim = 768` **подтверждены замером** и оставлены | на книгах (852 чанка, 13 запросов) порог 0.6 вырождает гибрид в fts (MRR 0.635 / recall 0.692), а 0.8/1.0/0 дают 1.000/1.000 — 0.8 стоит ровно на границе полезного. `mrl_dim = 256` даёт тот же MRR при базе на 28 % меньше, но усечение необратимо (обратно только переиндексацией), и четверть выигрыша этого не стоит | `config.DEFAULTS`, README «Search quality»/«Vector size», `ARCHITECTURE.md` §9 |
 | 55 | Проход по **настроенным** корням сверяет индекс с конфигом: файл, которого сканер не видел и который лежит вне всех настроенных корней, удаляется. Ad-hoc `feagle index --root` и проход, прерванный паузой, не удаляют ничего; корень, которого нет на диске (несмонтированный диск), сохраняет свои файлы | убрать чувствительную папку из `[index].roots` было недостаточно: `_prune_missing` чистил только под активными корнями, и файлы оставались в БД и в поиске. Попутно нашлась потеря данных: пауза посреди прохода удаляла всё, что сканер не успел пройти | `pipeline._prune_missing/index_roots`, `indexer.daemon._apply_root_change` |
+| 56 | Протокол `queryd` проверяет типы полей (int ≥ 1, `texts`/`titles` — список строк, `mode` — из известных), а `preview` принимает путь и как `abspath`, и как `realpath` | строковый `limit` доходил до SQLite и падал `TypeError`, а `texts: "abc"` превращался в список символов; путь, проиндексированный через симлинкованный корень, не превьюился, потому что индексер хранит `realpath`, а `preview` сравнивал `abspath` (решение 45 обещало «как у индексатора» — теперь верно) | `queryd._as_int/_as_text_list/_as_mode/_indexed` |
+| 57 | Команда для `Terminal=true` собирается по карте «терминал → разделитель», сверенной с мануалами: `wezterm start --`, `konsole -e`, `gnome-terminal --`, `xterm`/`alacritty -e`, `kitty`/`foot` — позиционно | `-e` подставлялся только для `xterm`/`alacritty`, поэтому `konsole` и `gnome-terminal` открывались **без** команды | `apps._TERMINAL_COMMAND`, `apps.launch_command` |
+| 58 | Внешний `[embeddings].server_url` предупреждает при загрузке конфига и отдельной строкой в `doctor` (для `http://` — явно про открытый текст) | туда уходит текст каждого запроса и каждого документа при индексации; это осознанный выбор владельца, но молчать о нём нельзя | `config._warn_server_url`, `doctor.check_embeddings_url` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 
