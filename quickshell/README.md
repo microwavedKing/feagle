@@ -8,8 +8,10 @@ no separate "ask for a query" step.
 `FeagleSearch.qml` is the reusable part: a small backend that talks to the
 `feagle queryd` daemon. `FeagleLauncher.qml` is a ready-to-run demo built on it —
 **drop the backend into your own Quickshell launcher** to add feagle search to it.
-The demo also shows a preview pane for the selected file, a `Tab` filter
-(all / applications / files) and frecency ranking for applications.
+The demo adds a preview pane for the selected file (text with the matched lines
+highlighted, an image, or a **PDF page**), `Applications` / `Files` group labels,
+clickable `All` / `Apps` / `Files` filter chips, a scrollbar with an
+"*N* more below" hint, and frecency ranking for applications.
 
 Requires [Quickshell](https://quickshell.org) 0.3+ and a running `feagle queryd`
 (the `feagle-queryd.service` user unit, or `feagle queryd`).
@@ -38,8 +40,21 @@ qs ipc -p /path/to/feagle/quickshell call feagle-launcher search "rust ownership
 `search` opens the launcher with the query already typed — handy for a second
 hotkey ("search my files") next to the plain launcher one.
 
-Keys inside the popup: `↑`/`↓` (and `PgUp`/`PgDn`, `Home`/`End`) move, `Tab`
-cycles the result filter, `Enter` runs the selection, `Esc` closes.
+### Keys
+
+| Key | Does |
+|---|---|
+| `↑` `↓` (or `Ctrl+P` / `Ctrl+N`) | Move the selection |
+| `PgUp` / `PgDn`, `Home` / `End` | Jump |
+| `Tab` / `Shift+Tab` | Cycle the filter (all → applications → files) |
+| `Enter` | Run the selection (launch the app / open the file at its position) |
+| `Ctrl+Enter` | Open the **folder** that contains the file |
+| `Ctrl+C` | Copy the file's path (or the app's command) to the clipboard |
+| `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Clear the line / delete a word / select all |
+| `Esc` | Close |
+
+Mouse works too: click a row to open it, hover to select, wheel to scroll the
+list or the preview, click a filter chip in the header.
 
 `qs ipc` must know which instance to talk to. With `-p` (as above) pass the same
 path. If you installed the demo as a **named config**
@@ -211,6 +226,7 @@ ranking below). Send it after running `exec`:
 
 ```json
 {"op":"preview","path":"/home/me/notes.md","line":12}
+{"op":"preview","path":"/home/me/book.pdf","page":7,"chunk_id":442}
 ```
 
 ```json
@@ -222,6 +238,10 @@ ranking below). Send it after running `exec`:
   client loads the file itself; no bytes are sent) or `"meta"` (binary or
   unreadable: `size`, `mtime` and a `reason`).
 - `line` is optional; without it the first lines come back.
+- A PDF chunk has no line, so pass `page` (and `chunk_id` to anchor the window on
+  the text that matched). The page is rendered with `pdftotext` and cached per
+  (file, mtime, page); the reply also carries `page`. Without poppler installed
+  the reply degrades to `kind:"meta"` with a reason.
 - A missing file is `{"ok":false,"error":"…"}`.
 
 **Request tags.** Any request may carry a `"req"` string; the reply echoes it, so
@@ -256,7 +276,12 @@ used last year. Deleting the JSON file resets the history.
 ## Styling and icons
 
 `FeagleLauncher.qml` keeps all colors in a small theme block at the top (`base`,
-`border`, `text`, `muted`, `selected`, `hovered`) — edit them to match your shell.
+`border`, `text`, `muted`, `selected`, `hovered`, `accent`) — edit them to match
+your shell, or set `lightTheme: true` for a light palette. Quickshell exposes no
+system palette, so these explicit colors are the way to theme it. Layout is just
+as configurable: `cardWidth`, `cardPreviewWidth`, `cardHeight`,
+`cardPreviewHeight`, `previewWidth` and `topMarginRatio`.
+
 Icons come from the system icon theme via `Quickshell.iconPath(name, true)`:
 application icons use the `icon` field, file icons are mapped from the extension.
 When the theme has no such icon (the default `hicolor` theme lacks most mimetype
@@ -273,8 +298,12 @@ variable).
   `feagle doctor`.
 - **Only keyword results, never "semantic"** — `llama-server` or the model is
   missing; `feagle doctor` says what to install. Keyword search still works.
+- **A PDF shows "cannot read the page text"** — `pdftotext` (poppler) is missing;
+  previews of other files still work.
 - **Files open with the wrong command** — set `feagleCommand`, or launch the shell
   with `FEAGLE_BIN=/path/to/feagle`; a venv/pipx install is often not on the
   session `PATH`.
+- **`Ctrl+C` does not copy** — the clipboard needs a running clipboard manager
+  (Quickshell's `clipboardText` writes to the Wayland selection).
 - **`PanelWindow is not creatable` from `qmllint`** — harmless, it is a qmllint
   limitation with Quickshell's types.

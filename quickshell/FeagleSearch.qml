@@ -209,6 +209,11 @@ QtObject {
         var msg = { op: "preview", req: "preview", path: item.path };
         if (item.line !== null && item.line !== undefined)
             msg.line = item.line;
+        // A PDF chunk has no line: the page is rendered and anchored on it.
+        if (item.page !== null && item.page !== undefined)
+            msg.page = item.page;
+        if (item.chunk_id !== null && item.chunk_id !== undefined)
+            msg.chunk_id = item.chunk_id;
         send(msg);
     }
 

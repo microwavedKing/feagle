@@ -17,6 +17,31 @@ telemetry.
 > CI). `llama-server` is optional — without it `feagle` degrades gracefully to
 > full-text search.
 
+## Quick start
+
+```sh
+yay -S feagle      # or: uv tool install git+https://github.com/microwavedKing/feagle
+feagle setup       # folders, model, systemd units, first index
+feagle search "borscht recipe"    # or bind a hotkey, see Launcher and hotkeys
+```
+
+`feagle setup` is interactive and can be skipped with `--yes --root ~/Documents`.
+Everything stays local; `llama-server` is optional and `feagle doctor` says what
+to install for the semantic side.
+
+## Contents
+
+[Requirements](#requirements) · [Install](#install) · [Usage](#usage) ·
+[Semantic search](#semantic-search) · [Opening results](#opening-results) ·
+[Services](#services-systemd-user-units) · [Diagnostics](#diagnostics) ·
+[Russian text and OCR](#russian-text-and-ocr) ·
+[Launcher and hotkeys](#launcher-and-hotkeys) · [Search quality](#search-quality) ·
+[Measured performance](#measured-performance) ·
+[Known limitations](#known-limitations) · [License](#license)
+
+The same document in Russian follows the English part, starting at
+[Требования](#требования).
+
 ## Requirements
 
 - Python 3.12+
@@ -369,10 +394,28 @@ the **`feagle pick`** fallback for any dmenu-compatible launcher.
 first, then file hits — keyword results instantly, semantic ones a moment later.
 There is **no second window** (unlike piping a query into `feagle search --pick`,
 which opens one launcher to ask and another to show results). It talks to
-`queryd` directly, so semantic ranking follows what you type. It also shows a
-**preview pane** for the selected file (surrounding text, or the image itself),
-cycles a result filter with `Tab` (all / applications / files), and ranks
-**frequently launched** applications higher.
+`queryd` directly, so semantic ranking follows what you type.
+
+The window is built to be driven without a mouse:
+
+| Key | Does |
+|---|---|
+| `↑` `↓` (or `Ctrl+P` / `Ctrl+N`) | Move the selection |
+| `PgUp` / `PgDn`, `Home` / `End` | Jump |
+| `Tab` / `Shift+Tab` | Cycle the filter: all → applications → files |
+| `Enter` | Launch the app / open the file at its line, page or timestamp |
+| `Ctrl+Enter` | Open the **folder** that contains the file |
+| `Ctrl+C` | Copy the file's path (or the app's command) |
+| `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Clear the line / delete a word / select all |
+| `Esc` | Close |
+
+Results are grouped under `Applications` and `Files`, a thin scrollbar plus an
+"*N* more below" hint shows where you are, and clickable `All` / `Apps` / `Files`
+chips in the header do the same as `Tab`. The **preview pane** on the right shows
+the selected file: numbered context lines with every query word highlighted
+(wheel-scrollable, long lines wrap), the image itself, or the **page of a PDF**
+anchored on the text that matched. Applications are ranked by **frecency** —
+how often and how recently you launched them.
 
 ```sh
 quickshell -p /path/to/feagle/quickshell                    # start it with your session
@@ -680,6 +723,18 @@ their own license — see [NOTICE](NOTICE).
 
 Пошаговое руководство (установка, настройка, хоткеи, решение проблем) —
 [`docs/INSTALL.ru.md`](docs/INSTALL.ru.md).
+
+## Быстрый старт
+
+```sh
+yay -S feagle      # либо: uv tool install git+https://github.com/microwavedKing/feagle
+feagle setup       # папки, модель, systemd-юниты, первый индекс
+feagle search "рецепт борща"      # или повесьте хоткей — см. «Лаунчер и хоткеи»
+```
+
+`feagle setup` интерактивен; его можно пропустить: `--yes --root ~/Documents`.
+Всё остаётся локально; `llama-server` опционален, а `feagle doctor` скажет, что
+поставить для семантики.
 
 ## Требования
 
@@ -1025,9 +1080,28 @@ mp3 = "mpv --start={time} {path}"
 через мгновение. **Второго окна нет** (в отличие от `wofi | feagle search --pick`,
 который открывает одно окно, чтобы спросить запрос, и второе — чтобы показать
 результаты). Он общается с `queryd` напрямую, поэтому семантика следует за тем,
-что вы печатаете. Плюс **панель превью** для выбранного файла (окружающий текст
-или сама картинка), переключение фильтра результатов по `Tab`
-(все / приложения / файлы) и приоритет **часто запускаемых** приложений.
+что вы печатаете.
+
+Окно рассчитано на работу без мыши:
+
+| Клавиша | Действие |
+|---|---|
+| `↑` `↓` (или `Ctrl+P` / `Ctrl+N`) | Перемещение по списку |
+| `PgUp` / `PgDn`, `Home` / `End` | Прыжок |
+| `Tab` / `Shift+Tab` | Фильтр: все → приложения → файлы |
+| `Enter` | Запустить приложение / открыть файл на строке, странице или таймкоде |
+| `Ctrl+Enter` | Открыть **каталог**, в котором лежит файл |
+| `Ctrl+C` | Скопировать путь файла (или команду приложения) |
+| `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Очистить строку / удалить слово / выделить всё |
+| `Esc` | Закрыть |
+
+Результаты сгруппированы под заголовками `Applications` и `Files`, тонкая полоса
+прокрутки и подсказка «ещё *N* ниже» показывают, где вы находитесь, а кликабельные
+чипы `All` / `Apps` / `Files` в шапке делают то же, что `Tab`. **Панель превью**
+справа показывает выбранный файл: нумерованные строки контекста с подсветкой всех
+слов запроса (прокручивается колесом, длинные строки переносятся), саму картинку
+или **страницу PDF**, привязанную к совпавшему тексту. Приложения упорядочены по
+**frecency** — как часто и как давно вы их запускали.
 
 ```sh
 quickshell -p /path/to/feagle/quickshell                    # запустить вместе с сессией

@@ -6,6 +6,7 @@
 //
 //   Run the demo:      quickshell -p /path/to/feagle/quickshell
 //   Toggle from a key: qs ipc call feagle-launcher toggle
+//   With a query:      qs ipc call feagle-launcher search "rust ownership"
 //
 // To use feagle inside your own launcher, copy FeagleSearch.qml and read its
 // header — you do not need this file.
@@ -25,14 +26,27 @@ PanelWindow {
     property int currentIndex: 0
     /// True when the daemon has not answered for a moment after opening.
     property bool daemonSlow: false
+    /// A short message shown in the footer instead of the counters ("" = none).
+    property string flash: ""
 
     // ---- theme (edit these to match your shell) ----------------------------
-    readonly property color base: "#1e1e2e"
-    readonly property color border: "#313244"
-    readonly property color text: "#cdd6f4"
-    readonly property color muted: "#a6adc8"
-    readonly property color selected: "#313244"
-    readonly property color hovered: "#28283a"
+    /// Flip to true for a light shell; every colour below follows it.
+    property bool lightTheme: false
+    readonly property color base: lightTheme ? "#f7f7fb" : "#1e1e2e"
+    readonly property color border: lightTheme ? "#d9d9e3" : "#313244"
+    readonly property color text: lightTheme ? "#1f1f2e" : "#cdd6f4"
+    readonly property color muted: lightTheme ? "#6b6b7b" : "#a6adc8"
+    readonly property color selected: lightTheme ? "#e6e6f2" : "#313244"
+    readonly property color hovered: lightTheme ? "#eeeef7" : "#28283a"
+    readonly property color accent: lightTheme ? "#2b6cb0" : "#89b4fa"
+
+    // ---- layout (edit to taste) --------------------------------------------
+    property int cardWidth: 620
+    property int cardPreviewWidth: 940
+    property int cardHeight: 440
+    property int cardPreviewHeight: 480
+    property int previewWidth: 360
+    property real topMarginRatio: 0.15
 
     visible: open
     color: "transparent"
@@ -59,7 +73,16 @@ PanelWindow {
         onTriggered: root.daemonSlow = true
     }
 
+    Timer {
+        id: flashTimer
+        interval: 2500
+        repeat: false
+        onTriggered: root.flash = ""
+    }
+
     // ---- helpers -----------------------------------------------------------
+    readonly property string home: Quickshell.env("HOME") || ""
+
     function fileIcon(path) {
         const name = String(path).split("/").pop();
         const dot = name.lastIndexOf(".");
@@ -87,8 +110,16 @@ PanelWindow {
         return icons[ext] || "text-x-generic";
     }
 
+    /// `$HOME` is shown as `~` (display only; opening still uses the real path).
+    function shorten(value) {
+        const text = String(value || "");
+        if (root.home.length > 0 && text.startsWith(root.home))
+            return "~" + text.slice(root.home.length);
+        return text;
+    }
+
     function primaryLabel(item) {
-        return item.kind === "app" ? item.name : item.path;
+        return item.kind === "app" ? item.name : root.shorten(item.path);
     }
 
     // The themed icon path, or "" when the theme has no such icon (no warnings).
@@ -153,17 +184,82 @@ PanelWindow {
         return (unit === 0 ? value : value.toFixed(1)) + " " + units[unit];
     }
 
-    function baseName(path) {
-        return String(path || "").split("/").pop();
-    }
-
     function fmtDate(seconds) {
         if (!seconds)
             return "";
         return new Date(seconds * 1000).toLocaleString(Qt.locale(), Locale.ShortFormat);
     }
 
-    // The preview text as one row per line, so the match can be highlighted.
+    // ---- keyboard helpers --------------------------------------------------
+    function deleteWord() {
+        const cursor = field.cursorPosition;
+        if (cursor === 0)
+            return;
+        const before = field.text.slice(0, cursor).replace(/\s*\S+\s*$/, "");
+        field.text = before + field.text.slice(cursor);
+        field.cursorPosition = before.length;
+    }
+
+    function copyTarget() {
+        const item = feagle.visibleResults[root.currentIndex];
+        if (!item)
+            return;
+        const value = item.kind === "app" ? (item.exec || []).join(" ") : item.path;
+        if (!value)
+            return;
+        Quickshell.clipboardText = value;
+        root.showFlash("Copied " + root.shorten(value));
+    }
+
+    /// Open the folder that contains the selection (files only).
+    function openFolder() {
+        const item = feagle.visibleResults[root.currentIndex];
+        if (!item)
+            return;
+        if (item.kind !== "file") {
+            feagle.activateItem(item);
+            root.closeLauncher();
+            return;
+        }
+        const parts = String(item.path).split("/");
+        parts.pop();
+        Quickshell.execDetached(["xdg-open", parts.join("/") || "/"]);
+        root.closeLauncher();
+    }
+
+    function showFlash(message) {
+        root.flash = message;
+        flashTimer.restart();
+    }
+
+    // ---- preview helpers ---------------------------------------------------
+    /// Query words worth highlighting (letters/digits only, so no escaping traps).
+    function queryTerms() {
+        return String(feagle.query || "")
+            .split(/\s+/)
+            .filter((word) => /^[\w\u0400-\u04ff]{2,}$/u.test(word));
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    /// One preview line as markup, with every query word emphasised.
+    function markLine(raw) {
+        var out = escapeHtml(String(raw).replace(/[\u0001\u0002]/g, ""));
+        const terms = root.queryTerms();
+        for (var i = 0; i < terms.length; i += 1) {
+            const pattern = new RegExp("(" + terms[i] + ")", "gi");
+            out = out.replace(pattern, "\u0001$1\u0002");
+        }
+        return out.split("\u0001").join("<b><font color=\"" + root.accent + "\">")
+            .split("\u0002").join("</font></b>");
+    }
+
+    // The preview text as one row per line, so matches can be highlighted.
     function previewLines() {
         const preview = feagle.preview;
         if (!preview || preview.kind !== "text" || !preview.text)
@@ -173,7 +269,11 @@ PanelWindow {
         const rows = [];
         for (var i = 0; i < raw.length; i += 1) {
             const number = start + i;
-            rows.push({ number: number, text: raw[i], current: preview.line === number });
+            rows.push({
+                number: number,
+                markup: root.markLine(raw[i]),
+                current: preview.line === number
+            });
         }
         return rows;
     }
@@ -181,10 +281,6 @@ PanelWindow {
     // Ask for a preview of whatever is currently selected.
     function syncPreview() {
         feagle.requestPreview(feagle.visibleResults[root.currentIndex] || null);
-    }
-
-    function filterLabel() {
-        return feagle.filter === "all" ? "" : feagle.filter + " · ";
     }
 
     // The muted second line of the preview header.
@@ -200,7 +296,9 @@ PanelWindow {
             parts.push(fmtDate(info.mtime));
         if (info && info.kind === "text" && info.start_line) {
             const lines = String(info.text || "").split("\n").length;
-            parts.push("lines " + info.start_line + "–" + (info.start_line + lines - 1));
+            const where = info.page ? "page " + info.page + ", " : "";
+            parts.push(where + "lines " + info.start_line + "–"
+                + (info.start_line + lines - 1));
         }
         return parts.join(" · ");
     }
@@ -210,20 +308,21 @@ PanelWindow {
         if (!item)
             return "";
         if (item.kind === "app")
-            return item.exec || "";
+            return (item.exec || []).join(" ");
         if (feagle.previewError)
             return "No preview: " + feagle.previewError;
         if (info && info.kind === "meta")
-            return item.path + (info.reason ? "\n\n" + info.reason : "");
+            return root.shorten(item.path) + (info.reason ? "\n\n" + info.reason : "");
         if (!info)
             return "Loading preview…";
-        return item.path;
+        return root.shorten(item.path);
     }
 
     function openLauncher() {
         root.open = true;
         root.currentIndex = 0;
         root.daemonSlow = false;
+        root.flash = "";
         field.text = "";
         feagle.setFilter("all");
         feagle.reset();
@@ -260,11 +359,13 @@ PanelWindow {
     Rectangle {
         id: card
         readonly property bool previewPane: root.open && feagle.visibleResults.length > 0
-        width: Math.min(card.previewPane ? 940 : 620, parent.width - 48)
-        height: Math.min(card.previewPane ? 480 : 440, parent.height - 96)
+        width: Math.min(card.previewPane ? root.cardPreviewWidth : root.cardWidth,
+                        parent.width - 48)
+        height: Math.min(card.previewPane ? root.cardPreviewHeight : root.cardHeight,
+                         parent.height - 96)
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
-        anchors.topMargin: Math.max(40, parent.height * 0.15)
+        anchors.topMargin: Math.max(40, parent.height * root.topMarginRatio)
         radius: 14
         color: root.base
         border.width: 1
@@ -273,11 +374,13 @@ PanelWindow {
         scale: root.open ? 1 : 0.98
         Behavior on opacity { NumberAnimation { duration: 120 } }
         Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+        Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
         // Swallow clicks so they never reach the backdrop.
         MouseArea { anchors.fill: parent }
 
-        // Search field.
+        // ---- search row ----------------------------------------------------
         Item {
             id: searchRow
             anchors { top: parent.top; left: parent.left; right: parent.right }
@@ -328,9 +431,9 @@ PanelWindow {
                 id: field
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: searchGlyph.right
-                anchors.right: parent.right
+                anchors.right: chips.left
                 anchors.leftMargin: 12
-                anchors.rightMargin: 18
+                anchors.rightMargin: 14
                 color: root.text
                 font.pixelSize: 17
                 clip: true
@@ -340,9 +443,10 @@ PanelWindow {
                     feagle.setQuery(text);
                 }
                 Keys.onPressed: (event) => {
-                    if (event.key === Qt.Key_Down) {
+                    const ctrl = (event.modifiers & Qt.ControlModifier) !== 0;
+                    if (event.key === Qt.Key_Down || (ctrl && event.key === Qt.Key_N)) {
                         root.move(1); event.accepted = true;
-                    } else if (event.key === Qt.Key_Up) {
+                    } else if (event.key === Qt.Key_Up || (ctrl && event.key === Qt.Key_P)) {
                         root.move(-1); event.accepted = true;
                     } else if (event.key === Qt.Key_PageDown) {
                         root.move(6); event.accepted = true;
@@ -361,11 +465,70 @@ PanelWindow {
                         feagle.cycleFilter(true);
                         root.currentIndex = 0;
                         event.accepted = true;
+                    } else if (ctrl && event.key === Qt.Key_U) {
+                        field.text = ""; event.accepted = true;
+                    } else if (ctrl && event.key === Qt.Key_W) {
+                        root.deleteWord(); event.accepted = true;
+                    } else if (ctrl && event.key === Qt.Key_A) {
+                        field.selectAll(); event.accepted = true;
+                    } else if (ctrl && event.key === Qt.Key_C) {
+                        root.copyTarget(); event.accepted = true;
+                    } else if (ctrl && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+                        root.openFolder(); event.accepted = true;
                     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                         feagle.activate(root.currentIndex); root.closeLauncher();
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Escape) {
                         root.closeLauncher(); event.accepted = true;
+                    }
+                }
+            }
+
+            // Filter chips: click or Tab. The active one is highlighted.
+            Row {
+                id: chips
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: parent.right
+                anchors.rightMargin: 18
+                spacing: 4
+
+                Repeater {
+                    model: [
+                        { key: "all", label: "All" },
+                        { key: "apps", label: "Apps" },
+                        { key: "files", label: "Files" }
+                    ]
+
+                    delegate: Rectangle {
+                        id: chip
+                        required property var modelData
+                        readonly property bool active: feagle.filter === chip.modelData.key
+                        width: chipText.implicitWidth + 18
+                        height: 24
+                        radius: 12
+                        color: chip.active ? root.selected
+                                           : (chipHover.hovered ? root.hovered : "transparent")
+                        border.width: chip.active ? 0 : 1
+                        border.color: root.border
+
+                        Text {
+                            id: chipText
+                            anchors.centerIn: parent
+                            color: chip.active ? root.text : root.muted
+                            font.pixelSize: 11
+                            font.bold: chip.active
+                            text: chip.modelData.label
+                        }
+
+                        HoverHandler { id: chipHover }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                feagle.setFilter(chip.modelData.key);
+                                root.currentIndex = 0;
+                                field.forceActiveFocus();
+                            }
+                        }
                     }
                 }
             }
@@ -379,7 +542,7 @@ PanelWindow {
             visible: feagle.visibleResults.length > 0
         }
 
-        // Footer with the mode and key hints.
+        // ---- footer --------------------------------------------------------
         Item {
             id: footer
             anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
@@ -392,16 +555,19 @@ PanelWindow {
                 anchors.right: hints.left
                 anchors.rightMargin: 12
                 elide: Text.ElideRight
-                color: root.muted
+                color: root.flash.length > 0 ? root.accent : root.muted
                 font.pixelSize: 11
                 text: {
+                    if (root.flash.length > 0)
+                        return root.flash;
                     if (root.daemonSlow && !feagle.connected)
                         return "queryd is not reachable — start feagle-queryd";
                     if (feagle.error)
                         return "queryd: " + feagle.error;
                     const count = feagle.visibleResults.length;
                     const kind = feagle.mode === "hybrid" ? "semantic" : "keyword";
-                    return root.filterLabel() + count + (count === 1 ? " result" : " results")
+                    const filter = feagle.filter === "all" ? "" : feagle.filter + " · ";
+                    return filter + count + (count === 1 ? " result" : " results")
                         + " · " + kind + " · " + Math.round(feagle.tookMs) + " ms";
                 }
             }
@@ -413,7 +579,7 @@ PanelWindow {
                 anchors.rightMargin: 18
                 color: root.muted
                 font.pixelSize: 11
-                text: "tab filter  ↑↓  ↵ open  esc close"
+                text: "tab filter  ↑↓  ↵ open  ^c copy  ^⏎ folder  esc close"
             }
         }
 
@@ -447,95 +613,159 @@ PanelWindow {
                         positionViewAtIndex(currentIndex, ListView.Contain);
                     root.syncPreview();
                 }
-                delegate: Rectangle {
-                    id: row
+                delegate: Item {
+                    id: rowItem
                     required property var modelData
                     required property int index
+                    /// First row of its kind: the group label is drawn above it.
+                    readonly property bool groupStart: rowItem.index === 0
+                        || list.model[rowItem.index - 1].kind !== rowItem.modelData.kind
                     width: list.width
-                    height: 50
-                    color: index === root.currentIndex
-                        ? root.selected
-                        : (hover.hovered ? root.hovered : "transparent")
+                    height: (rowItem.groupStart ? 26 : 0) + 50
 
-                    // Real themed icon when the theme has one, else a drawn fallback.
-                    IconImage {
-                        id: rowIcon
-                        anchors.verticalCenter: parent.verticalCenter
+                    Text {
                         anchors.left: parent.left
                         anchors.leftMargin: 18
-                        implicitSize: 22
-                        visible: source !== ""
-                        source: root.iconSource(row.modelData)
+                        anchors.top: parent.top
+                        anchors.topMargin: 10
+                        visible: rowItem.groupStart
+                        color: root.muted
+                        font.pixelSize: 10
+                        font.capitalization: Font.AllUppercase
+                        font.letterSpacing: 0.7
+                        text: rowItem.modelData.kind === "app" ? "Applications" : "Files"
                     }
 
                     Rectangle {
-                        anchors.verticalCenter: parent.verticalCenter
+                        id: row
                         anchors.left: parent.left
-                        anchors.leftMargin: 18
-                        width: 22
-                        height: 22
-                        radius: 6
-                        color: root.hovered
-                        visible: rowIcon.source === ""
-                        Text {
-                            anchors.centerIn: parent
-                            color: root.muted
-                            font.pixelSize: 9
-                            font.bold: true
-                            text: root.fallbackLabel(row.modelData)
-                        }
-                    }
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        height: 50
+                        color: rowItem.index === root.currentIndex
+                            ? root.selected
+                            : (hover.hovered ? root.hovered : "transparent")
 
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: rowIcon.right
-                        anchors.leftMargin: 12
-                        anchors.right: rowPos.left
-                        anchors.rightMargin: 12
-                        spacing: 1
+                        // Real themed icon when the theme has one, else a drawn badge.
+                        IconImage {
+                            id: rowIcon
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 18
+                            implicitSize: 22
+                            visible: source !== ""
+                            source: root.iconSource(rowItem.modelData)
+                        }
+
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 18
+                            width: 22
+                            height: 22
+                            radius: 6
+                            color: root.hovered
+                            visible: rowIcon.source === ""
+                            Text {
+                                anchors.centerIn: parent
+                                color: root.muted
+                                font.pixelSize: 9
+                                font.bold: true
+                                text: root.fallbackLabel(rowItem.modelData)
+                            }
+                        }
+
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: rowIcon.right
+                            anchors.leftMargin: 12
+                            anchors.right: rowPos.left
+                            anchors.rightMargin: 12
+                            spacing: 1
+
+                            Text {
+                                width: parent.width
+                                color: root.text
+                                font.pixelSize: 14
+                                elide: Text.ElideMiddle
+                                text: root.primaryLabel(rowItem.modelData)
+                            }
+                            Text {
+                                width: parent.width
+                                color: root.muted
+                                font.pixelSize: 11
+                                elide: Text.ElideRight
+                                visible: text.length > 0
+                                text: root.secondaryLabel(rowItem.modelData)
+                            }
+                        }
 
                         Text {
-                            width: parent.width
-                            color: root.text
-                            font.pixelSize: 14
-                            elide: Text.ElideMiddle
-                            text: root.primaryLabel(row.modelData)
-                        }
-                        Text {
-                            width: parent.width
+                            id: rowPos
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.right: parent.right
+                            anchors.rightMargin: 18
                             color: root.muted
                             font.pixelSize: 11
-                            elide: Text.ElideRight
-                            visible: text.length > 0
-                            text: root.secondaryLabel(row.modelData)
+                            text: root.positionLabel(rowItem.modelData)
+                        }
+
+                        HoverHandler {
+                            id: hover
+                            onHoveredChanged: {
+                                if (hovered)
+                                    root.currentIndex = rowItem.index;
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                feagle.activateItem(rowItem.modelData);
+                                root.closeLauncher();
+                            }
                         }
                     }
+                }
+            }
 
-                    Text {
-                        id: rowPos
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.right: parent.right
-                        anchors.rightMargin: 18
-                        color: root.muted
-                        font.pixelSize: 11
-                        text: root.positionLabel(row.modelData)
-                    }
+            // Thin scroll indicator for the list.
+            Rectangle {
+                id: scrollbar
+                width: 3
+                radius: 1.5
+                color: root.muted
+                opacity: 0.35
+                x: list.width - 7
+                visible: list.contentHeight > list.height + 2
+                height: Math.max(28, body.height * body.height / list.contentHeight)
+                y: list.contentY / Math.max(1, list.contentHeight - list.height)
+                    * Math.max(0, body.height - scrollbar.height)
+            }
 
-                    HoverHandler {
-                        id: hover
-                        onHoveredChanged: {
-                            if (hovered)
-                                root.currentIndex = row.index;
-                        }
-                    }
+            // "N more below" pill, so a clipped list never looks finished.
+            Rectangle {
+                id: moreBelow
+                readonly property int hiddenBelow: list.contentHeight > list.contentY + list.height + 2
+                    ? Math.max(1, list.count - 1 - list.indexAt(list.width / 2, list.height - 2))
+                    : 0
+                visible: hiddenBelow > 0
+                anchors.horizontalCenter: list.horizontalCenter
+                anchors.bottom: list.bottom
+                anchors.bottomMargin: 8
+                width: moreText.implicitWidth + 18
+                height: 20
+                radius: 10
+                color: root.base
+                border.width: 1
+                border.color: root.border
 
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            feagle.activateItem(row.modelData);
-                            root.closeLauncher();
-                        }
-                    }
+                Text {
+                    id: moreText
+                    anchors.centerIn: parent
+                    color: root.muted
+                    font.pixelSize: 10
+                    text: "▾ " + moreBelow.hiddenBelow + " more"
                 }
             }
 
@@ -552,7 +782,7 @@ PanelWindow {
             // ---- preview pane ----------------------------------------------
             Item {
                 id: previewPane
-                width: 360
+                width: root.previewWidth
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 anchors.right: parent.right
@@ -621,49 +851,86 @@ PanelWindow {
                     text: root.previewMeta(previewPane.item, previewPane.info)
                 }
 
-                // Text preview: numbered context lines, the match highlighted.
-                Column {
-                    id: previewText
+                // Text preview: numbered lines, query words highlighted, wheel scroll.
+                Flickable {
+                    id: previewScroll
                     anchors.top: previewMeta.bottom
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.topMargin: 14
+                    anchors.bottom: parent.bottom
+                    anchors.topMargin: 12
                     anchors.leftMargin: 18
                     anchors.rightMargin: 18
-                    spacing: 0
+                    anchors.bottomMargin: 12
                     visible: previewPane.isText
+                    clip: true
+                    contentWidth: width
+                    contentHeight: previewText.height
+                    boundsBehavior: Flickable.StopAtBounds
+                    opacity: visible ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 140 } }
 
-                    Repeater {
-                        model: root.previewLines()
-                        delegate: Rectangle {
-                            id: lineRow
-                            required property var modelData
-                            width: previewText.width
-                            height: 17
-                            color: lineRow.modelData.current ? root.selected : "transparent"
+                    Column {
+                        id: previewText
+                        width: previewScroll.width
+                        spacing: 0
 
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 32
-                                horizontalAlignment: Text.AlignRight
-                                color: root.muted
-                                font.pixelSize: 10
-                                font.family: "monospace"
-                                text: lineRow.modelData.number
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: 40
-                                anchors.right: parent.right
-                                color: lineRow.modelData.current ? root.text : root.muted
-                                font.pixelSize: 11
-                                font.family: "monospace"
-                                elide: Text.ElideRight
-                                text: lineRow.modelData.text.length > 0 ? lineRow.modelData.text : " "
+                        Repeater {
+                            model: root.previewLines()
+                            delegate: Item {
+                                id: lineRow
+                                required property var modelData
+                                width: previewText.width
+                                height: Math.max(17, lineText.implicitHeight + 2)
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: lineRow.modelData.current ? root.selected : "transparent"
+                                }
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 1
+                                    width: 32
+                                    horizontalAlignment: Text.AlignRight
+                                    color: root.muted
+                                    font.pixelSize: 10
+                                    font.family: "monospace"
+                                    text: lineRow.modelData.number
+                                }
+                                Text {
+                                    id: lineText
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 40
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    color: lineRow.modelData.current ? root.text : root.muted
+                                    font.pixelSize: 11
+                                    font.family: "monospace"
+                                    textFormat: Text.StyledText
+                                    wrapMode: Text.Wrap
+                                    text: lineRow.modelData.markup.length > 0
+                                        ? lineRow.modelData.markup : " "
+                                }
                             }
                         }
                     }
+                }
+
+                // Thin scroll indicator for the preview.
+                Rectangle {
+                    width: 3
+                    radius: 1.5
+                    color: root.muted
+                    opacity: 0.3
+                    x: parent.width - 7
+                    visible: previewScroll.visible
+                        && previewScroll.contentHeight > previewScroll.height + 2
+                    height: Math.max(24, previewScroll.height * previewScroll.height
+                        / previewScroll.contentHeight)
+                    y: previewScroll.y + previewScroll.contentY
+                        / Math.max(1, previewScroll.contentHeight - previewScroll.height)
+                        * Math.max(0, previewScroll.height - height)
                 }
 
                 Image {
@@ -707,7 +974,8 @@ PanelWindow {
                     visible: !previewPane.isText && !previewPane.isImage
                     color: root.muted
                     font.pixelSize: 11
-                    font.family: previewPane.item && previewPane.item.kind === "app" ? "monospace" : ""
+                    font.family: previewPane.item && previewPane.item.kind === "app"
+                        ? "monospace" : ""
                     wrapMode: Text.WrapAnywhere
                     text: root.previewDetail(previewPane.item, previewPane.info)
                 }
