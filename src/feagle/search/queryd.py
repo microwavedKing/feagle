@@ -75,6 +75,60 @@ _CLIENT_TIMEOUT = 120.0
 _MAX_CONNECTIONS = 16
 
 
+#: Search modes the protocol accepts (the same three the CLI offers).
+_MODES = ("auto", "hybrid", "fts")
+
+
+class _BadRequest(Exception):
+    """A request field has the wrong type or an unusable value."""
+
+
+def _as_int(
+    value: Any, name: str, default: int | None = None, *, minimum: int | None = None
+) -> int | None:
+    """``value`` as an integer, rejecting anything that is not one.
+
+    A JSON client normally sends a number, but a buggy one (or a hand-written
+    ``nc``) can send ``"10"`` or ``"abc"``; ``"abc"`` used to reach SQLite and
+    raise a ``TypeError`` deep in a query builder. A numeric string is accepted,
+    everything else is answered with a clear error.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise _BadRequest(f"{name} must be an integer")
+    try:
+        number = int(value)
+    except ValueError:
+        raise _BadRequest(f"{name} must be an integer") from None
+    if minimum is not None and number < minimum:
+        raise _BadRequest(f"{name} must be >= {minimum}")
+    return number
+
+
+def _as_count(value: Any, name: str, default: int, *, minimum: int = 1) -> int:
+    """An integer with a fallback for a missing field (never ``None``)."""
+    number = _as_int(value, name, default, minimum=minimum)
+    return default if number is None else number
+
+
+def _as_text_list(value: Any, name: str) -> list[str]:
+    """``value`` as a list of strings; a bare string is *not* a list of chars."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise _BadRequest(f"{name} must be a list of strings")
+    return value
+
+
+def _as_mode(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or value not in _MODES:
+        raise _BadRequest("mode must be one of " + ", ".join(_MODES))
+    return value
+
+
 def _preview_window(total: int, line: int | None) -> tuple[int, int]:
     """The ``[start, end)`` line range to show for a preview."""
     if line is None or line < 1:
@@ -262,15 +316,21 @@ class QueryEngine:
         could open the 0600 socket could read *any* file of the user through it.
         The index is the natural allowlist: every path that can show up in a
         reply was put there by the indexer, and nothing else is reachable.
+
+        The indexer stores ``realpath`` (``pipeline._canonical``), so a path
+        reached through a symlinked root would not match its own row; both
+        spellings of ``target`` are accepted.
         """
         try:
             conn = self._connect()
         except (FileNotFoundError, sqlite3.Error) as exc:
             log.warning("preview: cannot consult the index: %s", exc)
             return False
+        wanted = (str(target), os.path.realpath(target))
+        placeholders = ", ".join("?" * len(wanted))
         try:
             row = conn.execute(
-                "SELECT 1 FROM files WHERE path = ? LIMIT 1", (str(target),)
+                f"SELECT 1 FROM files WHERE path IN ({placeholders}) LIMIT 1", wanted
             ).fetchone()
         except sqlite3.Error as exc:
             log.warning("preview: index lookup failed: %s", exc)
@@ -298,8 +358,8 @@ class QueryEngine:
         own text when ``chunk_id`` is given.
 
         Only files present in the index are served (see ``_indexed``); the path
-        is normalised the same way the indexer stores it (``abspath`` +
-        ``expanduser``, no symlink resolution).
+        is accepted both as given (``abspath`` + ``expanduser``) and resolved
+        (``realpath``), which is the form the indexer stores.
         """
         from ..indexer import extract
 
@@ -561,37 +621,35 @@ class QueryEngine:
             if op == "launcher":
                 return self.launcher(
                     str(request.get("query", "")),
-                    limit=request.get("limit"),
-                    mode=request.get("mode"),
-                    apps_limit=int(request.get("apps_limit", 8)),
+                    limit=_as_int(request.get("limit"), "limit", minimum=1),
+                    mode=_as_mode(request.get("mode")),
+                    apps_limit=_as_count(request.get("apps_limit"), "apps_limit", 8),
                 )
             if op == "used":
                 return self.used(str(request.get("key", "")))
             if op == "preview":
-                line = request.get("line")
-                page = request.get("page")
-                chunk_id = request.get("chunk_id")
                 return self.preview(
                     str(request.get("path", "")),
-                    line=int(line) if line is not None else None,
-                    page=int(page) if page is not None else None,
-                    chunk_id=int(chunk_id) if chunk_id is not None else None,
+                    line=_as_int(request.get("line"), "line", minimum=1),
+                    page=_as_int(request.get("page"), "page", minimum=1),
+                    chunk_id=_as_int(request.get("chunk_id"), "chunk_id", minimum=1),
                 )
             if op == "search":
                 return self.search(
                     str(request.get("query", "")),
-                    limit=request.get("limit"),
-                    mode=request.get("mode"),
+                    limit=_as_int(request.get("limit"), "limit", minimum=1),
+                    mode=_as_mode(request.get("mode")),
                 )
             if op == "embed":
-                texts = request.get("texts") or []
                 return self.embed(
-                    list(texts),
-                    str(request.get("kind", "doc")),
-                    titles=request.get("titles"),
+                    _as_text_list(request.get("texts"), "texts"),
+                    str(request.get("kind") or "doc"),
+                    titles=_as_text_list(request.get("titles"), "titles") or None,
                 )
             if op == "status":
                 return self.status()
+        except _BadRequest as exc:
+            return {"ok": False, "error": str(exc)}
         except Exception as exc:
             log.exception("queryd operation failed: %s", op)
             return {"ok": False, "error": str(exc)}
