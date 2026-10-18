@@ -33,6 +33,19 @@ _FIELD_CODES = {"%f", "%F", "%u", "%U", "%d", "%D", "%n", "%N", "%i", "%c", "%k"
 #: Terminals tried (in order) when an entry asks for ``Terminal=true``.
 _TERMINALS = ("kitty", "alacritty", "wezterm", "foot", "gnome-terminal", "konsole", "xterm")
 
+#: How a terminal is told to run a command: the arguments inserted between the
+#: terminal and the ``Exec`` argv. Checked against each terminal's manual
+#: (``wezterm start -- vim``, ``konsole -e htop``, ``gnome-terminal -- htop``,
+#: ``xterm -e``, ``alacritty -e``). kitty and foot take the command positionally,
+#: which is also the fallback for a terminal we do not know.
+_TERMINAL_COMMAND = {
+    "xterm": ["-e"],
+    "alacritty": ["-e"],
+    "konsole": ["-e"],
+    "gnome-terminal": ["--"],
+    "wezterm": ["start", "--"],
+}
+
 
 @dataclass(frozen=True)
 class App:
@@ -148,7 +161,8 @@ def launch_command(app: App) -> list[str]:
         terminal = default_terminal()
         if terminal is None:
             return argv
-        return [terminal, "-e", *argv] if terminal in {"xterm", "alacritty"} else [terminal, *argv]
+        separator = _TERMINAL_COMMAND.get(Path(terminal).name, [])
+        return [terminal, *separator, *argv]
     return argv
 
 
