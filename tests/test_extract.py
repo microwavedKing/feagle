@@ -19,6 +19,38 @@ FIXTURES = Path(__file__).parent / "fixtures"
 PDF_FIXTURE = FIXTURES / "two_pages.pdf"
 
 
+def test_extracts_only_the_visible_text_of_html(tmp_path):
+    path = tmp_path / "page.html"
+    path.write_text(
+        "<html><head><title>Hidden</title><style>b{color:red}</style></head>"
+        "<body><h1>Feagle</h1><p>local &amp; offline search</p>"
+        "<script>var x = 1;</script></body></html>",
+        encoding="utf-8",
+    )
+    result = extract(path)
+    assert result.kind == "text"
+    text = result.pages[0]
+    assert "Feagle" in text
+    assert "local & offline search" in text  # entity decoded
+    assert "<h1>" not in text and "<p>" not in text
+    assert "var x" not in text  # script body dropped
+    assert "Hidden" not in text  # <head> dropped
+
+
+def test_extracts_xml_without_the_tags(tmp_path):
+    path = tmp_path / "feed.xml"
+    path.write_text("<rss><item><title>Hello world</title></item></rss>", encoding="utf-8")
+    text = extract(path).pages[0]
+    assert "Hello world" in text
+    assert "<title>" not in text
+
+
+def test_extracts_text_from_broken_markup(tmp_path):
+    path = tmp_path / "broken.html"
+    path.write_text("<html><body>some text <b>bold</body>", encoding="utf-8")
+    assert "some text" in extract(path).pages[0]
+
+
 def test_extracts_utf8_text(tmp_path):
     path = tmp_path / "a.txt"
     path.write_text("Привет, world!\nвторая строка", encoding="utf-8")

@@ -680,13 +680,20 @@ corpus (**3.9× faster**, `stem_text` 7.8×, only 285 real stemmer calls). Searc
   two pages at once for a measured 1.78× speedup.
 - Image search is opt-in and CPU-heavy: it needs the `mmproj` file and `ffmpeg`,
   images are downscaled before embedding, and the embeddings server then uses
-  about 1 GiB of RAM.
+  about 1 GiB of RAM. Measured on an 8-core CPU-only machine: ~11 s for a
+  640x480 image and over a minute at 1024px, so a photo library takes a long
+  time to index. It is worth it mainly with a GPU backend, or with a small
+  `image_max_dim`.
 - Video search is the heaviest media: it embeds one frame per
   `video_frame_interval` seconds (up to `video_max_frames`), so a long clip takes
   a while to index on CPU.
 - Audio is transcribed with `whisper.cpp` and indexed as text; a base model runs
   several times faster than real time on the reference laptop, but long files
   still take a while. Audio does not need the `mmproj` file.
+- Office documents (`.docx`, `.odt`, `.rtf`, `.epub`) are not extracted: the
+  allowlist covers plain text, source code, PDF, and HTML/XML (markup stripped).
+  A `.docx` can be added through the `[openers]` table for opening, but its text
+  is not indexed.
 - `sqlite-vec` is pre-1.0; deletions from `vec0` do not shrink the file until
   `feagle index --rebuild`.
 - Upgrading from an older index version migrates the schema automatically on the
@@ -1366,13 +1373,18 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
   (значение по умолчанию) распознаёт две страницы разом: замерено 1.78×.
 - Поиск картинок включается вручную и тяжёл на CPU: нужны файл `mmproj` и `ffmpeg`,
   картинки уменьшаются перед эмбеддингом, а сервер эмбеддингов начинает занимать
-  около 1 ГиБ RAM.
+  около 1 ГиБ RAM. Замер на 8-ядерной машине без GPU: ~11 с на картинку 640x480 и
+  больше минуты на 1024 px, поэтому фототека индексируется долго. Оправдан в
+  основном с GPU-бэкендом или при маленьком `image_max_dim`.
 - Поиск видео — самый тяжёлый: эмбеддится один кадр каждые `video_frame_interval`
   секунд (не более `video_max_frames`), поэтому длинный клип на CPU индексируется
   долго.
 - Аудио транскрибируется через `whisper.cpp` и индексируется как текст; базовая
   модель на эталонном ноутбуке быстрее реального времени в несколько раз, но
   длинные файлы всё равно обрабатываются не мгновенно. `mmproj` для аудио не нужен.
+- Офисные документы (`.docx`, `.odt`, `.rtf`, `.epub`) не извлекаются: список
+  покрывает обычный текст, исходники, PDF и HTML/XML (у них разметка снимается).
+  `.docx` можно открыть через таблицу `[openers]`, но его текст не индексируется.
 - `sqlite-vec` — pre-1.0: удаления из `vec0` не уменьшают файл без
   `feagle index --rebuild`, а новая векторная таблица резервирует группу на 1024
   строки.

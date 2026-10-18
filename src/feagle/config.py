@@ -40,6 +40,7 @@ DEFAULTS: dict[str, Any] = {
             ".txt", ".md", ".rst", ".tex", ".pdf", ".py", ".c", ".h", ".cpp", ".hpp",
             ".rs", ".go", ".js", ".ts", ".java", ".sh", ".lua", ".toml", ".yaml",
             ".yml", ".json", ".cfg", ".ini", ".csv", ".org",
+            ".html", ".htm", ".xml", ".log",
         ],
         "exclude_dirs": [
             ".git", "node_modules", ".cache", "__pycache__", ".venv", "venv",
@@ -367,7 +368,8 @@ roots = []
 # File extensions treated as text/code (allowlist).
 include_ext = [".txt",".md",".rst",".tex",".pdf",".py",".c",".h",".cpp",".hpp",
                ".rs",".go",".js",".ts",".java",".sh",".lua",".toml",".yaml",
-               ".yml",".json",".cfg",".ini",".csv",".org"]
+               ".yml",".json",".cfg",".ini",".csv",".org",
+               ".html",".htm",".xml",".log"]
 # Directory names never descended into.
 exclude_dirs = [".git","node_modules",".cache","__pycache__",".venv","venv",
                 "dist","build","target",".mypy_cache",".pytest_cache"]
