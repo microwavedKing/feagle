@@ -36,6 +36,14 @@ it is running, and opens the database directly otherwise.
 .SS index [\fIOPTIONS\fR]
 Scan the configured roots and bring the index up to date. Unchanged files are
 not re-read: size and modification time are compared first, then a hash.
+A pass over the configured roots also reconciles the index with the
+configuration: a file that is gone, or that lies outside every configured root
+(its directory was dropped from
+.BR [index].roots ),
+is removed. A pass with
+.B \-\-root
+only touches what it scans, and a pass paused by the load or battery check
+removes nothing.
 .TP
 .BR \-\-root " " PATH
 Index this directory instead of the configured roots. Repeatable.

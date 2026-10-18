@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -27,8 +28,6 @@ class FakeEmbedder:
 
 
 def embedded_of(conn, path):
-    import os
-
     return conn.execute(
         "SELECT embedded FROM files WHERE path = ?", (os.path.realpath(path),)
     ).fetchone()["embedded"]
@@ -522,6 +521,27 @@ def test_roots_change_restarts_the_watcher(root, conn, tmp_path):
     daemon._restart_watcher(events)
     assert daemon._watcher_generation == first + 1
     assert daemon.watcher.roots == [other]
+
+
+def test_roots_change_reconciles_the_index(root, conn, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "secret.txt").write_text("secret", encoding="utf-8")
+
+    two_roots = make_cfg(root)
+    two_roots["index"]["roots"] = [str(root), str(other)]
+    pipeline.index_roots(conn, two_roots)
+    assert conn.execute("SELECT COUNT(*) AS n FROM files").fetchone()["n"] == 2
+
+    daemon = IndexerDaemon(
+        two_roots, conn=conn, embedder_provider=lambda: None, pause_check=lambda: None,
+        watch=False, reload_config=lambda: make_cfg(root),
+    )
+    assert daemon._reload_config() is True
+    daemon._apply_root_change(None)  # what the loop does on a root change
+
+    paths = [row["path"] for row in conn.execute("SELECT path FROM files")]
+    assert paths == [os.path.realpath(root / "a.txt")]
 
 
 def test_run_applies_reloaded_settings_without_a_restart(root, conn):

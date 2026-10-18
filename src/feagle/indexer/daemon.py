@@ -236,8 +236,9 @@ class IndexerDaemon:
             # Give an owned llama-server a chance to unload while we wait, so it
             # does not sit in RAM (~460 MiB) forever when the indexer is the owner.
             self._run_idle_hook()
-            if self._reload_config() and events is not None:
-                self._restart_watcher(events)
+            if self._reload_config():
+                next_rescan = self._next_rescan(self._apply_root_change(events))
+                continue
             now = self.clock()
             if next_rescan is not None and now >= next_rescan:
                 log.info("periodic rescan")
@@ -263,6 +264,20 @@ class IndexerDaemon:
                 continue  # nothing in the batch lives under a configured root
             log.info("change in %d path(s); reindexing them", len(changed))
             self.index_changes(changed)
+
+    def _apply_root_change(
+        self, events: queue.Queue[set[Path] | None] | None
+    ) -> pipeline.IndexStats:
+        """React to a changed root list: restart the watcher and reconcile.
+
+        Dropping a directory from ``[index].roots`` must also drop its files
+        from the index; waiting for the next scheduled rescan could take hours,
+        so a full pass over the new roots runs right away.
+        """
+        if events is not None:
+            self._restart_watcher(events)
+        log.info("index roots changed; reconciling the index")
+        return self.run_once()
 
     def _reload_config(self) -> bool:
         """Re-read the config; returns True when the watched roots changed.
