@@ -41,6 +41,16 @@ def test_generate_corpus_layout(tmp_path):
     assert {item["lang"] for item in manifest["files"]} == {"en", "ru"}
 
 
+def test_generate_corpus_clears_a_previous_stale_corpus(tmp_path):
+    """The default corpus dir is shared: leftovers must not become noise."""
+    bench.generate_corpus(tmp_path, files=8, seed=1)
+    assert len(list((tmp_path / "docs").iterdir())) == 8
+
+    manifest = bench.generate_corpus(tmp_path, files=3, seed=1)
+    names = sorted(p.name for p in (tmp_path / "docs").iterdir())
+    assert names == sorted(item["name"] for item in manifest["files"])
+
+
 def test_generated_documents_are_not_empty(tmp_path):
     bench.generate_corpus(tmp_path, files=3, seed=2)
     for path in (tmp_path / "docs").iterdir():

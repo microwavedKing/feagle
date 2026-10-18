@@ -7,6 +7,7 @@ and by the thin scripts in ``bench/``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import random
 import shutil
@@ -135,9 +136,16 @@ def _paragraph(rng: random.Random, words: list[str], lang: str, sentences: int) 
 
 
 def generate_corpus(out_dir: Path, files: int, seed: int = 1) -> dict[str, Any]:
-    """Write ``files`` synthetic documents into ``out_dir/docs`` + queries.json."""
+    """Write ``files`` synthetic documents into ``out_dir/docs`` + queries.json.
+
+    A previous run's documents are removed first: the default corpus directory is
+    shared, and a leftover corpus with more files would silently become noise for
+    the queries of this run (a 60-document report used to index 1200 documents).
+    """
     rng = random.Random(seed)
     docs_dir = out_dir / "docs"
+    if docs_dir.is_dir():
+        shutil.rmtree(docs_dir)
     docs_dir.mkdir(parents=True, exist_ok=True)
 
     manifest: dict[str, Any] = {"seed": seed, "files": [], "queries": []}
@@ -258,6 +266,24 @@ def measure_queries(
     }
 
 
+def _db_size(db_path: Path) -> int:
+    """Index size on disk, including a write-ahead log that has not been merged.
+
+    The main file alone undercounts a freshly indexed database (part of it can
+    still live in `-wal`), which once made `mrl_dim = 256` look like "half the
+    size" instead of the real quarter off.
+    """
+    parts = (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm"))
+    return sum(part.stat().st_size for part in parts if part.exists())
+
+
+def _db_size_after_checkpoint(conn: Any, db_path: Path) -> int:
+    """Merge the write-ahead log, then return the whole size on disk."""
+    with contextlib.suppress(Exception):
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    return _db_size(db_path)
+
+
 def evaluate_quality(
     conn: Any,
     embedder: Any | None,
@@ -356,7 +382,7 @@ def quality_report(
         try:
             pipeline.index_roots(conn, cfg, roots=[str(corpus_dir / "docs")], embedder=embedder)
             chunks = conn.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"]
-            db_size = db_path.stat().st_size
+            db_size = _db_size_after_checkpoint(conn, db_path)
             quality = evaluate_quality(conn, embedder, manifest["queries"], cfg=cfg, limit=limit)
         finally:
             conn.close()
@@ -426,7 +452,7 @@ def run_bench(
         index_s = time.perf_counter() - started
         peak_after = _self_peak_rss()
 
-        db_size = db_path.stat().st_size
+        db_size = _db_size_after_checkpoint(conn, db_path)
         chunk_count = stats.chunks
         result: dict[str, Any] = {
             "corpus": str(corpus_dir),

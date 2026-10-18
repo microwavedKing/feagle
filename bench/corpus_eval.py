@@ -135,8 +135,8 @@ def main(argv: list[str] | None = None) -> int:
                 index_s = time.perf_counter() - started
             chunks = conn.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"]
             files = len(conn.execute("SELECT id FROM files").fetchall())
-            db_size = db_path.stat().st_size
             quality = bench.evaluate_quality(conn, embedder, queries, cfg=cfg, limit=args.limit)
+            db_size = bench._db_size_after_checkpoint(conn, db_path)
         finally:
             conn.close()
     finally:
