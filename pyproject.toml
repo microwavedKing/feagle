@@ -4,7 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "feagle"
-version = "0.2.1"
+# Single source of truth: src/feagle/__init__.py (see [tool.hatch.version]).
+dynamic = ["version"]
 description = "Local semantic file search for Arch Linux + Wayland: full-text and meaning-based lookup, fully offline."
 readme = "README.md"
 license = "MIT"
@@ -39,6 +40,9 @@ feagle = "feagle.cli.__main__:main"
 [project.urls]
 Homepage = "https://github.com/microwavedKing/feagle"
 Repository = "https://github.com/microwavedKing/feagle"
+
+[tool.hatch.version]
+path = "src/feagle/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/feagle"]
@@ -85,7 +89,7 @@ exclude_lines = [
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src/feagle"]
+files = ["src/feagle", "scripts"]
 warn_unused_configs = true
 warn_redundant_casts = true
 warn_unused_ignores = true
