@@ -137,11 +137,60 @@ def test_backfill_embeds_existing_files(conn, root):
     assert all(row["embedded"] == 1 for row in conn.execute("SELECT embedded FROM files"))
 
 
-def test_backfill_stops_when_server_dies(conn, root):
-    (root / "a.txt").write_text("content", encoding="utf-8")
+def test_backfill_continues_past_a_file_that_cannot_be_embedded(conn, root):
+    """One bad file must not cost the whole queue its vectors."""
+    (root / "bad.txt").write_text("alpha MARKER beta", encoding="utf-8")
+    (root / "good.txt").write_text("plain content", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root))  # no embedder -> embedded=0
+
+    done = pipeline.backfill(conn, make_cfg(root), MarkerEmbedder())
+    assert done == 1
+    assert embedded_of(conn, root / "good.txt") == 1
+    assert embedded_of(conn, root / "bad.txt") == 0  # stays for a later pass
+    assert vec.vec_count(conn) == 1
+
+
+class CountingBrokenEmbedder(BrokenEmbedder):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def embed_documents(self, items):
+        self.calls += 1
+        return super().embed_documents(items)
+
+
+def test_backfill_gives_up_when_the_server_stays_down(conn, root):
+    for i in range(5):
+        (root / f"f{i}.txt").write_text(f"content {i}", encoding="utf-8")
     pipeline.index_roots(conn, make_cfg(root))
-    assert pipeline.backfill(conn, make_cfg(root), BrokenEmbedder()) == 0
-    assert embedded_of(conn, root / "a.txt") == 0
+    embedder = CountingBrokenEmbedder()
+
+    assert pipeline.backfill(conn, make_cfg(root), embedder) == 0
+    # a timeout per file would be pointless: it stops after a few failures
+    assert embedder.calls == 3
+    assert embedded_of(conn, root / "f0.txt") == 0
+
+
+def test_backfill_retries_a_flaky_server(conn, root):
+    """A single failure must not end the pass (the counter resets on success)."""
+    for i in range(4):
+        (root / f"f{i}.txt").write_text(f"content {i}", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root))
+
+    class FlakyOnce(FakeEmbedder):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def embed_documents(self, items):
+            self.calls += 1
+            if self.calls in (1, 3):
+                raise ServerUnavailable("boom")
+            return super().embed_documents(items)
+
+    done = pipeline.backfill(conn, make_cfg(root), FlakyOnce())
+    assert done == 2  # f1 and f2 succeeded, f0 and f3 still wait
 
 
 def test_rebuild_drops_and_recreates_vectors(conn, root):
