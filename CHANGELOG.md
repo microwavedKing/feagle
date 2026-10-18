@@ -37,9 +37,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Development status is beta (`pyproject.toml`, the README status line).
 - `scripts/release.py bump` also updates the version and the date in the man
   page header.
+- A pass paused by the load or battery check is retried after five minutes even
+  when periodic rescans are disabled (`rescan_interval_min = 0`); before, such a
+  machine waited for the rescan interval (six hours by default) or for a file
+  change.
 
 ### Fixed
 
+- An HTML/XML file that cannot be parsed is now reported as a file error instead
+  of being indexed as raw markup: tags would dilute its embedding and nothing
+  would tell you that the page text was never extracted. The rest of the run is
+  unaffected, as with any other extraction failure.
+- An opener template may contain literal braces (`sh -c 'awk {print $1}'`) and a
+  path may contain `{`/`}`; both used to go through `str.format` and could raise.
+  Only `{path}`, `{line}`, `{page}` and `{time}` are substituted now (format specs
+  still work), anything else passes through literally.
 - Backfill no longer gives up on the whole queue because of one file: a file whose
   content cannot be embedded keeps `embedded=0` for a later pass, and the walk
   goes on. Only a *run* of failures ends the pass early — three in a row — which
@@ -412,6 +424,20 @@ on Wayland.
 
 - Статус разработки — бета (`pyproject.toml`, строка статуса в README).
 - `scripts/release.py bump` обновляет также версию и дату в заголовке man-страницы.
+- Проход, приостановленный по нагрузке или батарее, повторяется через пять минут
+  даже при выключенном периодическом rescan (`rescan_interval_min = 0`); раньше
+  такая машина ждала интервала rescan (по умолчанию шесть часов) или изменения файла.
+
+### Исправлено
+
+- HTML/XML, который не удалось разобрать, теперь помечается ошибкой файла, а не
+  индексируется сырой разметкой: теги разбавляли бы его эмбеддинг, и никто бы не
+  узнал, что текст страницы не извлечён. Остальной проход это не ломает — как и
+  любая другая ошибка извлечения.
+- В шаблоне открывалки теперь могут быть литеральные фигурные скобки
+  (`sh -c 'awk {print $1}'`), а в пути — `{`/`}`; раньше и то и другое шло через
+  `str.format` и могло упасть. Подставляются только `{path}`, `{line}`, `{page}` и
+  `{time}` (формат-спецификации по-прежнему работают), остальное остаётся как есть.
 
 ### Исправлено
 
