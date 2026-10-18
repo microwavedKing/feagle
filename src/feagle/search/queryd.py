@@ -18,7 +18,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .. import __version__, db, frecency, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
@@ -367,12 +367,8 @@ class QueryEngine:
         conn = self._connect()
         try:
             embedder = self._ensure_embedder()
-            use_hybrid = (
-                mode in ("auto", "hybrid")
-                and embedder is not None
-                and db.has_vec_table(conn)
-            )
-            if use_hybrid:
+            vector: list[float] | None = None
+            if mode in ("auto", "hybrid") and embedder is not None and db.has_vec_table(conn):
                 try:
                     vector = embedder.embed_queries([query])[0]
                 except (ServerUnavailable, EmbeddingError) as exc:
@@ -385,10 +381,8 @@ class QueryEngine:
                         except (ServerUnavailable, EmbeddingError) as retry_exc:
                             log.warning("still unavailable (%s); text search only", retry_exc)
                             self._drop_embedder()
-                            embedder = None
-                    if embedder is None:
-                        use_hybrid = False
-            if use_hybrid:
+                            vector = None
+            if vector is not None:
                 hits = hybrid.search_hybrid(
                     conn,
                     query,
@@ -543,7 +537,7 @@ class _Handler(socketserver.StreamRequestHandler):
             except json.JSONDecodeError as exc:
                 response: dict[str, Any] = {"ok": False, "error": f"invalid JSON: {exc}"}
             else:
-                response = self.server.engine.dispatch(request)
+                response = cast("_UnixServer", self.server).engine.dispatch(request)
                 # Echo the client's optional tag so it can route the reply.
                 tag = request.get("req")
                 if isinstance(tag, str):
@@ -616,13 +610,14 @@ class QuerydServer:
             self.shutdown()
 
     def _start_idle_loop(self) -> None:
-        if self.idle_hook is None:
+        hook = self.idle_hook
+        if hook is None:
             return
 
         def loop() -> None:
             while not self._stop_idle.wait(30.0):
                 with contextlib.suppress(Exception):
-                    self.idle_hook()
+                    hook()
 
         threading.Thread(target=loop, name="feagle-idle", daemon=True).start()
 

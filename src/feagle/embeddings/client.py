@@ -83,10 +83,10 @@ class EmbeddingClient:
         self.batch_size = max(1, batch_size)
         self.task = task
         self.prompts = prompts.get_family(family)
-        kwargs: dict[str, object] = {"timeout": timeout}
         if transport is not None:
-            kwargs["transport"] = transport
-        self._client = httpx.Client(**kwargs)
+            self._client = httpx.Client(timeout=timeout, transport=transport)
+        else:
+            self._client = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
         self._client.close()

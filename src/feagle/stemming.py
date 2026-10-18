@@ -54,7 +54,7 @@ def stem_token(token: str) -> str:
     stemmer = _get_stemmer()
     if stemmer is None or not is_cyrillic(token):
         return token
-    return stemmer.stemWord(token.lower())  # type: ignore[attr-defined]
+    return stemmer.stemWord(token.lower())
 
 
 def stem_token_cache_info() -> object:

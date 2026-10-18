@@ -15,6 +15,7 @@ import sqlite_vec
 
 if TYPE_CHECKING:
     import sqlite3
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,7 @@ class VectorHit:
 
 
 def insert_vectors(
-    conn: sqlite3.Connection, items: list[tuple[int, list[float]]]
+    conn: sqlite3.Connection, items: Sequence[tuple[int, Sequence[float]]]
 ) -> int:
     """Insert ``(chunk_id, vector)`` pairs. Caller must delete stale rows first."""
     for chunk_id, vector in items:

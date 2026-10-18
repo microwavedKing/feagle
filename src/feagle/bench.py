@@ -144,7 +144,7 @@ def generate_corpus(out_dir: Path, files: int, seed: int = 1) -> dict[str, Any]:
     for index in range(files):
         concept = CONCEPTS[index % len(CONCEPTS)]
         lang = "ru" if index % 2 else "en"
-        words = list(concept[lang])  # type: ignore[arg-type]
+        words = list(concept[lang])
         title = f"{words[0].capitalize()} {words[1]} {index}"
 
         kind = index % 3

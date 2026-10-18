@@ -135,7 +135,15 @@ def build_supervisor(
             "lock_file": runtime_dir / "llama.lock",
             "touch_file": runtime_dir / "llama.touch",
         }
-    return LlamaSupervisor(supervisor_cfg, health=health, spawn=spawn, **files)
+    return LlamaSupervisor(
+        supervisor_cfg,
+        health=health,
+        spawn=spawn,
+        port_file=files.get("port_file"),
+        pid_file=files.get("pid_file"),
+        lock_file=files.get("lock_file"),
+        touch_file=files.get("touch_file"),
+    )
 
 
 class EmbeddingService:

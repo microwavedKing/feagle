@@ -28,6 +28,9 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      - name: Type check
+        run: mypy
+
       - name: Test
         # Tests that need llama-server, a model, poppler or tesseract skip
         # themselves; nothing here needs network or a GUI. Coverage is a gate

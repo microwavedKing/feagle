@@ -55,7 +55,7 @@ def search_in_process(cfg: dict[str, Any], query: str, limit: int, mode: str) ->
                 service = None
                 embedder = None
 
-            if service is not None and db.has_vec_table(conn):
+            if service is not None and embedder is not None and db.has_vec_table(conn):
                 vector = embedder.embed_queries([query])[0]
                 hits = hybrid.search_hybrid(
                     conn,

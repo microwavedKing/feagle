@@ -308,8 +308,10 @@ class IndexerDaemon:
         stop: threading.Event,
         generation: int,
     ) -> None:
+        watcher = self.watcher
+        assert watcher is not None  # set before the producer thread starts
         try:
-            for paths in self.watcher.events(stop):
+            for paths in watcher.events(stop):
                 if paths:
                     events.put(paths)
                 if stop.is_set() or self.stop_event.is_set():
