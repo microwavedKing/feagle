@@ -716,6 +716,8 @@ network calls except the one-shot model download that you start yourself
 
 ## Known limitations
 
+- FTS5 has no native Russian stemming; `feagle` compensates with a separate
+  stemmed column (Snowball) instead of a tokenizer.
 - OCR is opt-in and slow: about a second per PDF page and ~0.65 s per image on
   the reference laptop. It needs `tesseract` plus language data; scanned PDF
   pages also need `pdftoppm` from `poppler`. `ocr_workers = 2` (the default) runs
@@ -737,12 +739,15 @@ network calls except the one-shot model download that you start yourself
   A `.docx` can be added through the `[openers]` table for opening, but its text
   is not indexed.
 - `sqlite-vec` is pre-1.0; deletions from `vec0` do not shrink the file until
-  `feagle index --rebuild`.
+  `feagle index --rebuild`, and a fresh vector table preallocates a 1024-row page
+  group (small databases look larger per chunk than they are).
+- Indexing is CPU-bound (~450 tokens/s on the reference laptop); a large corpus
+  takes a while to index the first time.
 - Upgrading from an older index version migrates the schema automatically on the
   next open; the full-text index is rebuilt from stored chunks (files are not
   re-read).
-- The AUR package is prepared (`PKGBUILD`, `.SRCINFO`); publishing it is a manual
-  step.
+- The AUR package is prepared (`PKGBUILD`, `.SRCINFO`, man page and shell
+  completions); publishing it is a manual step.
 
 ## License
 
@@ -1468,10 +1473,14 @@ MRR@10 0.375, Recall@20 0.500 — точного совпадения мало �
   `.docx` можно открыть через таблицу `[openers]`, но его текст не индексируется.
 - `sqlite-vec` — pre-1.0: удаления из `vec0` не уменьшают файл без
   `feagle index --rebuild`, а новая векторная таблица резервирует группу на 1024
-  строки.
+  строки (маленькие базы поэтому выглядят «толще» на чанк).
 - Индексация упирается в CPU (~450 токенов/с на целевой машине); большой корпус
   в первый раз индексируется небыстро.
-- AUR-пакет подготовлен (`PKGBUILD`, `.SRCINFO`), публикация — ручной шаг.
+- Обновление со старой версии индекса мигрирует схему автоматически при следующем
+  открытии; полнотекстовый индекс пересобирается из уже сохранённых чанков (файлы
+  не перечитываются).
+- AUR-пакет подготовлен (`PKGBUILD`, `.SRCINFO`, man-страница и комплишены),
+  публикация — ручной шаг.
 
 ## Лицензия
 
