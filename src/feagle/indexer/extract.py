@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 
 from ..log import get_logger
@@ -37,6 +38,10 @@ BINARY_SNIFF = 8192
 
 #: Wall-clock limit for a single ``pdftotext`` invocation.
 PDF_TIMEOUT = 30.0
+
+#: Markup extensions: read as text, but with the tags stripped so the index
+#: holds the visible words instead of the markup.
+MARKUP_SUFFIXES = (".html", ".htm", ".xml")
 
 PDF_MISSING_HINT = "install poppler (pdftotext) to index PDF files"
 
@@ -122,6 +127,8 @@ def extract(
             ocr_psm=ocr_psm,
             ocr_osd=ocr_osd,
         )
+    if suffix in MARKUP_SUFFIXES:
+        return extract_markup(path, max_bytes=max_bytes)
     return extract_text(path, max_bytes=max_bytes)
 
 
@@ -171,6 +178,55 @@ def extract_text(path: Path, *, max_bytes: int | None = None) -> Extracted:
     if encoding != "utf-8":
         log.info("decoded %s as %s", path, encoding)
     return Extracted(pages=(text,), kind="text", encoding=encoding)
+
+
+class _MarkupText(HTMLParser):
+    """Visible text of an HTML/XML document, with the markup dropped."""
+
+    _SKIP = frozenset({"script", "style", "head"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._SKIP:
+            self._skip += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip:
+            self._parts.append(data)
+
+    @property
+    def text(self) -> str:
+        return " ".join(" ".join(self._parts).split())
+
+
+def extract_markup(path: Path, *, max_bytes: int | None = None) -> Extracted:
+    """Read an HTML/XML file and keep only its visible text.
+
+    Indexing the raw markup would put tags into the embedding and dilute it;
+    ``<script>``/``<style>``/``<head>`` carry no content at all.
+    """
+    data = _read_bytes(path, max_bytes)
+    if b"\x00" in data[:BINARY_SNIFF]:
+        raise UnsupportedFile(f"binary content: {path}")
+    text, encoding = decode_text(data)
+    if encoding != "utf-8":
+        log.info("decoded %s as %s", path, encoding)
+    parser = _MarkupText()
+    try:
+        parser.feed(text)
+        parser.close()
+    except Exception as exc:  # noqa: BLE001 - a malformed page must not fail the run
+        log.warning("could not parse the markup in %s: %s", path, exc)
+        return Extracted(pages=(text,), kind="text", encoding=encoding)
+    return Extracted(pages=(parser.text,), kind="text", encoding=encoding)
 
 
 def extract_image(
