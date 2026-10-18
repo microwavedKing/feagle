@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import db, paths, units
+from . import config, db, paths, units
 from .embeddings.client import EmbeddingClient
 from .embeddings.service import resolve_model
 from .indexer.extract import pdftotext_available
@@ -265,6 +265,29 @@ def check_model(cfg: dict[str, Any], *, verify_hash: bool = True) -> Check:
     return Check("model", "ok", f"{spec.name} ({path.name})", hint)
 
 
+def check_embeddings_url(cfg: dict[str, Any]) -> Check:
+    """Say out loud when the embedding server is not on this machine.
+
+    ``[embeddings].server_url`` is a deliberate escape hatch, but everything that
+    is indexed and every query is sent there; over plain HTTP it is also readable
+    on the way.
+    """
+    url = str(cfg["embeddings"].get("server_url") or "").strip()
+    host = config.embeddings_host(url)
+    if host is None:
+        return Check("embeddings url", "info", "local (llama-server is started on demand)")
+    if url.lower().startswith("https://"):
+        return Check(
+            "embeddings url", "info", f"{url} (https)",
+            "query text and indexed documents are sent to this host",
+        )
+    return Check(
+        "embeddings url", "warn", f"{url} (plain http)",
+        "query text and indexed documents are sent there unencrypted; use https:// "
+        "or a local model",
+    )
+
+
 def check_server_health(cfg: dict[str, Any]) -> Check:
     url = _server_base_url(cfg)
     if url is None:
@@ -481,6 +504,7 @@ def run_checks(cfg: dict[str, Any], *, verify_model_hash: bool = True) -> list[C
         check_llama_server(),
         check_llama_devices(),
         check_model(cfg, verify_hash=verify_model_hash),
+        check_embeddings_url(cfg),
         check_server_health(cfg),
         check_embedding_dim(cfg),
         check_pdftotext(),
