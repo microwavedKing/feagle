@@ -729,6 +729,12 @@ network calls except the one-shot model download that you start yourself
   your account. A symlink is refused while `[index].follow_symlinks = false` (the
   default). A preview never reads more than 2 MiB, and one PDF page is rendered
   with a 20 s limit.
+- **Removing a directory from `[index].roots` also removes it from the index.**
+  The next pass over the configured roots drops the files that are no longer under
+  any of them, and a running `feagle-indexerd` does that as soon as it notices the
+  change instead of waiting for the periodic rescan. A root that is only
+  temporarily unavailable (an unmounted drive) keeps its files, and
+  `feagle index --root PATH` never touches the other roots.
 - **`llama-server` is loopback-only.** It listens on `127.0.0.1` with no API key,
   so a process running as *you* can reach it. That is deliberate: a key would not
   stop such a process and would break the one-command setup. Nothing leaves the
@@ -1490,6 +1496,11 @@ Qwen3 на CPU его стоит уменьшить.
   записи. Симлинк отвергается, пока `[index].follow_symlinks = false` (значение по
   умолчанию). Превью читает не больше 2 МиБ, а на отрисовку страницы PDF есть лимит
   20 с.
+- **Удаление каталога из `[index].roots` убирает его и из индекса.** Следующий проход
+  по настроенным корням выкидывает файлы, которые больше не лежат ни под одним из них,
+  а работающий `feagle-indexerd` делает это сразу, как заметит изменение, — не дожидаясь
+  планового рескана. Корень, который просто временно недоступен (несмонтированный
+  диск), сохраняет свои файлы, а `feagle index --root PATH` не трогает остальные корни.
 - **`llama-server` слушает только loopback.** Это `127.0.0.1` без API-ключа — до
   него может дотянуться процесс, запущенный от *вашего* имени. Так и задумано: ключ
   от такого процесса не спасёт, зато сломал бы настройку «одной командой». Наружу

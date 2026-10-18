@@ -181,20 +181,67 @@ def test_removed_file_is_pruned(root, conn):
     assert conn.execute("SELECT COUNT(*) AS n FROM files").fetchone()["n"] == 1
 
 
-def test_pruning_only_affects_scanned_roots(root, conn):
+def test_a_root_removed_from_the_config_is_pruned(root, conn):
+    other = root.parent / "other"
+    other.mkdir()
+    (other / "secret.txt").write_text("secret", encoding="utf-8")
+    (root / "a.txt").write_text("inside", encoding="utf-8")
+
+    two_roots = make_cfg(root)
+    two_roots["index"]["roots"] = [str(root), str(other)]
+    pipeline.index_roots(conn, two_roots)
+    assert file_row(conn, other / "secret.txt") is not None
+
+    # Dropping ``other`` from the config drops its files from the index; a pass
+    # over the configured roots is authoritative (the privacy fix).
+    stats = pipeline.index_roots(conn, make_cfg(root))
+    assert stats.pruned == 1
+    assert file_row(conn, other / "secret.txt") is None
+    assert file_row(conn, root / "a.txt") is not None
+    assert stats.scanned == 1
+
+
+def test_explicit_roots_only_touch_what_they_scanned(root, conn):
     other = root.parent / "other"
     other.mkdir()
     (other / "keep.txt").write_text("outside", encoding="utf-8")
+    (root / "a.txt").write_text("inside", encoding="utf-8")
 
     cfg = make_cfg(root)
     cfg["index"]["roots"] = [str(root), str(other)]
-    (root / "a.txt").write_text("inside", encoding="utf-8")
     pipeline.index_roots(conn, cfg)
 
-    # next run scans only ``root``: the file under ``other`` must survive
-    stats = pipeline.index_roots(conn, make_cfg(root))
+    # ``feagle index --root PATH`` (explicit roots) must not drop other roots.
+    stats = pipeline.index_roots(conn, cfg, roots=[str(root)])
     assert stats.pruned == 0
     assert file_row(conn, other / "keep.txt") is not None
+
+
+def test_a_temporarily_missing_root_keeps_its_files(root, conn, tmp_path):
+    (root / "a.txt").write_text("inside", encoding="utf-8")
+    cfg = make_cfg(root)
+    pipeline.index_roots(conn, cfg)
+
+    away = tmp_path / "root-away"
+    root.rename(away)  # e.g. an external drive that got unmounted
+
+    stats = pipeline.index_roots(conn, cfg)
+    assert stats.scanned == 0
+    assert stats.pruned == 0
+    # the row (with its original path) is kept, so a remount costs nothing
+    assert file_row(conn, root / "a.txt") is not None
+
+
+def test_removed_file_is_pruned_when_full(root, conn):
+    path = root / "a.txt"
+    path.write_text("content", encoding="utf-8")
+    (root / "b.txt").write_text("keep me", encoding="utf-8")
+    pipeline.index_roots(conn, make_cfg(root))
+
+    path.unlink()
+    stats = pipeline.index_roots(conn, make_cfg(root), full=True)
+    assert stats.pruned == 1
+    assert file_row(conn, root / "b.txt") is not None
 
 
 def test_missing_root_is_skipped(root, conn):
@@ -490,6 +537,9 @@ def test_pause_check_stops_the_run(root, conn):
     assert stats.paused == "on battery"
     assert stats.scanned == 2
     assert "paused=" in stats.summary()
+    # A paused pass must not reconcile: it has not seen the rest yet.
+    assert stats.pruned == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM files").fetchone()["n"] == 2
 
     # a later run without the pause finishes the remaining files
     rest = pipeline.index_roots(conn, make_cfg(root))

@@ -83,6 +83,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is what a port taken between the free-port probe and the bind looks like. A
   server that stays alive but never becomes healthy is still an error after one
   attempt.
+- A directory dropped from `[index].roots` is now removed from the index by the
+  next pass over the configured roots. Its files used to stay in the database and
+  keep showing up in search forever — wrong precisely when the directory was
+  removed to stop indexing it. A pass with an explicit root list
+  (`feagle index --root PATH`) and a pass that paused halfway still only touch
+  what they scanned, and a root that is merely unavailable (an unmounted drive)
+  keeps its files.
+- A pass paused by the load or battery check no longer deletes the files it did
+  not reach yet. Reconciling the index walks the whole `files` table and drops
+  what the scan did not see, so a pause in the middle of a scan used to empty the
+  rest of the index (the next pass would rebuild it, but the work was wasted and
+  the index was wrong in the meantime).
+- `feagle index --full` also cleans up files that vanished, like a normal pass,
+  instead of skipping the reconciliation.
+- The indexer reacts to a changed root list right away: dropping a directory from
+  `[index].roots` while the daemon is running now runs the pass that removes its
+  files, instead of waiting for the next periodic rescan (six hours by default).
 
 ## [0.3.0] - 2026-10-18
 
@@ -485,6 +502,23 @@ on Wayland.
 - Старт `llama-server` повторяется на новом порту, если процесс вышел сразу — так
   выглядит порт, перехваченный между пробой свободного порта и bind. Сервер, который
   жив, но так и не стал здоровым, по-прежнему считается ошибкой после одной попытки.
+- Каталог, убранный из `[index].roots`, теперь удаляется из индекса на следующем
+  проходе по настроенным корням. Раньше его файлы навсегда оставались в базе и
+  продолжали находиться поиском — как раз когда папку и убирают из конфига, чтобы
+  прекратить её индексировать. Проход с явным списком корней
+  (`feagle index --root PATH`) и проход, прерванный паузой, по-прежнему трогают
+  только то, что просканировали, а корень, который просто недоступен
+  (несмонтированный диск), сохраняет свои файлы.
+- Проход, прерванный паузой по нагрузке или батарее, больше не удаляет файлы, до
+  которых не дошёл. Сверка индекса обходит всю таблицу `files` и выкидывает всё,
+  чего не видела, поэтому пауза посреди сканирования очищала остаток индекса
+  (следующий проход его перестраивал, но работа тратилась зря, а до тех пор индекс
+  был неверным).
+- `feagle index --full` теперь тоже чистит исчезнувшие файлы, как обычный проход, а
+  не пропускает сверку.
+- Индексатор реагирует на смену набора корней сразу: удаление каталога из
+  `[index].roots` на работающем демоне запускает проход, который убирает его файлы,
+  а не ждёт планового рескана (по умолчанию шесть часов).
 
 ## 0.3.0 (по-русски) — 2026-10-18
 

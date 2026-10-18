@@ -630,32 +630,53 @@ def _apply_outcome(
             stats.error_samples.append(str(path))
 
 
+def _remove_row(conn: sqlite3.Connection, file_id: int) -> int:
+    """Delete one file row (its chunks, FTS rows and vectors); returns ``1``."""
+    with conn:
+        old_ids = _delete_file_chunks(conn, file_id)
+        if old_ids and db.has_vec_table(conn):
+            vec_delete(conn, old_ids)
+        conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+    return 1
+
+
 def _remove_path(conn: sqlite3.Connection, path: Path) -> int:
     """Delete the index rows for one path; ``1`` when something was removed."""
     row = conn.execute("SELECT id FROM files WHERE path = ?", (_canonical(path),)).fetchone()
     if row is None:
         return 0
-    with conn:
-        old_ids = _delete_file_chunks(conn, row["id"])
-        if old_ids and db.has_vec_table(conn):
-            vec_delete(conn, old_ids)
-        conn.execute("DELETE FROM files WHERE id = ?", (row["id"],))
-    return 1
+    return _remove_row(conn, row["id"])
+
+
+def _within(path: Path, roots: list[Path]) -> bool:
+    """Whether ``path`` is one of ``roots`` or lives under one of them."""
+    return any(path == root or root in path.parents for root in roots)
 
 
 def _prune_missing(
-    conn: sqlite3.Connection, roots: list[Path], seen: set[str], stats: IndexStats
+    conn: sqlite3.Connection,
+    *,
+    scanned: list[Path],
+    configured: list[Path],
+    seen: set[str],
+    stats: IndexStats,
 ) -> None:
-    """Delete rows for files that no longer exist under the scanned roots."""
-    if not roots:
-        return
+    """Reconcile the index with the configured roots.
+
+    A row goes away when the scanner did not yield it and either it lies under a
+    root that was scanned (the file is gone or a config change now filters it
+    out) or it lies outside every configured root (its root was dropped from
+    ``[index].roots``). A file under a configured root that is currently
+    unavailable (an unmounted drive) is kept, so a temporary outage does not
+    empty the index.
+    """
     for row in conn.execute("SELECT id, path FROM files").fetchall():
         stored = row["path"]
         if stored in seen:
             continue
         path = Path(stored)
-        if any(path == root or root in path.parents for root in roots):
-            stats.pruned += _remove_path(conn, path)
+        if _within(path, scanned) or not _within(path, configured):
+            stats.pruned += _remove_row(conn, row["id"])
 
 
 def index_roots(
@@ -715,8 +736,17 @@ def index_roots(
             image_budget -= 1
         _apply_outcome(stats, outcome, written, inserted, candidate.path)
 
-    if not full and not rebuild:
-        _prune_missing(conn, active, seen, stats)
+    # A pass over the configured roots is authoritative: once it finished, the
+    # index is reconciled with the config. Explicit roots (``feagle index
+    # --root``, benchmarks) and a pass that paused halfway only touch what they
+    # actually saw.
+    if roots is None and active and not stats.paused:
+        scanned = [Path(os.path.realpath(root)) for root in active]
+        configured = [
+            Path(os.path.realpath(os.path.abspath(os.path.expanduser(str(root)))))
+            for root in cfg["index"]["roots"]
+        ]
+        _prune_missing(conn, scanned=scanned, configured=configured, seen=seen, stats=stats)
 
     log.info("index run finished: %s", stats.summary())
     return stats
