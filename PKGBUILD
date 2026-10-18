@@ -21,19 +21,22 @@ makedepends=(
   'python-pytest'
 )
 optdepends=(
-  'poppler: PDF indexing (pdftotext)'
+  'poppler: PDF indexing (pdftotext) and PDF page previews'
+  'quickshell: the recommended QML launcher popup (AUR)'
   'llama.cpp-git: semantic search (AUR; needs a build newer than 2026-10-06)'
   'llama.cpp-vulkan-git: semantic search with Vulkan offload (AUR)'
   'llama.cpp-cuda-git: semantic search with CUDA offload (AUR)'
-  'tesseract: OCR for scanned PDFs'
+  'tesseract: OCR for scanned PDFs and images'
   'tesseract-data-eng: English OCR data'
   'tesseract-data-rus: Russian OCR data'
-  'ffmpeg: image search (downscales images before embedding)'
-  'fuzzel: launcher for "feagle pick"'
-  'wofi: launcher for "feagle pick"'
-  'rofi: launcher for "feagle pick" (Wayland support included since 2.0)'
-  'tofi: launcher for "feagle pick" (AUR)'
-  'walker: launcher for "feagle pick" (AUR)'
+  'tesseract-data-osd: orientation detection for OCR ([index].ocr_osd)'
+  'ffmpeg: image and video indexing (downscales images, extracts frames)'
+  'whisper.cpp: audio transcription (AUR; provides whisper-cli)'
+  'fuzzel: alternative dmenu launcher for "feagle pick"'
+  'wofi: alternative dmenu launcher for "feagle pick"'
+  'rofi: alternative dmenu launcher for "feagle pick" (Wayland support since 2.0)'
+  'tofi: alternative dmenu launcher for "feagle pick" (AUR)'
+  'walker: alternative dmenu launcher for "feagle pick" (AUR)'
 )
 install="$pkgname.install"
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
@@ -61,6 +64,14 @@ package() {
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 NOTICE README.md CHANGELOG.md docs/INSTALL.ru.md \
     -t "$pkgdir/usr/share/doc/$pkgname/"
+
+  # Manual page and shell completions (bash, zsh, fish).
+  install -Dm644 man/feagle.1 "$pkgdir/usr/share/man/man1/feagle.1"
+  install -Dm644 completions/feagle.bash \
+    "$pkgdir/usr/share/bash-completion/completions/feagle"
+  install -Dm644 completions/_feagle "$pkgdir/usr/share/zsh/site-functions/_feagle"
+  install -Dm644 completions/feagle.fish \
+    "$pkgdir/usr/share/fish/vendor_completions.d/feagle.fish"
 
   install -Dm644 systemd/feagle-indexerd.service \
     "$pkgdir/usr/lib/systemd/user/feagle-indexerd.service"

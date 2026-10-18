@@ -8,7 +8,7 @@ from a compositor hotkey and opens the result at the right place (a PDF page, a
 source line). Everything stays on your machine: no cloud, no accounts, no
 telemetry.
 
-> **Status:** early development (`0.3.0`). Full-text and semantic search work,
+> **Status:** beta (`0.3.0`). Full-text and semantic search work,
 > Russian word forms are matched through stemming, scanned PDFs and images can be
 > OCR'd, images and videos can be found by a text description (opt-in multimodal
 > embeddings), audio can be transcribed (opt-in, whisper.cpp), results open at a
@@ -74,7 +74,8 @@ feagle setup
 ```
 
 Note that `python-sqlite-vec` is an AUR package too, so the helper has to build
-it as well.
+it as well. The package also installs the `feagle(1)` manual page and shell
+completions for bash, zsh and fish.
 
 ### With uv or pipx
 
@@ -106,6 +107,21 @@ A non-interactive equivalent:
 ```sh
 .venv/bin/feagle setup --yes --root ~/Documents --model embeddinggemma-2-q4
 ```
+
+The manual page and the shell completions are plain files in `man/` and
+`completions/` (the AUR package installs them system-wide). For a user-local
+install from a checkout:
+
+```sh
+install -Dm644 man/feagle.1 ~/.local/share/man/man1/feagle.1
+install -Dm644 completions/feagle.bash ~/.local/share/bash-completion/completions/feagle
+install -Dm644 completions/_feagle ~/.local/share/zsh/site-functions/_feagle
+install -Dm644 completions/feagle.fish ~/.config/fish/completions/feagle.fish
+```
+
+For zsh, the target directory has to be in `$fpath`; add
+`fpath+=(~/.local/share/zsh/site-functions)` to `~/.zshrc` before `compinit` if
+it is not there already.
 
 ## Usage
 
@@ -745,7 +761,7 @@ their own license — see [NOTICE](NOTICE).
 (страница PDF, строка кода). Всё остаётся на вашей машине: без облака, аккаунтов
 и телеметрии.
 
-> **Статус:** ранняя разработка (`0.3.0`). Работают полнотекстовый и семантический
+> **Статус:** бета (`0.3.0`). Работают полнотекстовый и семантический
 > поиск, русские словоформы (стемминг), OCR сканированных PDF и картинок, поиск
 > картинок и видео по текстовому описанию (опциональные мультимодальные
 > эмбеддинги), транскрипция аудио (опционально, whisper.cpp), открытие на
@@ -799,7 +815,8 @@ yay -S feagle        # или другой AUR-хелпер
 feagle setup
 ```
 
-Учтите: `python-sqlite-vec` — тоже AUR-пакет, хелпер соберёт и его.
+Учтите: `python-sqlite-vec` — тоже AUR-пакет, хелпер соберёт и его. Пакет также
+ставит man-страницу `feagle(1)` и комплишены для bash, zsh и fish.
 
 ### Через uv или pipx
 
@@ -826,6 +843,20 @@ python3 -m venv .venv
 ```sh
 feagle setup --yes --root ~/Documents --model embeddinggemma-2-q4
 ```
+
+Man-страница и комплишены — обычные файлы в `man/` и `completions/` (AUR-пакет
+ставит их системно). Для установки только для себя из репозитория:
+
+```sh
+install -Dm644 man/feagle.1 ~/.local/share/man/man1/feagle.1
+install -Dm644 completions/feagle.bash ~/.local/share/bash-completion/completions/feagle
+install -Dm644 completions/_feagle ~/.local/share/zsh/site-functions/_feagle
+install -Dm644 completions/feagle.fish ~/.config/fish/completions/feagle.fish
+```
+
+Для zsh каталог должен быть в `$fpath`: добавьте
+`fpath+=(~/.local/share/zsh/site-functions)` в `~/.zshrc` **до** `compinit`, если
+его там ещё нет.
 
 ## Использование
 
