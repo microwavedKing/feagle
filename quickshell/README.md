@@ -243,6 +243,11 @@ ranking below). Send it after running `exec`:
   (file, mtime, page); the reply also carries `page`. Without poppler installed
   the reply degrades to `kind:"meta"` with a reason.
 - A missing file is `{"ok":false,"error":"…"}`.
+- **Only indexed files are served:** `path` must be a row in the index (a path
+  from a `launcher` reply always is). Anything else — a file outside the indexed
+  roots, a symlink while `follow_symlinks` is off — is refused with
+  `{"ok":false,"error":"not in the index: …"}`. The daemon must not become a way
+  to read arbitrary files through the socket.
 
 **Request tags.** Any request may carry a `"req"` string; the reply echoes it, so
 one connection can mix request kinds. The demo tags `"launcher"` and `"preview"`

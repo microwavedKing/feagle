@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import time
 import types
@@ -55,6 +56,25 @@ def make_cfg():
     cfg = config.default_config()
     cfg["search"]["limit"] = 5
     return cfg
+
+
+def register_path(db_path, path: str, *, size: int = 0, mtime_ns: int = 0) -> None:
+    """Insert an index row for ``path`` (which is what allows a preview of it)."""
+    conn = db.open_database(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO files(path, size, mtime_ns, state, updated_at) VALUES(?,?,?,'ok',?)",
+            (path, size, mtime_ns, int(time.time())),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def register_file(db_path, target: Path) -> None:
+    """Put a real file into the index, which is what allows a preview of it."""
+    stat = target.stat()
+    register_path(db_path, str(target), size=stat.st_size, mtime_ns=stat.st_mtime_ns)
 
 
 @pytest.fixture
@@ -472,6 +492,7 @@ def test_launcher_frecency_never_beats_a_better_match(db_path, monkeypatch):
 def test_preview_text_around_the_matched_line(db_path, tmp_path):
     target = tmp_path / "note.txt"
     target.write_text("\n".join(f"line {i}" for i in range(1, 51)), encoding="utf-8")
+    register_file(db_path, target)
     engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
 
     result = engine.dispatch({"op": "preview", "path": str(target), "line": 25})
@@ -487,6 +508,7 @@ def test_preview_text_around_the_matched_line(db_path, tmp_path):
 def test_preview_without_a_line_shows_the_top(db_path, tmp_path):
     target = tmp_path / "note.txt"
     target.write_text("\n".join(f"line {i}" for i in range(1, 51)), encoding="utf-8")
+    register_file(db_path, target)
     engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
 
     result = engine.dispatch({"op": "preview", "path": str(target)})
@@ -494,9 +516,22 @@ def test_preview_without_a_line_shows_the_top(db_path, tmp_path):
     assert result["text"].splitlines()[-1] == "line 24"
 
 
+def test_preview_normalises_the_path(db_path, tmp_path):
+    target = tmp_path / "note.txt"
+    target.write_text("hello", encoding="utf-8")
+    register_file(db_path, target)
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    # Same file, spelled with a redundant component the indexer never stored.
+    result = engine.dispatch({"op": "preview", "path": str(tmp_path / "." / "note.txt")})
+    assert result["ok"] is True
+    assert result["kind"] == "text"
+
+
 def test_preview_image_is_a_marker(db_path, tmp_path):
     target = tmp_path / "shot.png"
     target.write_bytes(b"\x89PNG\r\n\x1a\n")
+    register_file(db_path, target)
     engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
 
     result = engine.dispatch({"op": "preview", "path": str(target)})
@@ -508,6 +543,7 @@ def test_preview_image_is_a_marker(db_path, tmp_path):
 def test_preview_binary_file_is_metadata(db_path, tmp_path):
     target = tmp_path / "blob.bin"
     target.write_bytes(b"\x00\x01\x02binary")
+    register_file(db_path, target)
     engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
 
     result = engine.dispatch({"op": "preview", "path": str(target)})
@@ -516,14 +552,103 @@ def test_preview_binary_file_is_metadata(db_path, tmp_path):
     assert result["size"] == 9
 
 
+def test_preview_outside_the_index_is_refused(db_path, tmp_path):
+    """The socket must not become a way to read any file of the user."""
+    target = tmp_path / "secret.txt"
+    target.write_text("not indexed", encoding="utf-8")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(target)})
+    assert result["ok"] is False
+    assert "not in the index" in result["error"]
+
+
+def test_preview_of_a_sibling_file_is_refused(db_path, tmp_path):
+    """A sibling of an indexed file is still not indexed."""
+    indexed = tmp_path / "note.txt"
+    indexed.write_text("line 1\n", encoding="utf-8")
+    register_file(db_path, indexed)
+    sibling = tmp_path / "other.txt"
+    sibling.write_text("line 1\n", encoding="utf-8")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    assert engine.dispatch({"op": "preview", "path": str(indexed)})["ok"] is True
+    assert engine.dispatch({"op": "preview", "path": str(sibling)})["ok"] is False
+
+
+def test_preview_refuses_a_symlink(db_path, tmp_path):
+    real = tmp_path / "real.txt"
+    real.write_text("payload\n", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real)
+    register_file(db_path, link)  # even a row for the link does not unlock it
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(link)})
+    assert result["ok"] is False
+    assert "not in the index" in result["error"]
+
+
+def test_preview_allows_a_symlink_when_follow_symlinks_is_on(db_path, tmp_path):
+    real = tmp_path / "real.txt"
+    real.write_text("payload\n", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real)
+    register_file(db_path, link)
+    cfg = make_cfg()
+    cfg["index"]["follow_symlinks"] = True
+    engine = QueryEngine(cfg, db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(link)})
+    assert result["ok"] is True
+    assert "payload" in result["text"]
+
+
+def test_preview_without_a_database_is_refused(db_path, tmp_path):
+    target = tmp_path / "note.txt"
+    target.write_text("hello", encoding="utf-8")
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+    engine.db_path = db_path.parent / "missing.sqlite"
+
+    result = engine.dispatch({"op": "preview", "path": str(target)})
+    assert result["ok"] is False
+    assert "not in the index" in result["error"]
+
+
+def test_preview_with_a_schemaless_database_is_refused(tmp_path):
+    """A database without the `files` table must not crash the daemon."""
+    empty = tmp_path / "empty.sqlite"
+    sqlite3.connect(empty).close()
+    target = tmp_path / "note.txt"
+    target.write_text("hello", encoding="utf-8")
+    engine = QueryEngine(make_cfg(), db_path=empty, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(target)})
+    assert result["ok"] is False
+    assert "not in the index" in result["error"]
+
+
 def test_preview_missing_file_is_an_error(db_path, tmp_path):
     engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
     result = engine.dispatch({"op": "preview", "path": str(tmp_path / "gone.txt")})
+    assert result["ok"] is False
+    assert "not in the index" in result["error"]
+
+
+def test_preview_of_an_indexed_file_that_vanished_is_an_error(db_path, tmp_path):
+    target = tmp_path / "gone.txt"
+    target.write_text("bye\n", encoding="utf-8")
+    register_file(db_path, target)
+    target.unlink()
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "preview", "path": str(target)})
     assert result["ok"] is False
     assert "cannot read" in result["error"]
 
 
 def test_preview_directory_is_an_error(db_path, tmp_path):
+    register_path(db_path, str(tmp_path))
     engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
     result = engine.dispatch({"op": "preview", "path": str(tmp_path)})
     assert result["ok"] is False
@@ -599,6 +724,7 @@ def test_preview_pdf_page_without_a_chunk_starts_at_the_top(db_path, pdf_chunk):
 
 def test_preview_pdf_without_poppler_degrades_to_metadata(db_path, monkeypatch):
     monkeypatch.setattr(queryd.shutil, "which", lambda name: None)
+    register_file(db_path, TWO_PAGES)
     engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
 
     result = engine.dispatch({"op": "preview", "path": str(TWO_PAGES), "page": 1})
