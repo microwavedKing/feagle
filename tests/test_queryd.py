@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import sqlite3
 import threading
 import time
@@ -311,6 +312,33 @@ def test_is_running_false_when_absent(tmp_path):
     assert QuerydClient(tmp_path / "nope.sock").is_running() is False
 
 
+class _FakeReader:
+    """A minimal stand-in for ``rfile``: hands out the given bytes, then EOF."""
+
+    def __init__(self, data: bytes = b"") -> None:
+        self.data = data
+
+    def readline(self, limit: int = -1) -> bytes:
+        if not self.data:
+            return b""
+        if limit >= 0:
+            head, self.data = self.data[:limit], self.data[limit:]
+            return head
+        head, self.data = self.data, b""
+        return head
+
+
+class _FakeWriter:
+    def __init__(self) -> None:
+        self.written: list[bytes] = []
+
+    def write(self, data: bytes) -> None:
+        self.written.append(data)
+
+    def flush(self) -> None:
+        pass
+
+
 @pytest.mark.parametrize("exc", [BrokenPipeError, ConnectionResetError])
 def test_handler_ignores_a_client_that_hung_up(exc):
     """A dropped client must not leak an exception out of the handler."""
@@ -327,10 +355,97 @@ def test_handler_ignores_a_client_that_hung_up(exc):
             raise exc("client gone")
 
     handler = queryd._Handler.__new__(queryd._Handler)
-    handler.rfile = [b'{"op":"ping"}\n']
+    handler.rfile = _FakeReader(b'{"op":"ping"}\n')
     handler.wfile = _DeadSocket()
     handler.server = types.SimpleNamespace(engine=_Engine(), request_hook=None)
     handler.handle()  # must not raise
+
+
+def test_handler_rejects_an_oversized_request_line():
+    class _Engine:
+        def dispatch(self, request):
+            raise AssertionError("an oversized line must not be dispatched")
+
+    handler = queryd._Handler.__new__(queryd._Handler)
+    handler.rfile = _FakeReader(b"x" * (queryd._MAX_REQUEST_BYTES + 10))
+    handler.wfile = _FakeWriter()
+    handler.server = types.SimpleNamespace(engine=_Engine(), request_hook=None)
+
+    handler.handle()
+
+    reply = json.loads(handler.wfile.written[0])
+    assert reply["ok"] is False
+    assert "request too large" in reply["error"]
+
+
+def test_handler_closes_an_idle_connection():
+    class _Engine:
+        def dispatch(self, request):
+            raise AssertionError("nothing was sent")
+
+    class _IdleReader:
+        def readline(self, limit=-1):
+            raise TimeoutError("idle")
+
+    handler = queryd._Handler.__new__(queryd._Handler)
+    handler.rfile = _IdleReader()
+    handler.wfile = _FakeWriter()
+    handler.server = types.SimpleNamespace(engine=_Engine(), request_hook=None)
+
+    handler.handle()  # must not raise
+
+
+def test_search_rejects_an_over_long_query(db_path):
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+    result = engine.dispatch({"op": "search", "query": "x" * (queryd._MAX_QUERY_CHARS + 1)})
+    assert result["ok"] is False
+    assert "query too long" in result["error"]
+
+
+def test_launcher_rejects_an_over_long_query(db_path):
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+    result = engine.dispatch({"op": "launcher", "query": "x" * (queryd._MAX_QUERY_CHARS + 1)})
+    assert result["ok"] is False
+    assert "query too long" in result["error"]
+
+
+def test_embed_rejects_too_many_texts(db_path):
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=FakeEmbedder())
+    result = engine.dispatch({"op": "embed", "texts": ["x"] * (queryd._MAX_EMBED_TEXTS + 1)})
+    assert result["ok"] is False
+    assert "too many texts" in result["error"]
+
+
+def test_embed_rejects_an_over_long_text(db_path):
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=FakeEmbedder())
+    result = engine.dispatch({"op": "embed", "texts": ["x" * (queryd._MAX_EMBED_CHARS + 1)]})
+    assert result["ok"] is False
+    assert "text too long" in result["error"]
+
+
+def test_limits_do_not_hit_a_normal_request(engine):
+    result = engine.dispatch({"op": "search", "query": "alpha"})
+    assert result["ok"] is True
+    assert engine.dispatch({"op": "embed", "texts": ["short"]})["ok"] is True
+
+
+def test_too_many_connections_are_refused(tmp_path):
+    engine = types.SimpleNamespace(dispatch=lambda request: {"ok": True})
+    server = queryd._UnixServer(str(tmp_path / "q.sock"), queryd._Handler, engine)
+    try:
+        for _ in range(queryd._MAX_CONNECTIONS):
+            assert server._slots.acquire(blocking=False)
+        request, peer = socket.socketpair()
+        try:
+            server.process_request(request, None)  # refused: no thread spawned
+            assert json.loads(peer.makefile("rb").readline()) == {
+                "ok": False,
+                "error": "too many connections",
+            }
+        finally:
+            peer.close()
+    finally:
+        server.server_close()
 
 
 def test_client_disconnect_mid_reply_is_not_an_error(server, tmp_path, capsys, monkeypatch):

@@ -53,6 +53,27 @@ _PREVIEW_PDF_TIMEOUT = 20.0
 #: How many rendered PDF pages to keep (moving through one page must not re-render).
 _PREVIEW_PAGE_CACHE = 8
 
+# -- request limits --------------------------------------------------------
+#: A client of the same user is not an attacker (see the security model), but a
+#: buggy one must not be able to exhaust the daemon. Every limit below answers
+#: with ``ok:false`` rather than truncating silently.
+
+#: Longest single request line (one JSON object) accepted; a longer one is
+#: rejected without buffering the rest of it.
+_MAX_REQUEST_BYTES = 256 * 1024
+#: Longest search query accepted, in characters.
+_MAX_QUERY_CHARS = 4096
+#: How many texts one ``embed`` request may carry, and how long each may be.
+_MAX_EMBED_TEXTS = 64
+_MAX_EMBED_CHARS = 8192
+#: Seconds a connection may sit idle before the daemon closes it. Clients
+#: reconnect (the QML popup does so on its own), and a stray client that opens a
+#: connection and never sends anything cannot hold the slot forever.
+_CLIENT_TIMEOUT = 120.0
+#: Connections served at the same time; the rest are refused right away instead
+#: of piling up threads.
+_MAX_CONNECTIONS = 16
+
 
 def _preview_window(total: int, line: int | None) -> tuple[int, int]:
     """The ``[start, end)`` line range to show for a preview."""
@@ -203,6 +224,8 @@ class QueryEngine:
         """A ready-to-render list: applications first, then file hits."""
         from .. import apps as apps_module
 
+        if (rejection := self._over_limit("query", query, _MAX_QUERY_CHARS)) is not None:
+            return rejection
         files = self.search(query, limit=limit, mode=mode)
         results: list[dict[str, Any]] = []
         for score, app in apps_module.match_apps(
@@ -394,9 +417,20 @@ class QueryEngine:
             conn.close()
         return row["body"] if row is not None else None
 
+    def _over_limit(self, name: str, value: str, maximum: int) -> dict[str, Any] | None:
+        """A rejection reply when ``value`` is longer than ``maximum``, else ``None``."""
+        if len(value) > maximum:
+            return {
+                "ok": False,
+                "error": f"{name} too long: {len(value)} > {maximum} characters",
+            }
+        return None
+
     def search(
         self, query: str, *, limit: int | None = None, mode: str | None = None
     ) -> dict[str, Any]:
+        if (rejection := self._over_limit("query", query, _MAX_QUERY_CHARS)) is not None:
+            return rejection
         search_cfg = self.cfg["search"]
         limit = limit or search_cfg["limit"]
         mode = mode or search_cfg["mode"]
@@ -467,6 +501,14 @@ class QueryEngine:
     def embed(
         self, texts: list[str], kind: str = "doc", titles: list[str] | None = None
     ) -> dict[str, Any]:
+        if len(texts) > _MAX_EMBED_TEXTS:
+            return {
+                "ok": False,
+                "error": f"too many texts: {len(texts)} > {_MAX_EMBED_TEXTS}",
+            }
+        for text in texts:
+            if (rejection := self._over_limit("text", text, _MAX_EMBED_CHARS)) is not None:
+                return rejection
         embedder = self._ensure_embedder()
         if embedder is None:
             return {"ok": False, "error": "embeddings unavailable", "hint": _EMBEDDINGS_HINT}
@@ -557,6 +599,10 @@ class QueryEngine:
 
 
 class _Handler(socketserver.StreamRequestHandler):
+    #: A silent client gives the slot back after this many seconds (the clients
+    #: reconnect: `QuerydClient` per request, the QML popup on disconnect).
+    timeout = _CLIENT_TIMEOUT
+
     def handle(self) -> None:
         # A client that hangs up mid-exchange (or resets the connection) is
         # normal: without this, socketserver prints a traceback for every such
@@ -565,9 +611,19 @@ class _Handler(socketserver.StreamRequestHandler):
             self._pump()
         except (BrokenPipeError, ConnectionResetError):
             log.debug("queryd: client disconnected mid-request")
+        except TimeoutError:
+            log.debug("queryd: client idle for %.0fs, closing the connection", _CLIENT_TIMEOUT)
 
     def _pump(self) -> None:
-        for raw in self.rfile:
+        while raw := self.rfile.readline(_MAX_REQUEST_BYTES):
+            if not raw.endswith(b"\n"):
+                # A request line that does not fit: stop reading instead of
+                # letting the client grow the buffer without bound.
+                self._reply({
+                    "ok": False,
+                    "error": f"request too large (max {_MAX_REQUEST_BYTES} bytes)",
+                })
+                return
             line = raw.strip()
             if not line:
                 continue
@@ -581,21 +637,52 @@ class _Handler(socketserver.StreamRequestHandler):
                 tag = request.get("req")
                 if isinstance(tag, str):
                     response["req"] = tag
-            self.wfile.write((json.dumps(response, ensure_ascii=False) + "\n").encode())
-            self.wfile.flush()
+            self._reply(response)
             hook = getattr(self.server, "request_hook", None)
             if hook is not None:
                 hook()
 
+    def _reply(self, response: dict[str, Any]) -> None:
+        self.wfile.write((json.dumps(response, ensure_ascii=False) + "\n").encode())
+        self.wfile.flush()
+
 
 class _UnixServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
+    #: Accepted-but-queued connections; the rest get a fast refusal (see below).
+    request_queue_size = _MAX_CONNECTIONS
 
     def __init__(self, path: str, handler, engine: QueryEngine, request_hook=None, idle_hook=None):
         self.engine = engine
         self.request_hook = request_hook
         self.idle_hook = idle_hook
+        self._slots = threading.BoundedSemaphore(_MAX_CONNECTIONS)
         super().__init__(path, handler)
+
+    def process_request(self, request, client_address) -> None:
+        """Serve at most ``_MAX_CONNECTIONS`` clients at once.
+
+        Threads are daemon and unbounded by default, so a client that connects
+        and then sits on it would pile up threads. Refusing right away (instead
+        of blocking the accept loop) keeps the daemon answering the others.
+        """
+        if not self._slots.acquire(blocking=False):
+            log.warning("queryd: refusing a connection: %d already active", _MAX_CONNECTIONS)
+            with contextlib.suppress(OSError):
+                request.sendall(b'{"ok":false,"error":"too many connections"}\n')
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 class QuerydServer:
