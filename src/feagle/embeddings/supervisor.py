@@ -95,9 +95,20 @@ def build_llama_command(cfg: SupervisorConfig, port: int) -> list[str]:
 
 
 def _free_port() -> int:
+    """A currently free loopback port.
+
+    The socket is closed by the time the caller uses the number, so the port can
+    be taken in between; ``LlamaSupervisor._start_server`` retries on another
+    port when the server dies at startup, which is what that race looks like.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+#: Attempts at a fresh port when llama-server exits during startup (see
+#: ``_free_port``: the port can be taken between the probe and the bind).
+_SPAWN_ATTEMPTS = 3
 
 
 def _default_health(url: str, timeout: float = 1.0) -> bool:
@@ -255,21 +266,45 @@ class LlamaSupervisor:
             log.warning("stale llama-server port file; starting a new server")
             self._remove_files()
 
-        port = _free_port()
-        url = f"http://127.0.0.1:{port}"
-        command = build_llama_command(self.cfg, port)
-        log.info("starting llama-server on port %d", port)
-        self._proc = self._spawn(command)
-        self._write_files(port, int(getattr(self._proc, "pid", 0)))
+        return self._start_server()
 
-        if self._wait_healthy(url):
-            self._url = url
-            self._owned = True
-            self._last_activity = self._clock()
-            return url
+    def _start_server(self) -> str:
+        """Spawn ``llama-server`` on a free port and return its base URL.
 
-        self._remove_files()
-        self._terminate()
+        ``_free_port`` releases its socket before llama-server binds, so in that
+        window another process can take the port; the server then exits at once.
+        An early exit is therefore retried on a fresh port instead of failing the
+        request. A server that stays alive but never becomes healthy is a real
+        failure (a bad model or flags) and is reported after one attempt, so a
+        broken setup does not pay the health timeout several times over.
+        """
+        for attempt in range(1, _SPAWN_ATTEMPTS + 1):
+            port = _free_port()
+            url = f"http://127.0.0.1:{port}"
+            command = build_llama_command(self.cfg, port)
+            log.info("starting llama-server on port %d", port)
+            self._proc = self._spawn(command)
+            self._write_files(port, int(getattr(self._proc, "pid", 0)))
+
+            if self._wait_healthy(url):
+                self._url = url
+                self._owned = True
+                self._last_activity = self._clock()
+                return url
+
+            exited = self._proc is not None and self._proc.poll() is not None
+            self._remove_files()
+            self._terminate()
+            self._proc = None
+            if not exited:
+                break
+            if attempt < _SPAWN_ATTEMPTS:
+                log.warning(
+                    "llama-server exited at startup (attempt %d/%d); trying another port",
+                    attempt,
+                    _SPAWN_ATTEMPTS,
+                )
+
         raise ServerUnavailable(
             f"llama-server did not become healthy in {self.cfg.health_timeout:.0f}s; "
             f"see {self.log_file}"

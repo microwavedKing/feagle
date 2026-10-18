@@ -212,16 +212,62 @@ def test_unhealthy_spawn_raises_and_cleans_up(tmp_path):
 
 
 def test_early_exit_detected(tmp_path):
-    proc = FakeProc(exit_code=1)
+    procs = []
+
+    def spawn(cmd):
+        proc = FakeProc(exit_code=1)
+        procs.append(proc)
+        return proc
+
     sup, _ = make_supervisor(
         tmp_path,
         health=lambda url: False,
-        spawn=lambda cmd: proc,
+        spawn=spawn,
         cfg_kwargs={"health_timeout": 5.0},
     )
     with pytest.raises(Exception, match="did not become healthy"):
         sup.ensure_running()
-    assert proc.terminated is True
+    # a server that dies at once (usually a taken port) is retried, then given up
+    assert len(procs) == supervisor_module._SPAWN_ATTEMPTS
+    assert all(proc.terminated for proc in procs)
+
+
+def test_startup_exit_is_retried_on_another_port(tmp_path):
+    """A port taken between the probe and the bind must not fail the request."""
+    procs = [FakeProc(exit_code=1), FakeProc(exit_code=1), FakeProc()]
+    commands = []
+
+    def spawn(cmd):
+        commands.append(cmd)
+        return procs.pop(0)
+
+    sup, _ = make_supervisor(tmp_path, health=lambda url: True, spawn=spawn)
+    url = sup.ensure_running()
+
+    assert len(commands) == 3
+    ports = {command[command.index("--port") + 1] for command in commands}
+    assert len(ports) == 3  # a fresh port for every attempt
+    assert (tmp_path / "llama.port").read_text() == url.rsplit(":", 1)[1]
+    assert sup.owned is True
+
+
+def test_a_server_that_stays_alive_is_not_retried(tmp_path):
+    """A bad model or bad flags is reported after one attempt, not three."""
+    calls = []
+
+    def spawn(cmd):
+        calls.append(cmd)
+        return FakeProc()
+
+    sup, _ = make_supervisor(
+        tmp_path,
+        health=lambda url: False,
+        spawn=spawn,
+        cfg_kwargs={"health_timeout": 2.0},
+    )
+    with pytest.raises(Exception, match="did not become healthy"):
+        sup.ensure_running()
+    assert len(calls) == 1
 
 
 def test_idle_stop_terminates_owned_server(tmp_path):

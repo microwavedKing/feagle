@@ -163,10 +163,13 @@ def _embed(
     """Embed documents, degrading gracefully instead of failing the file.
 
     Returns a list aligned with ``items`` (``None`` marks a chunk that could not
-    be embedded), or ``None`` when the server is unavailable and nothing could
-    be embedded at all. A batch that the server rejects (for example an input
-    larger than the slot context) is retried chunk by chunk so that one bad
-    chunk does not cost the whole file its vectors.
+    be embedded), or ``None`` when nothing can be embedded **right now** because
+    the server is unavailable. The two are different outcomes for a caller that
+    walks many files: an all-``None`` list is about this file's content (an input
+    the model rejects), while ``None`` means the embeddings server is down and
+    the walk should stop rather than hammer it. A batch that the server rejects
+    (for example an input larger than the slot context) is retried chunk by chunk
+    so that one bad chunk does not cost the whole file its vectors.
     """
     try:
         return embedder.embed_documents(items)
@@ -187,8 +190,6 @@ def _embed(
             log.warning("chunk cannot be embedded, skipping it: %s", exc)
             vectors.append(None)
 
-    if all(vector is None for vector in vectors):
-        return None
     return vectors
 
 
@@ -473,14 +474,31 @@ def vec_delete(conn: sqlite3.Connection, chunk_ids: list[int]) -> None:
     vec.delete_vectors(conn, chunk_ids)
 
 
+#: Consecutive "server unavailable" failures that end a backfill pass. A dead
+#: server fails every file and each attempt pays the client timeout, so walking a
+#: large queue would only spin; content-specific failures never stop the pass.
+_BACKFILL_SERVER_FAILURES = 3
+
+
 def backfill(
     conn: sqlite3.Connection, cfg: dict[str, Any], embedder: Embedder, *, limit: int | None = None
 ) -> int:
-    """Embed chunks of files that are marked ``embedded=0``. Returns file count."""
+    """Embed chunks of files that are marked ``embedded=0``. Returns file count.
+
+    One file that cannot be embedded no longer aborts the whole pass. A
+    content-specific failure (a video whose frames do not match its chunks, an
+    image the model refuses, a chunk the server rejects) leaves the file at
+    ``embedded=0`` so a later pass retries it, and the walk goes on. Only a run
+    of ``ServerUnavailable`` failures ends the pass early: that is what a dead
+    embeddings server looks like, and the rest of the queue waits for the next
+    pass instead of paying a timeout per file.
+    """
     rows = conn.execute(
         "SELECT id, path FROM files WHERE state = 'ok' AND embedded = 0 ORDER BY id"
     ).fetchall()
     done = 0
+    pending = 0
+    server_failures = 0
     for row in rows:
         chunks = conn.execute(
             "SELECT id, body FROM chunks WHERE file_id = ? ORDER BY seq", (row["id"],)
@@ -492,21 +510,43 @@ def backfill(
 
         media_cfg = cfg.get("media") or {}
         suffix = Path(row["path"]).suffix.lower()
+        unavailable = False
+        problem: str | None = None
         if suffix in VIDEO_SUFFIXES and media_cfg.get("video"):
             _frame_chunks, vectors = _index_video_frames(
                 Path(row["path"]), media_cfg, embedder, allow_image=True, ocr=False
             )
-            if vectors is None or len(vectors) != len(chunks):
-                log.warning("cannot backfill video %s", row["path"])
-                break
+            if vectors is None:
+                unavailable, problem = True, "frame embedding failed"
+            elif len(vectors) != len(chunks):
+                problem = f"only {len(vectors)} of {len(chunks)} frames got a vector"
         elif suffix in IMAGE_SUFFIXES and media_cfg.get("images"):
             vectors = _embed_image(embedder, Path(row["path"]), media_cfg)
+            if vectors is None:
+                problem = "image embedding failed"
         else:
             vectors = _embed(
                 embedder, [(chunk["body"], Path(row["path"]).stem) for chunk in chunks]
             )
-        if vectors is None:
-            break  # server unavailable: stop rather than spin
+            if vectors is None:
+                unavailable, problem = True, "embeddings server unavailable"
+
+        if problem is not None:
+            pending += 1
+            log.warning("backfill: %s: %s", row["path"], problem)
+            server_failures = server_failures + 1 if unavailable else 0
+            if server_failures >= _BACKFILL_SERVER_FAILURES:
+                log.warning(
+                    "backfill: embeddings server looks down; stopping this pass, "
+                    "the remaining files wait for the next one"
+                )
+                break
+            continue
+        server_failures = 0
+
+        # A file only gets here with usable vectors: every way of ending up with
+        # ``None`` set ``problem`` above and either continued or stopped the pass.
+        assert vectors is not None
 
         db.ensure_vec_table(conn, embedder.dim, model_id=cfg["embeddings"]["model"])
         chunk_ids = [chunk["id"] for chunk in chunks]
@@ -526,9 +566,12 @@ def backfill(
         if complete:
             done += 1
         else:
+            pending += 1
             log.warning("some chunks of %s could not be embedded", row["path"])
         if limit is not None and done >= limit:
             break
+    if pending:
+        log.warning("backfill: %d file(s) still lack vectors, will retry", pending)
     return done
 
 

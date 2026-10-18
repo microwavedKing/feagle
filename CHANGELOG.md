@@ -20,6 +20,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.md`: a "Privacy and security" section (EN + RU), and a matching
   "Модель безопасности" subsection in `ARCHITECTURE.md`.
 
+### Fixed
+
+- Backfill no longer gives up on the whole queue because of one file: a file whose
+  content cannot be embedded keeps `embedded=0` for a later pass, and the walk
+  goes on. Only a *run* of failures ends the pass early — three in a row — which
+  is what a dead embeddings server looks like, where every further attempt would
+  cost a client timeout.
+- A request to the query daemon is now bounded: a line over 256 KiB is refused
+  instead of buffered, a search query over 4096 characters is refused, `embed`
+  refuses more than 64 texts or one over 8192 characters, at most 16 connections
+  are served at once (the next is refused right away) and a connection idle for
+  120 s is closed. None of this changed what a normal client sees.
+- `llama-server` startup is retried on a new port when it exits immediately, which
+  is what a port taken between the free-port probe and the bind looks like. A
+  server that stays alive but never becomes healthy is still an error after one
+  attempt.
+
 ## [0.3.0] - 2026-10-18
 
 Quality and release tooling, plus two search bugs found by using the thing. No
@@ -362,6 +379,22 @@ on Wayland.
 
 - `README.md`: раздел «Приватность и безопасность» (EN + RU) и соответствующий
   подраздел «Модель безопасности» в `ARCHITECTURE.md`.
+
+### Исправлено
+
+- Backfill больше не бросает всю очередь из-за одного файла: файл, содержимое
+  которого не эмбеддится, остаётся с `embedded=0` до следующего прохода, а обход
+  продолжается. Проход прерывается только после серии неудач — трёх подряд: так
+  выглядит мёртвый сервер эмбеддингов, где каждая следующая попытка стоила бы
+  клиентского таймаута.
+- Запрос к демону запросов теперь ограничен: строка длиннее 256 КиБ отклоняется, а
+  не буферизуется, поисковый запрос длиннее 4096 символов отклоняется, `embed`
+  отклоняет больше 64 текстов или текст длиннее 8192 символов, одновременно
+  обслуживается не больше 16 соединений (следующее отклоняется сразу), а соединение,
+  молчащее 120 с, закрывается. Для обычного клиента не изменилось ничего.
+- Старт `llama-server` повторяется на новом порту, если процесс вышел сразу — так
+  выглядит порт, перехваченный между пробой свободного порта и bind. Сервер, который
+  жив, но так и не стал здоровым, по-прежнему считается ошибкой после одной попытки.
 
 ## 0.3.0 (по-русски) — 2026-10-18
 
