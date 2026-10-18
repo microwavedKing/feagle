@@ -40,6 +40,30 @@ def test_absent_page_drops_flag_and_placeholder():
     ]
 
 
+def test_braces_in_the_path_are_kept():
+    """A path is data, never a template."""
+    path = Path("/a/{draft}/b{1}.txt")
+    assert openers.build_command("xdg-open {path}", path=path) == ["xdg-open", str(path)]
+
+
+def test_literal_braces_in_the_template_survive():
+    template = "sh -c 'awk {print $1}' {path}"
+    command = openers.build_command(template, path=Path("/a/b.txt"))
+    assert command == ["sh", "-c", "awk {print $1}", "/a/b.txt"]
+
+
+def test_an_unknown_placeholder_is_not_a_crash():
+    command = openers.build_command("echo {pth} {path}", path=Path("/a/b.txt"))
+    assert command == ["echo", "{pth}", "/a/b.txt"]
+
+
+def test_a_format_spec_on_a_placeholder_still_works():
+    command = openers.build_command(
+        "zathura --page {page:>3} {path}", path=Path("/a/b.pdf"), page=7
+    )
+    assert command == ["zathura", "--page", "  7", "/a/b.pdf"]
+
+
 def test_line_placeholder_inside_token():
     command = openers.build_command(OPENERS["py"], path=Path("/a/b.py"), line=42)
     assert command == ["code", "--goto", "/a/b.py:42"]
