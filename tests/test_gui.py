@@ -78,7 +78,7 @@ def test_unknown_section_is_reported(tmp_path, caplog):
     ("text", "key", "expected"),
     [
         ("preview_width = 5000\n", "preview_width", 360),
-        ("row_columns = 0\n", "row_columns", 4),
+        ("row_columns = 0\n", "row_columns", 3),
         ('theme = "solarized"\n', "theme", "dark"),
         ('debounce_ms = "soon"\n', "debounce_ms", 120),
         ('show_preview = "maybe"\n', "show_preview", True),
@@ -123,7 +123,7 @@ def test_coerce_accepts(key, value, expected):
         ("preview_width", 900),  # above the maximum
         ("preview_width", True),  # a bool is not an integer
         ("preview_width", "wide"),
-        ("row_columns", 5),
+        ("row_columns", 4),
         ("theme", "Solarized"),  # choices are case-sensitive
         ("default_filter", "app"),
         ("debounce_ms", 5000),
@@ -142,7 +142,7 @@ def test_set_gui_refuses_before_writing(tmp_path):
     with pytest.raises(gui.GuiError):
         gui.set_gui({"theme": "light", "row_columns": 99}, path)
     assert path.read_text(encoding="utf-8") == before
-    assert gui.load_gui(path)["row_columns"] == 4
+    assert gui.load_gui(path)["row_columns"] == 3
 
 
 def test_set_gui_needs_a_change(tmp_path):
@@ -165,6 +165,6 @@ def test_schema_covers_every_setting_and_is_json_ready():
     assert set(schema) == set(gui.SETTINGS)
     json.dumps(schema)  # the daemon puts it on the socket as JSON
     assert schema["row_columns"]["min"] == 1
-    assert schema["row_columns"]["max"] == 4
+    assert schema["row_columns"]["max"] == 3
     assert schema["theme"]["choices"] == ["dark", "light"]
     assert schema["show_preview"]["kind"] == "bool"

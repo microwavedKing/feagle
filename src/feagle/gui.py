@@ -62,9 +62,10 @@ class Setting:
     hint: str = ""
 
 
-#: Every key the panel may read or write. `row_columns` counts the row's four
-#: columns from the left: icon, title, path, and the position/meta column, so 4
-#: is the full row the launcher has always drawn.
+#: Every key the panel may read or write. `row_columns` counts the row's *text*
+#: columns from the left — title, path, and the position/meta column — so 3 is
+#: the full row the launcher has always drawn. The icon is not one of them: it is
+#: always drawn.
 SETTINGS: dict[str, Setting] = {
     "show_preview": Setting(
         "bool", True, hint="preview pane for the selected file"
@@ -73,7 +74,7 @@ SETTINGS: dict[str, Setting] = {
         "int", 360, minimum=200, maximum=800, hint="preview pane width, px"
     ),
     "row_columns": Setting(
-        "int", 4, minimum=1, maximum=4, hint="columns per result row: icon, title, path, meta"
+        "int", 3, minimum=1, maximum=3, hint="text columns per row: title, path, meta"
     ),
     "layout": Setting(
         "str", "detailed", choices=("compact", "detailed"), hint="row density"

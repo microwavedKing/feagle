@@ -104,7 +104,7 @@ def test_get_gui_returns_the_settings_with_their_schema(engine):
     reply = engine.dispatch({"op": "get_gui"})
     assert reply["ok"] is True
     assert reply["gui"] == gui.default_gui()
-    assert reply["schema"]["row_columns"]["max"] == 4
+    assert reply["schema"]["row_columns"]["max"] == 3
     assert reply["schema"]["theme"]["choices"] == ["dark", "light"]
     assert reply["path"].endswith("gui.toml")
 

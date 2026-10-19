@@ -223,8 +223,8 @@ llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
 ### Настройки попапа (`~/.config/feagle/gui.toml`)
 
 Отдельный файл (секция `[popup]`), который пишет **сам попап** через `set_gui`:
-`show_preview`, `preview_width`, `row_columns` (сколько колонок строки рисовать:
-иконка, название, путь, мета), `layout` (compact/detailed), `theme`, `default_filter`,
+`show_preview`, `preview_width`, `row_columns` (сколько текстовых колонок строки рисовать:
+название, путь, мета; иконка рисуется всегда), `layout` (compact/detailed), `theme`, `default_filter`,
 `apps_limit`, `debounce_ms`. Отдельно от `config.toml` намеренно: сюда пишет UI, и
 ошибка в нём не должна уметь сломать индексацию. Чтение лояльное (плохое значение →
 предупреждение и дефолт), запись строгая (`coerce` до записи, атомарная замена, 0600);
