@@ -5,7 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-19
+
+Security, packaging and a round of fixes from an audit of the whole code base.
+The query daemon previews only files that are in the index, removing a directory
+from `[index].roots` removes it from the index too, and `feagle doctor` explains
+the two settings that bite most often (a large embedding batch on a wide CPU
+model, a remote `[embeddings].server_url`). Adds a manual page, shell
+completions and freshly measured tables. No breaking changes; the two visible
+differences are that a dropped root disappears from the index and that
+`feagle setup` keeps timestamped backups.
 
 ### Security
 
@@ -468,7 +477,15 @@ on Wayland.
 
 ---
 
-## Unreleased (по-русски)
+## 0.4.0 (по-русски) — 2026-10-19
+
+Безопасность, упаковка и серия исправлений по итогам аудита всего кода. Демон
+запросов отдаёт превью только для файлов из индекса, удаление каталога из
+`[index].roots` убирает его и из индекса, а `feagle doctor` объясняет две настройки,
+которые чаще всего кусаются (большой батч эмбеддинга на широкой CPU-модели и внешний
+`[embeddings].server_url`). Добавлены man-страница, комплишены и перемеренные таблицы.
+Ломающих изменений нет; заметны две вещи — убранный из `[index].roots` каталог
+исчезает из индекса, а `feagle setup` хранит бэкапы с таймстампом.
 
 ### Безопасность
 

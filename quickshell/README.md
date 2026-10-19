@@ -262,7 +262,7 @@ disconnect).
 one connection can mix request kinds. The demo tags `"launcher"` and `"preview"`
 and routes on `req`.
 
-**`ping`** → `{"ok":true,"version":"0.3.0"}`.
+**`ping`** → `{"ok":true,"version":"0.4.0"}`.
 
 **`status`** → index counts (`files`, `chunks`, `vectors`, `schema_version`, …).
 

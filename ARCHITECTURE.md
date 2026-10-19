@@ -150,7 +150,7 @@ chunks_vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[DIM])
 ### queryd (NDJSON поверх unix-сокета, `$XDG_RUNTIME_DIR/feagle/queryd.sock`, 0600)
 
 ```json
-{"op":"ping"}                                  → {"ok":true,"version":"0.3.0"}
+{"op":"ping"}                                  → {"ok":true,"version":"0.4.0"}
 {"op":"search","query":"...","limit":20,"mode":"auto"}
                                                → {"ok":true,"mode":"hybrid|fts","took_ms":52,
                                                   "results":[{rank,score,path,page,line,snippet,chunk_id}]}
