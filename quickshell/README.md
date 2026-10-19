@@ -186,6 +186,7 @@ State (read-only for the launcher):
 | `connected` | Whether the socket is connected. |
 | `guiConfig` | The popup settings from `gui.toml` (`{}` until the daemon answers). |
 | `guiSchema` | `{kind, default, min, max, choices, hint}` per setting — render a panel from this. |
+| `history` | Recent queries, newest first (`[]` until the daemon answers). |
 
 Functions and signals:
 
@@ -199,6 +200,8 @@ Functions and signals:
 | `warmup()` | Ask the daemon to load the model in the background. |
 | `getGui()` | Fetch the popup settings and their schema (sent automatically on connect). |
 | `setGui(key, value)` | Persist one popup setting; `guiConfig` refreshes from the reply. |
+| `getHistory()` | Fetch the query history (sent automatically on connect). |
+| `addHistory(text)` | Remember a query; `history` refreshes from the reply. |
 | `reset()` | Clear the query/results and warm up again. |
 | `activate(index)` | Run `visibleResults[index]`. |
 | `activateItem(item)` | Launch an app or open a file for one item. |
@@ -230,6 +233,10 @@ per request.
 - `mode`: `"fts"` (keyword, instant) or `"hybrid"` (semantic; needs
   `llama-server`). Omit it to use the configured default.
 - `limit`: maximum file hits (optional).
+- With an **empty query** the daemon does no search (and does not embed `""`):
+  you get applications, then your **pinned files** (`favorites` in `gui.toml`),
+  then files you opened recently (frecency). Every path there is checked against
+  the index, so neither list can surface a file that is not indexed.
 - App `icon` is the `.desktop` `Icon=` name (feed it to `Quickshell.iconPath`);
   `exec` is a ready argv list — run it as-is, not through a shell.
 - File `line` / `page` / `time` are `null` when not applicable; `time` is in
@@ -251,13 +258,18 @@ there is no embedder (keyword search still works).
 {"op":"search","query":"tarts","limit":20,"mode":"hybrid"}
 ```
 
-**`used`** — remember that an application was launched (feeds the frecency
-ranking below). Send it after running `exec`:
+**`used`** — remember that something was launched (feeds the application ranking
+and the "recent files" list). Send it after running `exec` or opening a file:
 
 ```json
 {"op":"used","key":"firefox.desktop"}
+{"op":"used","key":"/home/me/notes.md","kind":"file"}
 {"ok":true}
 ```
+
+- `kind` is `"app"` (the default) or `"file"`. A file is recorded only when the
+  index knows it: the frecency file is user-writable, and browse mode shows those
+  paths back, so anything else would become a way to surface arbitrary paths.
 
 **`preview`** — a small preview of one file, for a preview pane:
 
@@ -330,6 +342,18 @@ and routes on `req`.
   may break indexing. It is written atomically, mode 0600.
 - Reading is lenient: a hand-edited file with a wrong value logs a warning and
   the default wins, so a typo never leaves the popup unusable.
+
+**`history`** — the queries the user actually ran, newest first (the popup walks
+them with `↑`/`↓` while the field is empty):
+
+```json
+{"op":"history"}                 → {"ok":true,"entries":["tarts","rust ownership"]}
+{"op":"history","add":"tarts"}   → {"ok":true,"entries":["tarts","rust ownership"]}
+```
+
+- `add` de-duplicates (an existing entry moves to the front), drops empty and
+  over-long entries, and keeps at most 100; the list lives in
+  `$XDG_STATE_HOME/feagle/history.json` (0600).
 
 **Two-phase pattern.** Send `mode:"fts"` on every keystroke and `mode:"hybrid"`
 after a short pause; the later reply simply replaces the list. Send `warmup`

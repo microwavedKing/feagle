@@ -50,6 +50,11 @@ class GuiError(Exception):
     """A setting name or value the popup cannot use."""
 
 
+#: How many pinned files ``favorites`` may hold, and how long one path may be.
+MAX_FAVORITES = 100
+MAX_PATH_CHARS = 4096
+
+
 @dataclass(frozen=True)
 class Setting:
     """One exposed key: its type, default and accepted range."""
@@ -134,12 +139,23 @@ SETTINGS: dict[str, Setting] = {
         hint="pause before the semantic pass",
         hint_ru="пауза перед семантическим поиском",
     ),
+    # `favorites` has no control in the panel (it is toggled with Ctrl+D over a
+    # result), so it is deliberately absent from the panel's order.
+    "favorites": Setting(
+        "paths",
+        [],
+        hint="pinned files, shown first on an empty query (Ctrl+D)",
+        hint_ru="закреплённые файлы, первыми при пустом запросе (Ctrl+D)",
+    ),
 }
 
 
 def default_gui() -> dict[str, Any]:
-    """A fresh copy of every default."""
-    return {key: setting.default for key, setting in SETTINGS.items()}
+    """A fresh copy of every default (lists included: callers may mutate)."""
+    return {
+        key: list(setting.default) if isinstance(setting.default, list) else setting.default
+        for key, setting in SETTINGS.items()
+    }
 
 
 def gui_file() -> Path:
@@ -194,9 +210,24 @@ def coerce(key: str, value: Any) -> Any:
         if setting.maximum is not None and number > setting.maximum:
             raise GuiError(f"{key} must be <= {setting.maximum}")
         return number
+    if setting.kind == "paths":
+        return _as_paths(key, value)
     if not isinstance(value, str) or value not in setting.choices:
         raise GuiError(f"{key} must be one of " + ", ".join(setting.choices))
     return value
+
+
+def _as_paths(key: str, value: Any) -> list[str]:
+    """A list of absolute paths (pins); empty entries are dropped."""
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise GuiError(f"{key} must be a list of paths")
+    paths = [path for path in value if path]
+    if len(paths) > MAX_FAVORITES:
+        raise GuiError(f"{key} holds at most {MAX_FAVORITES} paths")
+    for path in paths:
+        if not path.startswith("/") or len(path) > MAX_PATH_CHARS:
+            raise GuiError(f"{key}: paths must be absolute and shorter than {MAX_PATH_CHARS}")
+    return paths
 
 
 def load_gui(path: Path | None = None) -> dict[str, Any]:

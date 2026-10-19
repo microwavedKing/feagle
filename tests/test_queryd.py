@@ -634,6 +634,82 @@ def test_launcher_browse_lists_used_apps_first(db_path, monkeypatch):
     assert [r["name"] for r in result["results"] if r["kind"] == "app"] == ["Alps", "Alpha"]
 
 
+def test_launcher_accepts_zero_apps(engine):
+    """The popup asks for 0 applications while the "files" filter is active."""
+    result = engine.dispatch({"op": "launcher", "query": "alpha", "apps_limit": 0})
+    assert result["ok"] is True
+    assert [item for item in result["results"] if item["kind"] == "app"] == []
+
+
+def test_browse_lists_recent_files_by_frecency(engine, monkeypatch):
+    from feagle import apps
+
+    monkeypatch.setattr(apps, "discover_apps", lambda: [])
+    for _ in range(2):
+        assert engine.dispatch({"op": "used", "key": "/d/0.txt", "kind": "file"})["ok"] is True
+    assert engine.dispatch({"op": "used", "key": "/d/1.txt", "kind": "file"})["ok"] is True
+
+    result = engine.dispatch({"op": "launcher", "query": "", "apps_limit": 0})
+    files = [item for item in result["results"] if item["kind"] == "file"]
+    assert [item["path"] for item in files] == ["/d/0.txt", "/d/1.txt"]
+    assert files[0]["line"] is None and files[0]["page"] is None
+
+
+def test_browse_puts_favorites_first_without_duplicates(engine, monkeypatch):
+    from feagle import apps, gui
+
+    monkeypatch.setattr(apps, "discover_apps", lambda: [])
+    engine.dispatch({"op": "used", "key": "/d/0.txt", "kind": "file"})
+    engine.dispatch({"op": "used", "key": "/d/1.txt", "kind": "file"})
+    gui.set_gui({"favorites": ["/d/1.txt"]})
+
+    result = engine.dispatch({"op": "launcher", "query": "", "apps_limit": 0})
+    files = [item["path"] for item in result["results"] if item["kind"] == "file"]
+    assert files == ["/d/1.txt", "/d/0.txt"]
+
+
+def test_browse_hides_paths_the_index_does_not_know(db_path, monkeypatch):
+    """gui.toml and frecency.json are user-writable: the index stays the allowlist."""
+    from feagle import apps, gui
+
+    monkeypatch.setattr(apps, "discover_apps", lambda: [])
+    gui.set_gui({"favorites": ["/etc/passwd"]})
+    engine = QueryEngine(make_cfg(), db_path=db_path, embedder=None)
+
+    result = engine.dispatch({"op": "launcher", "query": "", "apps_limit": 0})
+    assert [item for item in result["results"] if item["kind"] == "file"] == []
+
+
+def test_used_file_must_be_indexed(engine):
+    reply = engine.dispatch({"op": "used", "key": "/not/in/the/index.txt", "kind": "file"})
+    assert reply["ok"] is False
+    assert "not in the index" in reply["error"]
+
+
+def test_used_rejects_an_unknown_kind(engine):
+    reply = engine.dispatch({"op": "used", "key": "x", "kind": "document"})
+    assert reply["ok"] is False
+    assert "kind must be one of" in reply["error"]
+
+
+def test_history_op_round_trip(engine):
+    assert engine.dispatch({"op": "history"})["entries"] == []
+    assert engine.dispatch({"op": "history", "add": "rust ownership"})["entries"] == [
+        "rust ownership"
+    ]
+    assert engine.dispatch({"op": "history", "add": "tarts"})["entries"] == [
+        "tarts",
+        "rust ownership",
+    ]
+    assert engine.dispatch({"op": "history"})["entries"] == ["tarts", "rust ownership"]
+
+
+def test_history_rejects_a_non_string(engine):
+    reply = engine.dispatch({"op": "history", "add": {"x": 1}})
+    assert reply["ok"] is False
+    assert "add must be a string" in reply["error"]
+
+
 def test_launcher_frecency_never_beats_a_better_match(db_path, monkeypatch):
     from feagle import apps, frecency
 

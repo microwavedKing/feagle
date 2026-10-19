@@ -162,6 +162,38 @@ def test_a_bad_value_on_disk_is_repaired_by_the_next_write(tmp_path):
     assert gui.load_gui(path)["theme"] == "dark"
 
 
+def test_favorites_round_trip(tmp_path):
+    path = _file(tmp_path)
+    values = gui.set_gui({"favorites": ["/a/b.txt", "/c"]}, path)
+    assert values["favorites"] == ["/a/b.txt", "/c"]
+    assert gui.load_gui(path)["favorites"] == ["/a/b.txt", "/c"]
+
+
+def test_default_favorites_are_a_fresh_list():
+    first = gui.default_gui()
+    first["favorites"].append("/tmp/x")
+    assert gui.default_gui()["favorites"] == []
+
+
+def test_favorites_drop_empty_entries():
+    assert gui.coerce("favorites", ["", "/a"]) == ["/a"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/a/b.txt",  # a bare string is not a list
+        ["relative/path"],
+        [1],
+        ["/" + "x" * gui.MAX_PATH_CHARS],
+        ["/x"] * (gui.MAX_FAVORITES + 1),
+    ],
+)
+def test_favorites_reject_unusable_values(value):
+    with pytest.raises(gui.GuiError):
+        gui.coerce("favorites", value)
+
+
 def test_schema_covers_every_setting_and_is_json_ready():
     schema = gui.schema()
 

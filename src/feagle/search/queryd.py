@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from .. import __version__, db, frecency, gui, paths
+from .. import __version__, db, frecency, gui, history, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..log import get_logger
 from ..search import hybrid
@@ -77,6 +77,12 @@ _MAX_CONNECTIONS = 16
 
 #: Search modes the protocol accepts (the same three the CLI offers).
 _MODES = ("auto", "hybrid", "fts")
+
+#: What ``used`` may report: an application launch or an opened file.
+_KINDS = ("app", "file")
+
+#: How many pinned/recent files browse mode (an empty query) returns.
+_BROWSE_FILES = 10
 
 
 class _BadRequest(Exception):
@@ -129,6 +135,15 @@ def _as_mode(value: Any) -> str | None:
     return value
 
 
+def _as_kind(value: Any) -> str:
+    """What ``used`` came from; applications unless told otherwise."""
+    if value is None:
+        return "app"
+    if not isinstance(value, str) or value not in _KINDS:
+        raise _BadRequest("kind must be one of " + ", ".join(_KINDS))
+    return value
+
+
 def _preview_window(total: int, line: int | None) -> tuple[int, int]:
     """The ``[start, end)`` line range to show for a preview."""
     if line is None or line < 1:
@@ -169,6 +184,7 @@ class QueryEngine:
         clock: Callable[[], float] = time.monotonic,
         retry_cooldown: float = 30.0,
         frecency_store: Any | None = None,
+        history_store: Any | None = None,
     ) -> None:
         self.cfg = cfg
         self.db_path = db_path or paths.db_path()
@@ -183,6 +199,9 @@ class QueryEngine:
         self._apps_built = 0.0
         self._apps_ttl = 60.0
         self._frecency = frecency_store if frecency_store is not None else frecency.FrecencyStore()
+        self._history = (
+            history_store if history_store is not None else history.QueryHistory()
+        )
         self._page_cache: dict[tuple[str, int, int], list[str]] = {}
 
     def _ensure_embedder(self) -> Any | None:
@@ -280,7 +299,12 @@ class QueryEngine:
 
         if (rejection := self._over_limit("query", query, _MAX_QUERY_CHARS)) is not None:
             return rejection
-        files = self.search(query, limit=limit, mode=mode)
+        # An empty query is browse mode: no search (and no embedding of ""), just
+        # applications plus the pinned/recent files.
+        if query.strip():
+            files = self.search(query, limit=limit, mode=mode)
+        else:
+            files = {"ok": True, "mode": "fts", "took_ms": 0.0, "results": []}
         results: list[dict[str, Any]] = []
         for score, app in apps_module.match_apps(
             self._app_list(), query, limit=apps_limit, bonus=self._app_bonus()
@@ -297,6 +321,12 @@ class QueryEngine:
             entry = dict(item)
             entry["kind"] = "file"
             results.append(entry)
+        if not query.strip():
+            # Browse mode: pinned files first, then what was opened recently.
+            for item in self._browse_files(_BROWSE_FILES):
+                entry = dict(item)
+                entry["kind"] = "file"
+                results.append(entry)
         return {
             "ok": True,
             "mode": files["mode"],
@@ -304,10 +334,81 @@ class QueryEngine:
             "results": results,
         }
 
-    def used(self, key: str) -> dict[str, Any]:
-        """Remember that ``key`` was launched (feeds the frecency ranking)."""
+    def used(self, key: str, kind: str = "app") -> dict[str, Any]:
+        """Remember a launch (feeds application ranking and recent files).
+
+        A file is recorded only when the index knows it: the frecency store is
+        user-writable, and browse mode shows those paths back as "recent files",
+        so anything else would turn it into a way to surface arbitrary paths.
+        """
+        if kind == "file" and not self._indexed(Path(key)):
+            return {"ok": False, "error": f"not in the index: {key}"}
         self._frecency.record(key)
         return {"ok": True}
+
+    def history(self, add: Any = None) -> dict[str, Any]:
+        """Recent queries; with ``add``, remember one first."""
+        if add is None:
+            return {"ok": True, "entries": self._history.entries()}
+        if not isinstance(add, str):
+            raise _BadRequest("add must be a string")
+        return {"ok": True, "entries": self._history.add(add)}
+
+    def _browse_files(self, limit: int) -> list[dict[str, Any]]:
+        """Pinned files first, then files opened recently (browse mode).
+
+        Both sources are user-writable (``gui.toml`` and ``frecency.json``), so
+        every candidate is checked against the index before it is returned.
+        """
+        pinned = [path for path in gui.load_gui().get("favorites", []) if path]
+        scores = self._frecency.scores()
+        recent = sorted(
+            (key for key in scores if key.startswith("/")),
+            key=lambda key: scores[key],
+            reverse=True,
+        )
+        candidates = list(dict.fromkeys([*pinned, *recent]))
+        kept = self._indexed_paths(candidates[: limit + len(pinned)])
+        return [
+            {
+                "rank": rank,
+                "score": round(scores.get(path, 0.0), 4),
+                "path": path,
+                "page": None,
+                "line": None,
+                "time": None,
+                "snippet": "",
+                "chunk_id": None,
+            }
+            for rank, path in enumerate(kept[:limit], start=1)
+        ]
+
+    def _indexed_paths(self, paths_: list[str]) -> list[str]:
+        """The subset of ``paths_`` the index knows, in the same order.
+
+        One connection for the whole batch: browse mode asks for a couple dozen
+        paths at once, and ``files.path`` is unique, so each check is an index
+        hit. Both spellings are accepted, like `_indexed`.
+        """
+        if not paths_:
+            return []
+        try:
+            conn = self._connect()
+        except (FileNotFoundError, sqlite3.Error) as exc:
+            log.warning("browse: cannot consult the index: %s", exc)
+            return []
+        try:
+            kept: list[str] = []
+            for path in paths_:
+                row = conn.execute(
+                    "SELECT 1 FROM files WHERE path IN (?, ?) LIMIT 1",
+                    (path, os.path.realpath(path)),
+                ).fetchone()
+                if row is not None:
+                    kept.append(path)
+            return kept
+        finally:
+            conn.close()
 
     def _indexed(self, target: Path) -> bool:
         """Whether ``target`` is a file the index knows about.
@@ -642,10 +743,16 @@ class QueryEngine:
                     str(request.get("query", "")),
                     limit=_as_int(request.get("limit"), "limit", minimum=1),
                     mode=_as_mode(request.get("mode")),
-                    apps_limit=_as_count(request.get("apps_limit"), "apps_limit", 8),
+                    apps_limit=_as_count(
+                        request.get("apps_limit"), "apps_limit", 8, minimum=0
+                    ),
                 )
             if op == "used":
-                return self.used(str(request.get("key", "")))
+                return self.used(
+                    str(request.get("key", "")), _as_kind(request.get("kind"))
+                )
+            if op == "history":
+                return self.history(request.get("add"))
             if op == "preview":
                 return self.preview(
                     str(request.get("path", "")),

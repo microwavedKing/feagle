@@ -111,7 +111,8 @@
 
 `units.py` (шаблоны юнитов + установка, `using_packaged()`), `doctor.py` (проверки),
 `setup.py` (TOML-рендер, бэкап, план), `gui.py` (настройки попапа: `SETTINGS`,
-`load_gui`/`save_gui`/`coerce`/`schema`, решение 61), `bench/` (тонкие CLI-обёртки над
+`load_gui`/`save_gui`/`coerce`/`schema`, решение 61), `history.py` (история запросов
+в state-каталоге, решение 62), `bench/` (тонкие CLI-обёртки над
 `feagle.bench`).
 Вне пакета: `man/feagle.1` (man-страница), `completions/` (bash, zsh, fish) — оба
 устанавливает `PKGBUILD`, а `tests/test_cli_docs.py` падает, если команда или опция
@@ -162,6 +163,9 @@ chunks_vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[DIM])
 {"op":"launcher","query":"...","mode":"fts|hybrid","apps_limit":8}
                                                → {"ok":true,"mode":..,"results":[{kind:"app"|"file",...}]}
 {"op":"used","key":"firefox.desktop"}          → {"ok":true}   (история запусков для frecency)
+{"op":"used","key":"/path/note.md","kind":"file"} → {"ok":true}   (файл обязан быть в индексе)
+{"op":"history"}                             → {"ok":true,"entries":["...", "..."]}
+{"op":"history","add":"..."}                 → {"ok":true,"entries":["...", "..."]}
 {"op":"preview","path":"...","line":12}        → {"ok":true,"kind":"text|image|meta","text":...}
 {"op":"get_gui"}                              → {"ok":true,"gui":{...},"schema":{...},"path":"..."}
 {"op":"set_gui","settings":{"theme":"light"}}  → {"ok":true,"gui":{...}}
@@ -226,7 +230,8 @@ llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
 `language` (auto/en/ru — язык интерфейса, auto по локали), `show_preview`,
 `preview_width`, `row_columns` (сколько текстовых колонок строки рисовать:
 название, путь, мета; иконка рисуется всегда), `layout` (compact/detailed), `theme`, `default_filter`,
-`apps_limit`, `debounce_ms`. Отдельно от `config.toml` намеренно: сюда пишет UI, и
+`apps_limit`, `debounce_ms`, `favorites` (список путей — закреплённые файлы, пишет
+Ctrl+D в попапе, а не панель). Отдельно от `config.toml` намеренно: сюда пишет UI, и
 ошибка в нём не должна уметь сломать индексацию. Чтение лояльное (плохое значение →
 предупреждение и дефолт), запись строгая (`coerce` до записи, атомарная замена, 0600);
 схему с диапазонами, вариантами и **подсказками на двух языках** отдаёт `get_gui`,
@@ -388,6 +393,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 59 | `doctor` предупреждает, когда у модели ≥ 1024 измерений, а `[index].embed_batch_size` больше 4; дефолт 16 не меняется | на CPU батч из 16 длинных книжных чанков не влезает в 60-секундный таймаут клиента: файлы остаются с `embedded=0` (замер: 81 % покрытия, два таймаута), а с батчем 4 таймаутов нет вовсе. Предупреждение, а не новый дефолт: EmbeddingGemma быстрее, и трогать её настройку не за чем | `doctor.check_embed_batch`, `config.DEFAULTS` |
 | 60 | Прогон Qwen3 по книгам (852 чанка, батч 4) **не добиваем**; строка в README остаётся с прежнего корпуса (230 чанков) с пометкой | корпуса и так расходятся: Qwen3 выигрывает на синтетике, EmbeddingGemma — на реальном тексте книг; полный прогон — это ~20 мин CPU ради одной строки таблицы, которая ничего не меняет в дефолте. Пометка в README важнее числа | README «Alternative model», `ARCHITECTURE.md` §9 |
 | 61 | Настройки попапа живут в **отдельном `gui.toml`** и ходят через `queryd` ops `get_gui`/`set_gui`; читаем лояльно (плохое значение → лог и дефолт), пишем строго (`coerce` до записи, атомарная замена, 0600), а вместе со значениями едет **схема** (диапазоны/варианты/подсказки) | писать UI-настройки в `config.toml` нельзя: панель сохраняет по клику, и одна опечатка там стоила бы индексации. Схема в ответе — чтобы диапазоны не дублировались в QML: `gui.SETTINGS` остаётся единственным источником правды, а `set_gui` отклоняет значение вне диапазона **до** записи (тест `test_set_gui_refuses_before_writing`) | `gui.py`, `paths.gui_file`, `queryd.QueryEngine.get_gui/set_gui` |
+| 62 | Browse-режим (пустой запрос) не ищет вовсе: `launcher` отдаёт приложения, затем **закреплённые** файлы из `gui.toml`, затем **недавно открытые** из frecency; каждый путь сверяется с индексом. История запросов — отдельный `history.json` в state-каталоге, `used` получил `kind` (`app`/`file`, файл обязан быть в индексе). Заодно `apps_limit = 0` больше не отклоняется | пустая строка уходила в эмбеддер, и KNN возвращал случайных соседей: browse показывал мусор, а открытие файла никак не влияло на список. `gui.toml` и `frecency.json` может править пользователь (и пишет QML), поэтому любой из них — ещё один способ подсветить произвольный путь; allowlist из индекса закрывает это так же, как `preview` (решение 45). История — в state, а не в `gui.toml`: она летучая, это не настройка, и её не должен перезаписывать `set_gui`. `apps_limit = 0` шлёт сам попап при фильтре Files, а валидация типов (решение 56) его отклоняла | `queryd.launcher/_browse_files/_indexed_paths/used/history`, `history.py`, `gui.SETTINGS["favorites"]` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 
