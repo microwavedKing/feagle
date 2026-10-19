@@ -56,6 +56,11 @@ def config_file() -> Path:
     return config_dir() / "config.toml"
 
 
+def gui_file() -> Path:
+    """The launcher popup's own settings (written by ``set_gui``)."""
+    return config_dir() / "gui.toml"
+
+
 def data_dir() -> Path:
     return data_home() / APP_NAME
 
