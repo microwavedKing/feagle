@@ -51,10 +51,35 @@ hotkey ("search my files") next to the plain launcher one.
 | `Ctrl+Enter` | Open the **folder** that contains the file |
 | `Ctrl+C` | Copy the file's path (or the app's command) to the clipboard |
 | `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Clear the line / delete a word / select all |
-| `Esc` | Close |
+| `Esc` | Close the settings panel, then the window |
+| `⚙` in the footer | Open/close the settings panel |
 
 Mouse works too: click a row to open it, hover to select, wheel to scroll the
-list or the preview, click a filter chip in the header.
+list or the preview, click a filter chip in the header, click the gear.
+
+### Settings
+
+The gear in the footer opens a panel over the results. Every control saves **on
+change** through the daemon (`get_gui` / `set_gui`) into
+`$XDG_CONFIG_HOME/feagle/gui.toml` — a file of its own, deliberately apart from
+`config.toml`: the panel writes it constantly, and nothing it can contain may be
+able to break indexing. `Esc` closes the panel without closing the launcher.
+
+| Key | What it changes | Range / values |
+|---|---|---|
+| `show_preview` | Draw the preview pane at all | `true` / `false` |
+| `preview_width` | Preview pane width | 200–800 px |
+| `row_columns` | Text columns per row: title, path, meta (the icon is always drawn) | 1–3 |
+| `layout` | Row density; `compact` is one line and skips the path | `compact` / `detailed` |
+| `theme` | Popup colours | `dark` / `light` |
+| `default_filter` | Results shown when the popup opens | `all` / `apps` / `files` |
+| `apps_limit` | Applications ranked above file hits while typing | 0–50 |
+| `debounce_ms` | Pause before the semantic pass | 0–2000 ms |
+
+Those are also the defaults, i.e. what a missing file means. Editing `gui.toml` by
+hand is fine: a value out of range is logged and ignored (the default wins), and
+the next click in the panel rewrites the whole file. A `set_gui` reply is
+all-or-nothing, so a rejected value is never written.
 
 `qs ipc` must know which instance to talk to. With `-p` (as above) pass the same
 path. If you installed the demo as a **named config**
@@ -151,6 +176,8 @@ State (read-only for the launcher):
 | `preview` | Preview of the selected file (`{kind: "text"\|"image"\|"meta", ...}`) or `null`. |
 | `previewError` | Last preview error, or `""`. |
 | `connected` | Whether the socket is connected. |
+| `guiConfig` | The popup settings from `gui.toml` (`{}` until the daemon answers). |
+| `guiSchema` | `{kind, default, min, max, choices, hint}` per setting — render a panel from this. |
 
 Functions and signals:
 
@@ -162,6 +189,8 @@ Functions and signals:
 | `cycleFilter(reverse)` | Cycle the filter forward (or back); what `Tab` calls. |
 | `requestPreview(item)` | Fetch a preview for `item` (files only), debounced. |
 | `warmup()` | Ask the daemon to load the model in the background. |
+| `getGui()` | Fetch the popup settings and their schema (sent automatically on connect). |
+| `setGui(key, value)` | Persist one popup setting; `guiConfig` refreshes from the reply. |
 | `reset()` | Clear the query/results and warm up again. |
 | `activate(index)` | Run `visibleResults[index]`. |
 | `activateItem(item)` | Launch an app or open a file for one item. |
@@ -272,8 +301,8 @@ and routes on `req`.
 
 ```json
 {"op":"get_gui"}
-{"ok":true,"gui":{"theme":"dark","row_columns":4,"…":""},
- "schema":{"row_columns":{"kind":"int","default":4,"min":1,"max":4,"choices":[],"hint":"…"},"…":""},
+{"ok":true,"gui":{"theme":"dark","row_columns":3,"…":""},
+ "schema":{"row_columns":{"kind":"int","default":3,"min":1,"max":3,"choices":[],"hint":"…"},"…":""},
  "path":"/home/me/.config/feagle/gui.toml"}
 ```
 

@@ -431,7 +431,8 @@ The window is built to be driven without a mouse:
 | `Ctrl+Enter` | Open the **folder** that contains the file |
 | `Ctrl+C` | Copy the file's path (or the app's command) |
 | `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Clear the line / delete a word / select all |
-| `Esc` | Close |
+| `Esc` | Close the settings panel, then the window |
+| `⚙` in the footer | Settings panel |
 
 Results are grouped under `Applications` and `Files`, a thin scrollbar plus an
 "*N* more below" hint shows where you are, and clickable `All` / `Apps` / `Files`
@@ -439,7 +440,11 @@ chips in the header do the same as `Tab`. The **preview pane** on the right show
 the selected file: numbered context lines with every query word highlighted
 (wheel-scrollable, long lines wrap), the image itself, or the **page of a PDF**
 anchored on the text that matched. Applications are ranked by **frecency** —
-how often and how recently you launched them.
+how often and how recently you launched them. The **gear** in the footer opens
+the popup's settings — preview on/off and width, columns per row, compact or
+detailed rows, dark/light theme, the default filter, the application limit and
+the semantic debounce; they are saved as you click, in
+`~/.config/feagle/gui.toml`.
 
 ```sh
 quickshell -p /path/to/feagle/quickshell                    # start it with your session
@@ -1215,7 +1220,8 @@ mp3 = "mpv --start={time} {path}"
 | `Ctrl+Enter` | Открыть **каталог**, в котором лежит файл |
 | `Ctrl+C` | Скопировать путь файла (или команду приложения) |
 | `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Очистить строку / удалить слово / выделить всё |
-| `Esc` | Закрыть |
+| `Esc` | Закрыть панель настроек, затем окно |
+| `⚙` в футере | Панель настроек |
 
 Результаты сгруппированы под заголовками `Applications` и `Files`, тонкая полоса
 прокрутки и подсказка «ещё *N* ниже» показывают, где вы находитесь, а кликабельные
@@ -1223,7 +1229,11 @@ mp3 = "mpv --start={time} {path}"
 справа показывает выбранный файл: нумерованные строки контекста с подсветкой всех
 слов запроса (прокручивается колесом, длинные строки переносятся), саму картинку
 или **страницу PDF**, привязанную к совпавшему тексту. Приложения упорядочены по
-**frecency** — как часто и как давно вы их запускали.
+**frecency** — как часто и как давно вы их запускали. **Шестерёнка** в футере
+открывает настройки попапа — превью вкл/выкл и его ширину, число колонок в строке,
+компактные/детальные строки, тёмную/светлую тему, фильтр по умолчанию, лимит
+приложений и задержку семантики; они сохраняются на каждый клик в
+`~/.config/feagle/gui.toml`.
 
 ```sh
 quickshell -p /path/to/feagle/quickshell                    # запустить вместе с сессией

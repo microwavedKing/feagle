@@ -50,6 +50,12 @@ QtObject {
     /// The `feagle` command used to open files (a name on PATH or an absolute path).
     /// Defaults to `$FEAGLE_BIN`, then `"feagle"`.
     property string feagleCommand: Quickshell.env("FEAGLE_BIN") || "feagle"
+    /// The popup's own settings (`gui.toml`), as `get_gui` returned them; empty
+    /// until the daemon answers. Read `guiConfig[key]`, write with `setGui()`.
+    property var guiConfig: ({})
+    /// The schema that describes those settings: `{kind, default, min, max,
+    /// choices, hint}` per key. The panel renders its controls from this.
+    property var guiSchema: ({})
 
     // ---- state (read-only for the launcher) --------------------------------
     /// The current query text.
@@ -87,6 +93,18 @@ QtObject {
     /// Ask the daemon to start loading the model in the background.
     function warmup(): void {
         send({ op: "warmup" });
+    }
+
+    /// Ask for the popup settings and their schema (also sent on connect).
+    function getGui(): void {
+        send({ op: "get_gui", req: "gui" });
+    }
+
+    /// Persist one popup setting; the reply refreshes `guiConfig` when it lands.
+    function setGui(key, value): void {
+        var change = {};
+        change[String(key)] = value;
+        send({ op: "set_gui", req: "gui", settings: change });
     }
 
     /// Clear the query and results (call when the launcher opens).
@@ -251,6 +269,17 @@ QtObject {
             applyPreview(msg);
             return;   // previews never affect the result list or `busy`
         }
+        if (msg && msg.req === "gui") {
+            if (msg.ok) {
+                root.guiConfig = msg.gui || ({});
+                if (msg.schema)
+                    root.guiSchema = msg.schema;
+                root.error = "";
+            } else {
+                root.error = msg.error || "settings error";
+            }
+            return;   // settings never affect the result list or `busy`
+        }
         root.busy = false;
         if (msg && msg.ok) {
             root.results = root.resultsFor(msg);
@@ -268,6 +297,7 @@ QtObject {
         onConnectedChanged: {
             if (connected && root.active) {
                 root.warmup();
+                root.getGui();
                 root.request("fts");
             }
         }

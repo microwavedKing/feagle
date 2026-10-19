@@ -29,9 +29,10 @@ PanelWindow {
     /// A short message shown in the footer instead of the counters ("" = none).
     property string flash: ""
 
-    // ---- theme (edit these to match your shell) ----------------------------
-    /// Flip to true for a light shell; every colour below follows it.
-    property bool lightTheme: false
+    // ---- theme (the default lives in gui.toml; the settings panel writes it) --
+    /// Light or dark, from the popup settings ("theme"; the documented default
+    /// is dark). Every colour below follows it.
+    readonly property bool lightTheme: root.setting("theme", "dark") === "light"
     readonly property color base: lightTheme ? "#f7f7fb" : "#1e1e2e"
     readonly property color border: lightTheme ? "#d9d9e3" : "#313244"
     readonly property color text: lightTheme ? "#1f1f2e" : "#cdd6f4"
@@ -40,13 +41,34 @@ PanelWindow {
     readonly property color hovered: lightTheme ? "#eeeef7" : "#28283a"
     readonly property color accent: lightTheme ? "#2b6cb0" : "#89b4fa"
 
-    // ---- layout (edit to taste) --------------------------------------------
+    // ---- layout (defaults live in gui.toml; the settings panel writes them) --
     property int cardWidth: 620
     property int cardPreviewWidth: 940
     property int cardHeight: 440
     property int cardPreviewHeight: 480
-    property int previewWidth: 360
+    readonly property int previewWidth: root.setting("preview_width", 360)
     property real topMarginRatio: 0.15
+    /// How many text columns a row draws (title, path, meta); the icon is always
+    /// drawn. `compact` rows are one line tall and skip the path column.
+    readonly property int rowColumns: root.setting("row_columns", 3)
+    readonly property bool compactRows: root.setting("layout", "detailed") === "compact"
+    /// Whether the preview pane is drawn at all.
+    readonly property bool showPreview: root.setting("show_preview", true)
+    /// The settings panel is open (the gear in the footer; Escape closes it).
+    property bool settingsOpen: false
+    onSettingsOpenChanged: {
+        // The field sits under the panel: do not let typing vanish behind it.
+        if (root.settingsOpen)
+            field.focus = false;
+        else if (root.open)
+            field.forceActiveFocus();
+    }
+    /// What the panel lists, in display order; `feagle.guiSchema` supplies the
+    /// ranges, defaults and choices. Keep in step with `gui.SETTINGS`.
+    readonly property var settingsOrder: [
+        "show_preview", "preview_width", "row_columns", "layout",
+        "theme", "default_filter", "apps_limit", "debounce_ms"
+    ]
 
     visible: open
     color: "transparent"
@@ -82,6 +104,44 @@ PanelWindow {
 
     // ---- helpers -----------------------------------------------------------
     readonly property string home: Quickshell.env("HOME") || ""
+
+    /// A setting's current value: gui.toml if it answered, else the schema default.
+    function settingValue(key) {
+        const value = feagle.guiConfig[key];
+        if (value !== undefined && value !== null)
+            return value;
+        const meta = feagle.guiSchema[key];
+        return meta ? meta.default : undefined;
+    }
+
+    /// `settingValue` with a local fallback, for bindings that must render before
+    /// the daemon has answered.
+    function setting(key, fallback) {
+        const value = root.settingValue(key);
+        return value !== undefined && value !== null ? value : fallback;
+    }
+
+    /// Persist one setting; the live knobs are applied at once. The rest are
+    /// bindings on `feagle.guiConfig`, so the reply re-renders them by itself.
+    function changeSetting(key, value) {
+        feagle.setGui(key, value);
+        if (key === "default_filter")
+            feagle.setFilter(value);
+        else if (key === "apps_limit")
+            feagle.appsLimit = value;
+        else if (key === "debounce_ms")
+            feagle.debounceMs = value;
+    }
+
+    /// Move an integer setting one step, clamped to the schema's range.
+    function stepSetting(key, direction) {
+        const meta = feagle.guiSchema[key] || ({});
+        const min = meta.min !== undefined ? meta.min : 0;
+        const max = meta.max !== undefined ? meta.max : 1000;
+        const step = (key === "preview_width" || key === "debounce_ms") ? 20 : 1;
+        const next = Number(root.settingValue(key)) + direction * step;
+        root.changeSetting(key, Math.max(min, Math.min(max, next)));
+    }
 
     function fileIcon(path) {
         const name = String(path).split("/").pop();
@@ -280,7 +340,10 @@ PanelWindow {
 
     // Ask for a preview of whatever is currently selected.
     function syncPreview() {
-        feagle.requestPreview(feagle.visibleResults[root.currentIndex] || null);
+        // A hidden pane must not cost a daemon round-trip (or a PDF render).
+        const item = root.showPreview
+            ? (feagle.visibleResults[root.currentIndex] || null) : null;
+        feagle.requestPreview(item);
     }
 
     // The muted second line of the preview header.
@@ -323,8 +386,12 @@ PanelWindow {
         root.currentIndex = 0;
         root.daemonSlow = false;
         root.flash = "";
+        root.settingsOpen = false;
         field.text = "";
-        feagle.setFilter("all");
+        // Pick up gui.toml (and any hand edit) on every open.
+        feagle.setFilter(root.setting("default_filter", "all"));
+        feagle.appsLimit = root.setting("apps_limit", 8);
+        feagle.debounceMs = root.setting("debounce_ms", 120);
         feagle.reset();
         root.syncPreview();
         field.forceActiveFocus();
@@ -358,7 +425,8 @@ PanelWindow {
     // ---- card --------------------------------------------------------------
     Rectangle {
         id: card
-        readonly property bool previewPane: root.open && feagle.visibleResults.length > 0
+        readonly property bool previewPane: root.open && root.showPreview
+            && feagle.visibleResults.length > 0
         width: Math.min(card.previewPane ? root.cardPreviewWidth : root.cardWidth,
                         parent.width - 48)
         height: Math.min(card.previewPane ? root.cardPreviewHeight : root.cardHeight,
@@ -465,10 +533,17 @@ PanelWindow {
                     } else if (ctrl && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
                         root.openFolder(); event.accepted = true;
                     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                        feagle.activate(root.currentIndex); root.closeLauncher();
+                        if (!root.settingsOpen) {
+                            feagle.activate(root.currentIndex);
+                            root.closeLauncher();
+                        }
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Escape) {
-                        root.closeLauncher(); event.accepted = true;
+                        if (root.settingsOpen)
+                            root.settingsOpen = false;
+                        else
+                            root.closeLauncher();
+                        event.accepted = true;
                     }
                 }
             }
@@ -564,11 +639,35 @@ PanelWindow {
             Text {
                 id: hints
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.right: parent.right
-                anchors.rightMargin: 18
+                anchors.right: gear.left
+                anchors.rightMargin: 8
                 color: root.muted
                 font.pixelSize: 11
                 text: "tab filter  ↑↓  ↵ open  ^c copy  ^⏎ folder  esc close"
+            }
+
+            // The settings panel (gui.toml through the daemon).
+            Rectangle {
+                id: gear
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: parent.right
+                anchors.rightMargin: 12
+                width: 26
+                height: 26
+                radius: 7
+                color: gearHover.hovered || root.settingsOpen ? root.hovered : "transparent"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "⚙"
+                    color: root.muted
+                    font.pixelSize: 14
+                }
+                HoverHandler { id: gearHover }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.settingsOpen = !root.settingsOpen
+                }
             }
         }
 
@@ -610,7 +709,7 @@ PanelWindow {
                     readonly property bool groupStart: rowItem.index === 0
                         || list.model[rowItem.index - 1].kind !== rowItem.modelData.kind
                     width: list.width
-                    height: (rowItem.groupStart ? 26 : 0) + 50
+                    height: (rowItem.groupStart ? 26 : 0) + (root.compactRows ? 34 : 50)
 
                     Text {
                         anchors.left: parent.left
@@ -630,7 +729,7 @@ PanelWindow {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
-                        height: 50
+                        height: root.compactRows ? 34 : 50
                         color: rowItem.index === root.currentIndex
                             ? root.selected
                             : (hover.hovered ? root.hovered : "transparent")
@@ -684,7 +783,8 @@ PanelWindow {
                                 color: root.muted
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
-                                visible: text.length > 0
+                                visible: text.length > 0 && root.rowColumns >= 2
+                                    && !root.compactRows
                                 text: root.secondaryLabel(rowItem.modelData)
                             }
                         }
@@ -696,6 +796,7 @@ PanelWindow {
                             anchors.rightMargin: 18
                             color: root.muted
                             font.pixelSize: 11
+                            visible: root.rowColumns >= 3
                             text: root.positionLabel(rowItem.modelData)
                         }
 
@@ -998,6 +1099,227 @@ PanelWindow {
                         if (feagle.filter === "files")
                             return "Type to search files";
                         return "Type to search your files and applications";
+                    }
+                }
+            }
+        }
+
+        // ---- settings (gui.toml; saved through the daemon on every change) ---
+        Rectangle {
+            id: settingsPanel
+            anchors.fill: parent
+            radius: 12
+            color: root.base
+            visible: root.settingsOpen
+
+            Text {
+                id: settingsTitle
+                anchors { left: parent.left; leftMargin: 18; top: parent.top; topMargin: 16 }
+                text: "Settings"
+                color: root.text
+                font.pixelSize: 12
+                font.bold: true
+                font.capitalization: Font.AllUppercase
+                font.letterSpacing: 0.7
+            }
+
+            Text {
+                anchors { left: settingsTitle.right; leftMargin: 10; baseline: settingsTitle.baseline }
+                text: "saved on change · gui.toml"
+                color: root.muted
+                font.pixelSize: 11
+            }
+
+            Rectangle {
+                anchors { right: parent.right; rightMargin: 14; top: parent.top; topMargin: 10 }
+                width: 28
+                height: 28
+                radius: 8
+                color: settingsCloseHover.hovered ? root.hovered : "transparent"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "×"
+                    color: root.muted
+                    font.pixelSize: 16
+                }
+                HoverHandler { id: settingsCloseHover }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.settingsOpen = false
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 48
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                color: root.muted
+                font.pixelSize: 12
+                visible: Object.keys(feagle.guiSchema).length === 0
+                text: "Settings need the query daemon: "
+                    + (feagle.error || "queryd is not reachable")
+            }
+
+            // One row per setting; the control follows the schema's `kind`, so the
+            // ranges and choices stay in gui.py and are not repeated here.
+            ListView {
+                id: settingsList
+                anchors {
+                    top: settingsTitle.bottom; topMargin: 14
+                    left: parent.left; right: parent.right; bottom: parent.bottom
+                }
+                clip: true
+                model: root.settingsOrder
+                spacing: 2
+
+                delegate: Item {
+                    id: settingRow
+                    required property string modelData
+                    readonly property var meta: feagle.guiSchema[settingRow.modelData] || ({})
+                    readonly property var current: root.settingValue(settingRow.modelData)
+                    width: settingsList.width
+                    height: 46
+
+                    Text {
+                        anchors {
+                            left: parent.left; leftMargin: 18
+                            verticalCenter: parent.verticalCenter
+                        }
+                        width: parent.width - 200
+                        text: settingRow.meta.hint || settingRow.modelData
+                        color: root.text
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                    }
+
+                    // bool
+                    Rectangle {
+                        visible: settingRow.meta.kind === "bool"
+                        anchors {
+                            right: parent.right; rightMargin: 18
+                            verticalCenter: parent.verticalCenter
+                        }
+                        width: 38
+                        height: 20
+                        radius: 10
+                        color: settingRow.current ? root.accent : root.hovered
+                        Behavior on color { ColorAnimation { duration: 120 } }
+
+                        Rectangle {
+                            width: 14
+                            height: 14
+                            radius: 7
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: settingRow.current ? parent.width - width - 3 : 3
+                            color: root.base
+                            Behavior on x { NumberAnimation { duration: 120 } }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: root.changeSetting(
+                                settingRow.modelData, !settingRow.current)
+                        }
+                    }
+
+                    // int: - value +
+                    Row {
+                        visible: settingRow.meta.kind === "int"
+                        anchors {
+                            right: parent.right; rightMargin: 18
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 6
+
+                        Rectangle {
+                            width: 22
+                            height: 22
+                            radius: 6
+                            border.width: 1
+                            border.color: root.border
+                            color: stepDownHover.hovered ? root.hovered : "transparent"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "−"
+                                color: root.muted
+                                font.pixelSize: 13
+                            }
+                            HoverHandler { id: stepDownHover }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: root.stepSetting(settingRow.modelData, -1)
+                            }
+                        }
+                        Text {
+                            width: 46
+                            horizontalAlignment: Text.AlignHCenter
+                            color: root.text
+                            font.pixelSize: 12
+                            text: settingRow.current === undefined
+                                ? "—" : String(settingRow.current)
+                        }
+                        Rectangle {
+                            width: 22
+                            height: 22
+                            radius: 6
+                            border.width: 1
+                            border.color: root.border
+                            color: stepUpHover.hovered ? root.hovered : "transparent"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "+"
+                                color: root.muted
+                                font.pixelSize: 13
+                            }
+                            HoverHandler { id: stepUpHover }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: root.stepSetting(settingRow.modelData, 1)
+                            }
+                        }
+                    }
+
+                    // str: one chip per choice
+                    Row {
+                        visible: settingRow.meta.kind === "str"
+                        anchors {
+                            right: parent.right; rightMargin: 18
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 4
+
+                        Repeater {
+                            model: settingRow.meta.choices || []
+                            delegate: Rectangle {
+                                id: choice
+                                required property string modelData
+                                readonly property bool active:
+                                    settingRow.current === choice.modelData
+                                width: choiceText.implicitWidth + 16
+                                height: 22
+                                radius: 11
+                                border.width: choice.active ? 0 : 1
+                                border.color: root.border
+                                color: choice.active
+                                    ? root.selected
+                                    : (choiceHover.hovered ? root.hovered : "transparent")
+
+                                Text {
+                                    id: choiceText
+                                    anchors.centerIn: parent
+                                    text: choice.modelData
+                                    color: choice.active ? root.text : root.muted
+                                    font.pixelSize: 11
+                                }
+                                HoverHandler { id: choiceHover }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: root.changeSetting(
+                                        settingRow.modelData, choice.modelData)
+                                }
+                            }
+                        }
                     }
                 }
             }

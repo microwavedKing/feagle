@@ -11,11 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The launcher popup keeps its own settings in `$XDG_CONFIG_HOME/feagle/gui.toml`
   (preview pane and its width, columns per row, compact/detailed density, theme,
-  default filter, application limit, debounce), read and written through the
-  daemon (`get_gui`/`set_gui`). `gui.toml` is separate from `config.toml` on
-  purpose: the panel saves on every click, and a mistake there must not be able
-  to break indexing. A hand-edited file with a wrong value logs a warning and
-  the default wins; `set_gui` refuses a value out of range before writing.
+  default filter, application limit, debounce), changed from a **gear-opened
+  settings panel** and read/written through the daemon (`get_gui`/`set_gui`).
+  `gui.toml` is separate from `config.toml` on purpose: the panel saves on every
+  click, and a mistake there must not be able to break indexing. A hand-edited
+  file with a wrong value logs a warning and the default wins; `set_gui` refuses
+  a value out of range before writing.
 
 ## [0.4.0] - 2026-10-19
 
@@ -495,8 +496,9 @@ on Wayland.
 
 - Настройки попапа-лаунчера живут в своём файле
   `$XDG_CONFIG_HOME/feagle/gui.toml` (панель превью и её ширина, колонки строки,
-  плотность compact/detailed, тема, фильтр по умолчанию, лимит приложений, debounce)
-  и читаются/пишутся через демон (`get_gui`/`set_gui`). `gui.toml` отдельно от
+  плотность compact/detailed, тема, фильтр по умолчанию, лимит приложений, debounce),
+  меняются из **панели настроек по шестерёнке** и ходят через демон
+  (`get_gui`/`set_gui`). `gui.toml` отдельно от
   `config.toml` намеренно: панель сохраняет на каждый клик, и ошибка там не должна
   уметь сломать индексацию. Плохое значение в файле, правленном руками, даёт
   предупреждение и дефолт; `set_gui` отклоняет значение вне диапазона **до** записи.
