@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from feagle import config, db
+from feagle import config, db, gui
 from feagle.embeddings.client import ServerUnavailable
 from feagle.search import queryd, vec
 from feagle.search.queryd import QuerydClient, QuerydServer, QueryEngine
@@ -85,8 +85,9 @@ def engine(db_path):
 
 @pytest.fixture(autouse=True)
 def _isolated_state(tmp_path, monkeypatch):
-    """Never let a test write the real frecency/state file."""
+    """Never let a test write the real frecency/state file or gui.toml."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
 def test_dispatch_ping(engine):
@@ -97,6 +98,52 @@ def test_dispatch_unknown_op(engine):
     result = engine.dispatch({"op": "nope"})
     assert result["ok"] is False
     assert "unknown op" in result["error"]
+
+
+def test_get_gui_returns_the_settings_with_their_schema(engine):
+    reply = engine.dispatch({"op": "get_gui"})
+    assert reply["ok"] is True
+    assert reply["gui"] == gui.default_gui()
+    assert reply["schema"]["row_columns"]["max"] == 4
+    assert reply["schema"]["theme"]["choices"] == ["dark", "light"]
+    assert reply["path"].endswith("gui.toml")
+
+
+def test_set_gui_persists_and_answers_with_every_setting(engine):
+    reply = engine.dispatch({"op": "set_gui", "settings": {"theme": "light", "row_columns": "2"}})
+    assert reply["ok"] is True
+    assert reply["gui"]["theme"] == "light"
+    assert reply["gui"]["row_columns"] == 2
+    assert reply["gui"]["preview_width"] == 360  # untouched keys come back too
+    assert engine.dispatch({"op": "get_gui"})["gui"]["theme"] == "light"
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"theme": "solarized"},  # not one of the choices
+        {"nonsense": 1},  # unknown key
+        {"row_columns": 9},  # out of range
+        {},  # nothing to change
+    ],
+)
+def test_set_gui_rejects_a_bad_change(engine, settings):
+    reply = engine.dispatch({"op": "set_gui", "settings": settings})
+    assert reply["ok"] is False
+    assert reply["error"]
+
+
+def test_set_gui_needs_an_object(engine):
+    reply = engine.dispatch({"op": "set_gui", "settings": "light"})
+    assert reply["ok"] is False
+    assert "object" in reply["error"]
+
+
+def test_a_rejected_set_gui_leaves_the_file_alone(engine):
+    engine.dispatch({"op": "set_gui", "settings": {"theme": "light"}})
+    reply = engine.dispatch({"op": "set_gui", "settings": {"theme": "dark", "row_columns": 99}})
+    assert reply["ok"] is False
+    assert engine.dispatch({"op": "get_gui"})["gui"]["theme"] == "light"
 
 
 def test_search_hybrid(engine):

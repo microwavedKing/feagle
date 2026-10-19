@@ -268,6 +268,32 @@ and routes on `req`.
 
 **`embed`** → embeddings for arbitrary texts (used by tooling).
 
+**`get_gui`** → the popup's own settings plus the schema to render them with:
+
+```json
+{"op":"get_gui"}
+{"ok":true,"gui":{"theme":"dark","row_columns":4,"…":""},
+ "schema":{"row_columns":{"kind":"int","default":4,"min":1,"max":4,"choices":[],"hint":"…"},"…":""},
+ "path":"/home/me/.config/feagle/gui.toml"}
+```
+
+**`set_gui`** → change one or more of them; the reply carries the full new set:
+
+```json
+{"op":"set_gui","settings":{"theme":"light","row_columns":2}}
+{"ok":true,"gui":{"theme":"light","row_columns":2,"…":""},"path":"…/gui.toml"}
+```
+
+- Only the keys in `schema` are accepted; anything else is
+  `{"ok":false,"error":"unknown setting: …"}`, and a value outside its range is
+  refused **before** the file is touched, so an `ok:true` reply means the disk
+  matches what came back.
+- Settings live in `$XDG_CONFIG_HOME/feagle/gui.toml`, deliberately apart from
+  `config.toml`: the panel writes it on every click, and nothing it can contain
+  may break indexing. It is written atomically, mode 0600.
+- Reading is lenient: a hand-edited file with a wrong value logs a warning and
+  the default wins, so a typo never leaves the popup unusable.
+
 **Two-phase pattern.** Send `mode:"fts"` on every keystroke and `mode:"hybrid"`
 after a short pause; the later reply simply replaces the list. Send `warmup`
 when the popup opens so the first semantic query is not slow.

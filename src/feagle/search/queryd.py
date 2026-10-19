@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from .. import __version__, db, frecency, paths
+from .. import __version__, db, frecency, gui, paths
 from ..embeddings.client import EmbeddingError, ServerUnavailable
 from ..log import get_logger
 from ..search import hybrid
@@ -587,6 +587,25 @@ class QueryEngine:
             return {"ok": False, "error": str(exc), "hint": _EMBEDDINGS_HINT}
         return {"ok": True, "dim": embedder.dim, "embeddings": vectors}
 
+    def get_gui(self) -> dict[str, Any]:
+        """The popup's settings, plus the schema its panel renders from.
+
+        The schema travels with the values so the QML side does not repeat the
+        ranges and choices: `gui.SETTINGS` stays the single source of truth.
+        """
+        return {
+            "ok": True,
+            "gui": gui.load_gui(),
+            "schema": gui.schema(),
+            "path": str(gui.gui_file()),
+        }
+
+    def set_gui(self, settings: Any) -> dict[str, Any]:
+        """Validate and persist a partial settings change, all-or-nothing."""
+        if not isinstance(settings, dict):
+            raise _BadRequest("settings must be an object of key: value")
+        return {"ok": True, "gui": gui.set_gui(settings), "path": str(gui.gui_file())}
+
     def status(self) -> dict[str, Any]:
         conn = self._connect()
         try:
@@ -648,7 +667,11 @@ class QueryEngine:
                 )
             if op == "status":
                 return self.status()
-        except _BadRequest as exc:
+            if op == "get_gui":
+                return self.get_gui()
+            if op == "set_gui":
+                return self.set_gui(request.get("settings"))
+        except (_BadRequest, gui.GuiError) as exc:
             return {"ok": False, "error": str(exc)}
         except Exception as exc:
             log.exception("queryd operation failed: %s", op)

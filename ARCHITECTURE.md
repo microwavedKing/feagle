@@ -110,7 +110,9 @@
 ### Вспомогательное
 
 `units.py` (шаблоны юнитов + установка, `using_packaged()`), `doctor.py` (проверки),
-`setup.py` (TOML-рендер, бэкап, план), `bench/` (тонкие CLI-обёртки над `feagle.bench`).
+`setup.py` (TOML-рендер, бэкап, план), `gui.py` (настройки попапа: `SETTINGS`,
+`load_gui`/`save_gui`/`coerce`/`schema`, решение 61), `bench/` (тонкие CLI-обёртки над
+`feagle.bench`).
 Вне пакета: `man/feagle.1` (man-страница), `completions/` (bash, zsh, fish) — оба
 устанавливает `PKGBUILD`, а `tests/test_cli_docs.py` падает, если команда или опция
 из `build_parser()` не описана в них.
@@ -161,6 +163,8 @@ chunks_vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[DIM])
                                                → {"ok":true,"mode":..,"results":[{kind:"app"|"file",...}]}
 {"op":"used","key":"firefox.desktop"}          → {"ok":true}   (история запусков для frecency)
 {"op":"preview","path":"...","line":12}        → {"ok":true,"kind":"text|image|meta","text":...}
+{"op":"get_gui"}                              → {"ok":true,"gui":{...},"schema":{...},"path":"..."}
+{"op":"set_gui","settings":{"theme":"light"}}  → {"ok":true,"gui":{...}}
 {"op":false ...}                               → {"ok":false,"error":"...","hint":"..."}
 ```
 
@@ -215,6 +219,16 @@ llama-server -m MODEL --embeddings --host 127.0.0.1 --port P --no-webui
 `[media]` images, mmproj, image_max_dim, images_per_run, video, video_frame_interval, video_max_frames, video_ocr, audio, whisper_binary, whisper_model, audio_language;
 `[search]` limit, mode, candidates, rrf_k, stemming, max_distance, max_per_file;
 `[launcher]` program; `[openers]` (свободная таблица: расширение → шаблон).
+
+### Настройки попапа (`~/.config/feagle/gui.toml`)
+
+Отдельный файл (секция `[popup]`), который пишет **сам попап** через `set_gui`:
+`show_preview`, `preview_width`, `row_columns` (сколько колонок строки рисовать:
+иконка, название, путь, мета), `layout` (compact/detailed), `theme`, `default_filter`,
+`apps_limit`, `debounce_ms`. Отдельно от `config.toml` намеренно: сюда пишет UI, и
+ошибка в нём не должна уметь сломать индексацию. Чтение лояльное (плохое значение →
+предупреждение и дефолт), запись строгая (`coerce` до записи, атомарная замена, 0600);
+схему с диапазонами и вариантами отдаёт `get_gui`, чтобы QML не дублировал их.
 
 ## 5. Жизненные циклы
 
@@ -371,6 +385,7 @@ PDF пропускаются; нет tesseract → OCR пропускается;
 | 58 | Внешний `[embeddings].server_url` предупреждает при загрузке конфига и отдельной строкой в `doctor` (для `http://` — явно про открытый текст) | туда уходит текст каждого запроса и каждого документа при индексации; это осознанный выбор владельца, но молчать о нём нельзя | `config._warn_server_url`, `doctor.check_embeddings_url` |
 | 59 | `doctor` предупреждает, когда у модели ≥ 1024 измерений, а `[index].embed_batch_size` больше 4; дефолт 16 не меняется | на CPU батч из 16 длинных книжных чанков не влезает в 60-секундный таймаут клиента: файлы остаются с `embedded=0` (замер: 81 % покрытия, два таймаута), а с батчем 4 таймаутов нет вовсе. Предупреждение, а не новый дефолт: EmbeddingGemma быстрее, и трогать её настройку не за чем | `doctor.check_embed_batch`, `config.DEFAULTS` |
 | 60 | Прогон Qwen3 по книгам (852 чанка, батч 4) **не добиваем**; строка в README остаётся с прежнего корпуса (230 чанков) с пометкой | корпуса и так расходятся: Qwen3 выигрывает на синтетике, EmbeddingGemma — на реальном тексте книг; полный прогон — это ~20 мин CPU ради одной строки таблицы, которая ничего не меняет в дефолте. Пометка в README важнее числа | README «Alternative model», `ARCHITECTURE.md` §9 |
+| 61 | Настройки попапа живут в **отдельном `gui.toml`** и ходят через `queryd` ops `get_gui`/`set_gui`; читаем лояльно (плохое значение → лог и дефолт), пишем строго (`coerce` до записи, атомарная замена, 0600), а вместе со значениями едет **схема** (диапазоны/варианты/подсказки) | писать UI-настройки в `config.toml` нельзя: панель сохраняет по клику, и одна опечатка там стоила бы индексации. Схема в ответе — чтобы диапазоны не дублировались в QML: `gui.SETTINGS` остаётся единственным источником правды, а `set_gui` отклоняет значение вне диапазона **до** записи (тест `test_set_gui_refuses_before_writing`) | `gui.py`, `paths.gui_file`, `queryd.QueryEngine.get_gui/set_gui` |
 
 ## 9. Измеренные факты (кратко; подробно — в README)
 

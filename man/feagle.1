@@ -263,6 +263,11 @@ Print the help for a command and exit.
 Configuration: roots, limits, model, search knobs, launcher and openers. Every
 key is documented in the file itself.
 .TP
+.I $XDG_CONFIG_HOME/feagle/gui.toml
+Settings of the launcher popup ("[popup]" table: preview, theme, row layout and
+filter). Written by the popup through the daemon; a wrong value is reported and
+ignored instead of being applied.
+.TP
 .I $XDG_DATA_HOME/feagle/feagle.sqlite
 The index: one SQLite database (file mode 0600, directory 0700) with the file
 table, the full\-text index and the vectors.

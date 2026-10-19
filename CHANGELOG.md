@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The launcher popup keeps its own settings in `$XDG_CONFIG_HOME/feagle/gui.toml`
+  (preview pane and its width, columns per row, compact/detailed density, theme,
+  default filter, application limit, debounce), read and written through the
+  daemon (`get_gui`/`set_gui`). `gui.toml` is separate from `config.toml` on
+  purpose: the panel saves on every click, and a mistake there must not be able
+  to break indexing. A hand-edited file with a wrong value logs a warning and
+  the default wins; `set_gui` refuses a value out of range before writing.
+
 ## [0.4.0] - 2026-10-19
 
 Security, packaging and a round of fixes from an audit of the whole code base.
@@ -476,6 +488,18 @@ on Wayland.
 [0.1.0]: https://github.com/microwavedKing/feagle/releases/tag/v0.1.0
 
 ---
+
+## Unreleased (по-русски)
+
+### Добавлено
+
+- Настройки попапа-лаунчера живут в своём файле
+  `$XDG_CONFIG_HOME/feagle/gui.toml` (панель превью и её ширина, колонки строки,
+  плотность compact/detailed, тема, фильтр по умолчанию, лимит приложений, debounce)
+  и читаются/пишутся через демон (`get_gui`/`set_gui`). `gui.toml` отдельно от
+  `config.toml` намеренно: панель сохраняет на каждый клик, и ошибка там не должна
+  уметь сломать индексацию. Плохое значение в файле, правленном руками, даёт
+  предупреждение и дефолт; `set_gui` отклоняет значение вне диапазона **до** записи.
 
 ## 0.4.0 (по-русски) — 2026-10-19
 
