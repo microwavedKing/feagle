@@ -386,34 +386,23 @@ PanelWindow {
             anchors { top: parent.top; left: parent.left; right: parent.right }
             height: 56
 
-            // Drawn magnifier — no icon-theme dependency, always renders.
+            // The feagle mark (quickshell/feagle.svg), loaded next to the repo.
             Item {
                 id: searchGlyph
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: parent.left
-                anchors.leftMargin: 18
-                width: 18
-                height: 18
+                anchors.leftMargin: 15
+                width: 28
+                height: 28
 
-                Rectangle {
-                    x: 1
-                    y: 1
-                    width: 11
-                    height: 11
-                    radius: 5.5
-                    color: "transparent"
-                    border.width: 1.6
-                    border.color: root.muted
-                }
-                Rectangle {
-                    x: 10
-                    y: 10
-                    width: 2
-                    height: 6
-                    radius: 1
-                    color: root.muted
-                    rotation: 45
-                    transformOrigin: Item.TopLeft
+                Image {
+                    anchors.centerIn: parent
+                    width: 28
+                    height: 28
+                    source: Qt.resolvedUrl("feagle.svg")
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    asynchronous: true
                 }
             }
 
@@ -981,20 +970,35 @@ PanelWindow {
                 }
             }
 
-            Text {
+            Column {
                 anchors.centerIn: parent
                 width: parent.width - 48
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WordWrap
-                color: root.muted
-                font.pixelSize: 13
+                spacing: 18
                 visible: feagle.visibleResults.length === 0
-                text: {
-                    if (feagle.query.length > 0)
-                        return "No matches for “" + feagle.query + "”";
-                    if (feagle.filter === "files")
-                        return "Type to search files";
-                    return "Type to search your files and applications";
+
+                Image {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 96
+                    height: 96
+                    source: Qt.resolvedUrl("feagle.svg")
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    asynchronous: true
+                }
+
+                Text {
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    color: root.muted
+                    font.pixelSize: 13
+                    text: {
+                        if (feagle.query.length > 0)
+                            return "No matches for “" + feagle.query + "”";
+                        if (feagle.filter === "files")
+                            return "Type to search files";
+                        return "Type to search your files and applications";
+                    }
                 }
             }
         }
