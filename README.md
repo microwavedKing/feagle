@@ -427,9 +427,11 @@ The window is built to be driven without a mouse:
 | `↑` `↓` (or `Ctrl+P` / `Ctrl+N`) | Move the selection |
 | `PgUp` / `PgDn`, `Home` / `End` | Jump |
 | `Tab` / `Shift+Tab` | Cycle the filter: all → applications → files |
+| `Alt+1`…`Alt+9` | Select the 1st…9th result |
 | `Enter` | Launch the app / open the file at its line, page or timestamp |
 | `Ctrl+Enter` | Open the **folder** that contains the file |
 | `Ctrl+C` | Copy the file's path (or the app's command) |
+| `Ctrl+T` | Toggle `~/…` and full paths in the list |
 | `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Clear the line / delete a word / select all |
 | `Esc` | Close the settings panel, then the window |
 | `⚙` in the footer | Settings panel |
@@ -444,7 +446,10 @@ how often and how recently you launched them. The **gear** in the footer opens
 the popup's settings — preview on/off and width, columns per row, compact or
 detailed rows, dark/light theme, the default filter, the application limit and
 the semantic debounce; they are saved as you click, in
-`~/.config/feagle/gui.toml`.
+`~/.config/feagle/gui.toml`. The interface speaks English and Russian
+(`language = "auto"` follows the locale), matched query words are highlighted in
+the result rows, and `Alt+1`…`Alt+9` / `Ctrl+T` pick a result by number and
+switch between `~/…` and full paths.
 
 ```sh
 quickshell -p /path/to/feagle/quickshell                    # start it with your session
@@ -1216,9 +1221,11 @@ mp3 = "mpv --start={time} {path}"
 | `↑` `↓` (или `Ctrl+P` / `Ctrl+N`) | Перемещение по списку |
 | `PgUp` / `PgDn`, `Home` / `End` | Прыжок |
 | `Tab` / `Shift+Tab` | Фильтр: все → приложения → файлы |
+| `Alt+1`…`Alt+9` | Выбрать 1-й…9-й результат |
 | `Enter` | Запустить приложение / открыть файл на строке, странице или таймкоде |
 | `Ctrl+Enter` | Открыть **каталог**, в котором лежит файл |
 | `Ctrl+C` | Скопировать путь файла (или команду приложения) |
+| `Ctrl+T` | Переключить `~/…` и полные пути в списке |
 | `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Очистить строку / удалить слово / выделить всё |
 | `Esc` | Закрыть панель настроек, затем окно |
 | `⚙` в футере | Панель настроек |
@@ -1233,7 +1240,10 @@ mp3 = "mpv --start={time} {path}"
 открывает настройки попапа — превью вкл/выкл и его ширину, число колонок в строке,
 компактные/детальные строки, тёмную/светлую тему, фильтр по умолчанию, лимит
 приложений и задержку семантики; они сохраняются на каждый клик в
-`~/.config/feagle/gui.toml`.
+`~/.config/feagle/gui.toml`. Интерфейс говорит по-английски и по-русски
+(`language = "auto"` — по локали), совпадения подсвечиваются в строках результатов,
+а `Alt+1`…`Alt+9` и `Ctrl+T` выбирают результат по номеру и переключают `~/…` ↔
+полные пути.
 
 ```sh
 quickshell -p /path/to/feagle/quickshell                    # запустить вместе с сессией

@@ -66,9 +66,21 @@ PanelWindow {
     /// What the panel lists, in display order; `feagle.guiSchema` supplies the
     /// ranges, defaults and choices. Keep in step with `gui.SETTINGS`.
     readonly property var settingsOrder: [
-        "show_preview", "preview_width", "row_columns", "layout",
+        "language", "show_preview", "preview_width", "row_columns", "layout",
         "theme", "default_filter", "apps_limit", "debounce_ms"
     ]
+    /// UI language: "auto" follows LC_ALL/LC_MESSAGES/LANG, the panel can pin
+    /// "en" or "ru".
+    readonly property string language: {
+        const wanted = root.setting("language", "auto");
+        if (wanted === "en" || wanted === "ru")
+            return wanted;
+        const locale = [Quickshell.env("LC_ALL"), Quickshell.env("LC_MESSAGES"),
+                        Quickshell.env("LANG")].filter((value) => value).join(" ");
+        return locale.toLowerCase().indexOf("ru") === 0 ? "ru" : "en";
+    }
+    /// Whether paths are shown in full instead of `~/…` (Ctrl+T).
+    property bool fullPaths: false
 
     visible: open
     color: "transparent"
@@ -104,6 +116,75 @@ PanelWindow {
 
     // ---- helpers -----------------------------------------------------------
     readonly property string home: Quickshell.env("HOME") || ""
+
+    /// Russian UI strings, keyed by the English text. `t()` falls back to the
+    /// key, so a string that is added here but not translated still reads as
+    /// English instead of breaking.
+    readonly property var ru: ({
+        "Search files and applications…": "Искать файлы и приложения…",
+        "Type to search files": "Введите запрос для поиска файлов",
+        "Type to search your files and applications": "Начните печатать: файлы и приложения",
+        "Applications": "Приложения",
+        "Files": "Файлы",
+        "All": "Все",
+        "Apps": "Прил.",
+        "semantic": "семантика",
+        "keyword": "ключевые слова",
+        "Copied ": "Скопировано: ",
+        "Application": "Приложение",
+        "No preview: ": "Без превью: ",
+        "Loading preview…": "Загрузка превью…",
+        "page": "стр.",
+        "lines": "строки",
+        "Settings": "Настройки",
+        "saved on change · gui.toml": "сохраняется сразу · gui.toml",
+        "Settings need the query daemon: ": "Настройки требуют демон запросов: ",
+        "queryd is not reachable — start feagle-queryd":
+            "queryd недоступен — запусти feagle-queryd",
+        "Full paths": "Полные пути",
+        "Short paths (~)": "Короткие пути (~)",
+        "alt+1…9  ↑↓  tab filter  ↵ open  ^c copy  ^⏎ folder  ^t paths  esc close":
+            "alt+1…9  ↑↓  tab фильтр  ↵ открыть  ^c копировать  ^⏎ папка  ^t пути  esc закрыть"
+    })
+
+    /// A UI string in the current language (the English text is the key).
+    function t(key) {
+        if (root.language !== "ru")
+            return key;
+        const value = root.ru[key];
+        return value !== undefined ? value : key;
+    }
+
+    /// "3 results" / "3 результата" with the right Russian plural.
+    function resultsText(count) {
+        if (root.language !== "ru")
+            return count + (count === 1 ? " result" : " results");
+        const ten = count % 10;
+        const hundred = count % 100;
+        if (ten === 1 && hundred !== 11)
+            return count + " результат";
+        if (ten >= 2 && ten <= 4 && (hundred < 12 || hundred > 14))
+            return count + " результата";
+        return count + " результатов";
+    }
+
+    function moreText(count) {
+        return root.language === "ru" ? "▾ ещё " + count : "▾ " + count + " more";
+    }
+
+    function noMatches(query) {
+        return root.language === "ru"
+            ? "Нет совпадений: «" + query + "»"
+            : "No matches for “" + query + "”";
+    }
+
+    function filterLabel(key) {
+        if (key === "apps")
+            return root.t("Apps");
+        if (key === "files")
+            return root.t("Files");
+        return root.t("All");
+    }
 
     /// A setting's current value: gui.toml if it answered, else the schema default.
     function settingValue(key) {
@@ -171,11 +252,12 @@ PanelWindow {
     }
 
     /// `$HOME` is shown as `~` (display only; opening still uses the real path).
+    /// Ctrl+T switches to full paths.
     function shorten(value) {
         const text = String(value || "");
-        if (root.home.length > 0 && text.startsWith(root.home))
-            return "~" + text.slice(root.home.length);
-        return text;
+        if (root.fullPaths || root.home.length === 0 || !text.startsWith(root.home))
+            return text;
+        return "~" + text.slice(root.home.length);
     }
 
     function primaryLabel(item) {
@@ -218,7 +300,7 @@ PanelWindow {
         if (item.time !== null && item.time !== undefined)
             return fmtTime(item.time);
         if (item.page !== null && item.page !== undefined)
-            return "p. " + item.page;
+            return (root.language === "ru" ? "стр. " : "p. ") + item.page;
         if (item.line !== null && item.line !== undefined)
             return ":" + item.line;
         return "";
@@ -268,7 +350,7 @@ PanelWindow {
         if (!value)
             return;
         Quickshell.clipboardText = value;
-        root.showFlash("Copied " + root.shorten(value));
+        root.showFlash(root.t("Copied ") + root.shorten(value));
     }
 
     /// Open the folder that contains the selection (files only).
@@ -351,7 +433,7 @@ PanelWindow {
         if (!item)
             return "";
         if (item.kind === "app")
-            return "Application";
+            return root.t("Application");
         var parts = [];
         if (info && info.size !== undefined)
             parts.push(fmtSize(info.size));
@@ -359,8 +441,8 @@ PanelWindow {
             parts.push(fmtDate(info.mtime));
         if (info && info.kind === "text" && info.start_line) {
             const lines = String(info.text || "").split("\n").length;
-            const where = info.page ? "page " + info.page + ", " : "";
-            parts.push(where + "lines " + info.start_line + "–"
+            const where = info.page ? root.t("page") + " " + info.page + ", " : "";
+            parts.push(where + root.t("lines") + " " + info.start_line + "–"
                 + (info.start_line + lines - 1));
         }
         return parts.join(" · ");
@@ -373,11 +455,11 @@ PanelWindow {
         if (item.kind === "app")
             return (item.exec || []).join(" ");
         if (feagle.previewError)
-            return "No preview: " + feagle.previewError;
+            return root.t("No preview: ") + feagle.previewError;
         if (info && info.kind === "meta")
             return root.shorten(item.path) + (info.reason ? "\n\n" + info.reason : "");
         if (!info)
-            return "Loading preview…";
+            return root.t("Loading preview…");
         return root.shorten(item.path);
     }
 
@@ -480,7 +562,7 @@ PanelWindow {
                 anchors.leftMargin: 12
                 color: root.muted
                 font.pixelSize: 17
-                text: "Search files and applications…"
+                text: root.t("Search files and applications…")
                 visible: field.text.length === 0
             }
 
@@ -514,6 +596,14 @@ PanelWindow {
                     } else if (event.key === Qt.Key_End) {
                         root.currentIndex = Math.max(0, feagle.visibleResults.length - 1);
                         event.accepted = true;
+                    } else if ((event.modifiers & Qt.AltModifier) !== 0
+                               && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
+                        const at = event.key - Qt.Key_1;
+                        if (at < feagle.visibleResults.length) {
+                            root.currentIndex = at;
+                            list.positionViewAtIndex(at, ListView.Contain);
+                        }
+                        event.accepted = true;
                     } else if (event.key === Qt.Key_Tab) {
                         feagle.cycleFilter((event.modifiers & Qt.ShiftModifier) !== 0);
                         root.currentIndex = 0;
@@ -530,6 +620,11 @@ PanelWindow {
                         field.selectAll(); event.accepted = true;
                     } else if (ctrl && event.key === Qt.Key_C) {
                         root.copyTarget(); event.accepted = true;
+                    } else if (ctrl && event.key === Qt.Key_T) {
+                        root.fullPaths = !root.fullPaths;
+                        root.showFlash(root.t(root.fullPaths
+                            ? "Full paths" : "Short paths (~)"));
+                        event.accepted = true;
                     } else if (ctrl && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
                         root.openFolder(); event.accepted = true;
                     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -558,9 +653,9 @@ PanelWindow {
 
                 Repeater {
                     model: [
-                        { key: "all", label: "All" },
-                        { key: "apps", label: "Apps" },
-                        { key: "files", label: "Files" }
+                        { key: "all" },
+                        { key: "apps" },
+                        { key: "files" }
                     ]
 
                     delegate: Rectangle {
@@ -581,7 +676,7 @@ PanelWindow {
                             color: chip.active ? root.text : root.muted
                             font.pixelSize: 11
                             font.bold: chip.active
-                            text: chip.modelData.label
+                            text: root.filterLabel(chip.modelData.key)
                         }
 
                         HoverHandler { id: chipHover }
@@ -625,14 +720,17 @@ PanelWindow {
                     if (root.flash.length > 0)
                         return root.flash;
                     if (root.daemonSlow && !feagle.connected)
-                        return "queryd is not reachable — start feagle-queryd";
+                        return root.t("queryd is not reachable — start feagle-queryd");
                     if (feagle.error)
                         return "queryd: " + feagle.error;
                     const count = feagle.visibleResults.length;
-                    const kind = feagle.mode === "hybrid" ? "semantic" : "keyword";
-                    const filter = feagle.filter === "all" ? "" : feagle.filter + " · ";
-                    return filter + count + (count === 1 ? " result" : " results")
-                        + " · " + kind + " · " + Math.round(feagle.tookMs) + " ms";
+                    const kind = feagle.mode === "hybrid"
+                        ? root.t("semantic") : root.t("keyword");
+                    const filter = feagle.filter === "all"
+                        ? "" : root.filterLabel(feagle.filter) + " · ";
+                    const took = Math.round(feagle.tookMs)
+                        + (root.language === "ru" ? " мс" : " ms");
+                    return filter + root.resultsText(count) + " · " + kind + " · " + took;
                 }
             }
 
@@ -641,9 +739,12 @@ PanelWindow {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.right: gear.left
                 anchors.rightMargin: 8
+                width: Math.min(implicitWidth, parent.width - 240)
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideLeft
                 color: root.muted
                 font.pixelSize: 11
-                text: "tab filter  ↑↓  ↵ open  ^c copy  ^⏎ folder  esc close"
+                text: root.t("alt+1…9  ↑↓  tab filter  ↵ open  ^c copy  ^⏎ folder  ^t paths  esc close")
             }
 
             // The settings panel (gui.toml through the daemon).
@@ -721,7 +822,8 @@ PanelWindow {
                         font.pixelSize: 10
                         font.capitalization: Font.AllUppercase
                         font.letterSpacing: 0.7
-                        text: rowItem.modelData.kind === "app" ? "Applications" : "Files"
+                        text: rowItem.modelData.kind === "app"
+                            ? root.t("Applications") : root.t("Files")
                     }
 
                     Rectangle {
@@ -775,17 +877,19 @@ PanelWindow {
                                 width: parent.width
                                 color: root.text
                                 font.pixelSize: 14
+                                textFormat: Text.StyledText
                                 elide: Text.ElideMiddle
-                                text: root.primaryLabel(rowItem.modelData)
+                                text: root.markLine(root.primaryLabel(rowItem.modelData))
                             }
                             Text {
                                 width: parent.width
                                 color: root.muted
                                 font.pixelSize: 11
+                                textFormat: Text.StyledText
                                 elide: Text.ElideRight
                                 visible: text.length > 0 && root.rowColumns >= 2
                                     && !root.compactRows
-                                text: root.secondaryLabel(rowItem.modelData)
+                                text: root.markLine(root.secondaryLabel(rowItem.modelData))
                             }
                         }
 
@@ -855,7 +959,7 @@ PanelWindow {
                     anchors.centerIn: parent
                     color: root.muted
                     font.pixelSize: 10
-                    text: "▾ " + moreBelow.hiddenBelow + " more"
+                    text: root.moreText(moreBelow.hiddenBelow)
                 }
             }
 
@@ -1095,10 +1199,10 @@ PanelWindow {
                     font.pixelSize: 13
                     text: {
                         if (feagle.query.length > 0)
-                            return "No matches for “" + feagle.query + "”";
+                            return root.noMatches(feagle.query);
                         if (feagle.filter === "files")
-                            return "Type to search files";
-                        return "Type to search your files and applications";
+                            return root.t("Type to search files");
+                        return root.t("Type to search your files and applications");
                     }
                 }
             }
@@ -1115,7 +1219,7 @@ PanelWindow {
             Text {
                 id: settingsTitle
                 anchors { left: parent.left; leftMargin: 18; top: parent.top; topMargin: 16 }
-                text: "Settings"
+                text: root.t("Settings")
                 color: root.text
                 font.pixelSize: 12
                 font.bold: true
@@ -1125,7 +1229,7 @@ PanelWindow {
 
             Text {
                 anchors { left: settingsTitle.right; leftMargin: 10; baseline: settingsTitle.baseline }
-                text: "saved on change · gui.toml"
+                text: root.t("saved on change · gui.toml")
                 color: root.muted
                 font.pixelSize: 11
             }
@@ -1158,8 +1262,8 @@ PanelWindow {
                 color: root.muted
                 font.pixelSize: 12
                 visible: Object.keys(feagle.guiSchema).length === 0
-                text: "Settings need the query daemon: "
-                    + (feagle.error || "queryd is not reachable")
+                text: root.t("Settings need the query daemon: ")
+                    + (feagle.error || root.t("queryd is not reachable — start feagle-queryd"))
             }
 
             // One row per setting; the control follows the schema's `kind`, so the
@@ -1188,7 +1292,9 @@ PanelWindow {
                             verticalCenter: parent.verticalCenter
                         }
                         width: parent.width - 200
-                        text: settingRow.meta.hint || settingRow.modelData
+                        text: settingRow.meta.hint
+                            ? (settingRow.meta.hint[root.language] || settingRow.meta.hint.en)
+                            : settingRow.modelData
                         color: root.text
                         font.pixelSize: 12
                         elide: Text.ElideRight

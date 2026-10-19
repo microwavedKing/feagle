@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   click, and a mistake there must not be able to break indexing. A hand-edited
   file with a wrong value logs a warning and the default wins; `set_gui` refuses
   a value out of range before writing.
+- The popup speaks **English and Russian**: `language` (`auto` follows
+  `LC_ALL`/`LC_MESSAGES`/`LANG`) switches every label, hint, empty state and the
+  footer counter (with Russian plurals) — no restart, the panel has a row for it.
+- Popup quality-of-life: matched query words are highlighted in the result rows
+  (`Text.StyledText`, which still elides), `Alt+1`…`Alt+9` select a result by
+  number, and `Ctrl+T` toggles `~/…` and full paths.
 
 ## [0.4.0] - 2026-10-19
 
@@ -502,6 +508,12 @@ on Wayland.
   `config.toml` намеренно: панель сохраняет на каждый клик, и ошибка там не должна
   уметь сломать индексацию. Плохое значение в файле, правленном руками, даёт
   предупреждение и дефолт; `set_gui` отклоняет значение вне диапазона **до** записи.
+- Попап говорит **по-английски и по-русски**: `language` (`auto` — по
+  `LC_ALL`/`LC_MESSAGES`/`LANG`) переключает все подписи, подсказки, пустые состояния
+  и счётчик в футере (с русскими склонениями) — без перезапуска, строка есть в панели.
+- QoL попапа: совпадения слов запроса подсвечиваются в строках результатов
+  (`Text.StyledText`, elide при этом работает), `Alt+1`…`Alt+9` выбирают результат
+  по номеру, `Ctrl+T` переключает `~/…` ↔ полные пути.
 
 ## 0.4.0 (по-русски) — 2026-10-19
 

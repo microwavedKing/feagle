@@ -47,9 +47,11 @@ hotkey ("search my files") next to the plain launcher one.
 | `↑` `↓` (or `Ctrl+P` / `Ctrl+N`) | Move the selection |
 | `PgUp` / `PgDn`, `Home` / `End` | Jump |
 | `Tab` / `Shift+Tab` | Cycle the filter (all → applications → files) |
+| `Alt+1`…`Alt+9` | Select the 1st…9th result |
 | `Enter` | Run the selection (launch the app / open the file at its position) |
 | `Ctrl+Enter` | Open the **folder** that contains the file |
 | `Ctrl+C` | Copy the file's path (or the app's command) to the clipboard |
+| `Ctrl+T` | Toggle `~/…` and full paths in the list |
 | `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Clear the line / delete a word / select all |
 | `Esc` | Close the settings panel, then the window |
 | `⚙` in the footer | Open/close the settings panel |
@@ -67,6 +69,7 @@ able to break indexing. `Esc` closes the panel without closing the launcher.
 
 | Key | What it changes | Range / values |
 |---|---|---|
+| `language` | Interface language (`auto` follows `LC_ALL`/`LC_MESSAGES`/`LANG`) | `auto` / `en` / `ru` |
 | `show_preview` | Draw the preview pane at all | `true` / `false` |
 | `preview_width` | Preview pane width | 200–800 px |
 | `row_columns` | Text columns per row: title, path, meta (the icon is always drawn) | 1–3 |
@@ -80,6 +83,11 @@ Those are also the defaults, i.e. what a missing file means. Editing `gui.toml` 
 hand is fine: a value out of range is logged and ignored (the default wins), and
 the next click in the panel rewrites the whole file. A `set_gui` reply is
 all-or-nothing, so a rejected value is never written.
+
+The interface itself is English or Russian: `language = "auto"` follows the
+locale, and the panel's first row switches it without a restart. Matched query
+words are highlighted in the result rows, `Alt+1`…`Alt+9` selects a result by
+number and `Ctrl+T` toggles `~/…` and full paths.
 
 `qs ipc` must know which instance to talk to. With `-p` (as above) pass the same
 path. If you installed the demo as a **named config**
@@ -302,7 +310,7 @@ and routes on `req`.
 ```json
 {"op":"get_gui"}
 {"ok":true,"gui":{"theme":"dark","row_columns":3,"…":""},
- "schema":{"row_columns":{"kind":"int","default":3,"min":1,"max":3,"choices":[],"hint":"…"},"…":""},
+ "schema":{"row_columns":{"kind":"int","default":3,"min":1,"max":3,"choices":[],"hint":{"en":"text columns per row: title, path, meta","ru":"текстовых колонок в строке: название, путь, мета"}},"…":""},
  "path":"/home/me/.config/feagle/gui.toml"}
 ```
 
