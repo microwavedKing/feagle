@@ -1,8 +1,9 @@
-"""The man page and the shell completions must not drift from the CLI parser."""
+"""The man page, the completions and the public docs must not drift from the CLI."""
 
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import pytest
@@ -98,3 +99,20 @@ def test_completions_are_installed_by_the_package():
     assert "man/feagle.1" in pkgbuild
     for relative in ("completions/feagle.bash", "completions/_feagle", "completions/feagle.fish"):
         assert relative in pkgbuild
+
+
+#: Public docs quote the version in the places ``scripts/release.py bump`` rewrites.
+#: A hand edit that misses one of them is what these patterns catch.
+_VERSION_DOCS = {
+    "README.md": r"\*\*(?:Status|Статус):\*\* (?:beta|бета) \(`(\d+\.\d+\.\d+)`\)",
+    "ARCHITECTURE.md": r'"version": *"(\d+\.\d+\.\d+)"',
+    "quickshell/README.md": r'"version": *"(\d+\.\d+\.\d+)"',
+}
+
+
+@pytest.mark.parametrize("name", sorted(_VERSION_DOCS))
+def test_public_docs_quote_the_current_version(name):
+    text = (ROOT / name).read_text(encoding="utf-8")
+    found = re.findall(_VERSION_DOCS[name], text)
+    assert found, f"{name}: no version quoted where release.py writes one"
+    assert set(found) == {__version__}, f"{name}: {sorted(set(found))} != {__version__}"
