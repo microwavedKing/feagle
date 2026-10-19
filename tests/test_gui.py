@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import stat
 import tomllib
@@ -156,3 +157,14 @@ def test_a_bad_value_on_disk_is_repaired_by_the_next_write(tmp_path):
     values = gui.set_gui({"preview_width": 400}, path)
     assert values["theme"] == "dark"
     assert gui.load_gui(path)["theme"] == "dark"
+
+
+def test_schema_covers_every_setting_and_is_json_ready():
+    schema = gui.schema()
+
+    assert set(schema) == set(gui.SETTINGS)
+    json.dumps(schema)  # the daemon puts it on the socket as JSON
+    assert schema["row_columns"]["min"] == 1
+    assert schema["row_columns"]["max"] == 4
+    assert schema["theme"]["choices"] == ["dark", "light"]
+    assert schema["show_preview"]["kind"] == "bool"

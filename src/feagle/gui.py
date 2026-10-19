@@ -103,6 +103,25 @@ def gui_file() -> Path:
     return paths.gui_file()
 
 
+def schema() -> dict[str, dict[str, Any]]:
+    """The settings as plain data, so the popup renders controls generically.
+
+    JSON-friendly on purpose: the panel asks the daemon for this instead of
+    repeating the ranges and choices in QML.
+    """
+    return {
+        key: {
+            "kind": setting.kind,
+            "default": setting.default,
+            "min": setting.minimum,
+            "max": setting.maximum,
+            "choices": list(setting.choices),
+            "hint": setting.hint,
+        }
+        for key, setting in SETTINGS.items()
+    }
+
+
 def coerce(key: str, value: Any) -> Any:
     """``value`` as the setting ``key`` expects, or raise :class:`GuiError`.
 
