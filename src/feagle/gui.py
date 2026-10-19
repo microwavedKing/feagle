@@ -60,6 +60,7 @@ class Setting:
     maximum: int | None = None
     choices: tuple[str, ...] = ()
     hint: str = ""
+    hint_ru: str = ""
 
 
 #: Every key the panel may read or write. `row_columns` counts the row's *text*
@@ -67,29 +68,71 @@ class Setting:
 #: the full row the launcher has always drawn. The icon is not one of them: it is
 #: always drawn.
 SETTINGS: dict[str, Setting] = {
+    "language": Setting(
+        "str",
+        "auto",
+        choices=("auto", "en", "ru"),
+        hint="interface language (auto follows the locale)",
+        hint_ru="язык интерфейса (auto — по локали)",
+    ),
     "show_preview": Setting(
-        "bool", True, hint="preview pane for the selected file"
+        "bool",
+        True,
+        hint="preview pane for the selected file",
+        hint_ru="панель превью для выбранного файла",
     ),
     "preview_width": Setting(
-        "int", 360, minimum=200, maximum=800, hint="preview pane width, px"
+        "int",
+        360,
+        minimum=200,
+        maximum=800,
+        hint="preview pane width, px",
+        hint_ru="ширина панели превью, px",
     ),
     "row_columns": Setting(
-        "int", 3, minimum=1, maximum=3, hint="text columns per row: title, path, meta"
+        "int",
+        3,
+        minimum=1,
+        maximum=3,
+        hint="text columns per row: title, path, meta",
+        hint_ru="текстовых колонок в строке: название, путь, мета",
     ),
     "layout": Setting(
-        "str", "detailed", choices=("compact", "detailed"), hint="row density"
+        "str",
+        "detailed",
+        choices=("compact", "detailed"),
+        hint="row density",
+        hint_ru="плотность строк",
     ),
     "theme": Setting(
-        "str", "dark", choices=("dark", "light"), hint="popup colours"
+        "str",
+        "dark",
+        choices=("dark", "light"),
+        hint="popup colours",
+        hint_ru="цвета попапа",
     ),
     "default_filter": Setting(
-        "str", "all", choices=("all", "apps", "files"), hint="results shown on open"
+        "str",
+        "all",
+        choices=("all", "apps", "files"),
+        hint="results shown on open",
+        hint_ru="результаты при открытии",
     ),
     "apps_limit": Setting(
-        "int", 8, minimum=0, maximum=50, hint="applications ranked above file hits"
+        "int",
+        8,
+        minimum=0,
+        maximum=50,
+        hint="applications ranked above file hits",
+        hint_ru="приложений выше файлов при вводе",
     ),
     "debounce_ms": Setting(
-        "int", 120, minimum=0, maximum=2000, hint="pause before the semantic pass"
+        "int",
+        120,
+        minimum=0,
+        maximum=2000,
+        hint="pause before the semantic pass",
+        hint_ru="пауза перед семантическим поиском",
     ),
 }
 
@@ -117,7 +160,7 @@ def schema() -> dict[str, dict[str, Any]]:
             "min": setting.minimum,
             "max": setting.maximum,
             "choices": list(setting.choices),
-            "hint": setting.hint,
+            "hint": {"en": setting.hint, "ru": setting.hint_ru or setting.hint},
         }
         for key, setting in SETTINGS.items()
     }

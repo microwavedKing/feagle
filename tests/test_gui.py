@@ -107,6 +107,8 @@ def test_broken_toml_falls_back_to_defaults(tmp_path, caplog):
         ("apps_limit", 0, 0),
         ("theme", "light", "light"),
         ("row_columns", 1, 1),
+        ("language", "ru", "ru"),
+        ("language", "auto", "auto"),
     ],
 )
 def test_coerce_accepts(key, value, expected):
@@ -125,6 +127,7 @@ def test_coerce_accepts(key, value, expected):
         ("preview_width", "wide"),
         ("row_columns", 4),
         ("theme", "Solarized"),  # choices are case-sensitive
+        ("language", "de"),  # not one of the choices
         ("default_filter", "app"),
         ("debounce_ms", 5000),
     ],
@@ -168,3 +171,10 @@ def test_schema_covers_every_setting_and_is_json_ready():
     assert schema["row_columns"]["max"] == 3
     assert schema["theme"]["choices"] == ["dark", "light"]
     assert schema["show_preview"]["kind"] == "bool"
+    assert schema["language"]["choices"] == ["auto", "en", "ru"]
+    assert schema["language"]["default"] == "auto"
+    # The panel renders its labels in the UI language, so both must be there.
+    for key, meta in schema.items():
+        assert meta["hint"]["en"], key
+        assert meta["hint"]["ru"], key
+    assert schema["theme"]["hint"] == {"en": "popup colours", "ru": "цвета попапа"}
