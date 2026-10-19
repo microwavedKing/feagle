@@ -81,6 +81,8 @@ PanelWindow {
     }
     /// Whether paths are shown in full instead of `~/…` (Ctrl+T).
     property bool fullPaths: false
+    /// Where the ↑/↓ walk stands in `feagle.history`; -1 is the live input.
+    property int historyIndex: -1
 
     visible: open
     color: "transparent"
@@ -143,8 +145,11 @@ PanelWindow {
             "queryd недоступен — запусти feagle-queryd",
         "Full paths": "Полные пути",
         "Short paths (~)": "Короткие пути (~)",
-        "alt+1…9  ↑↓  tab filter  ↵ open  ^c copy  ^⏎ folder  ^t paths  esc close":
-            "alt+1…9  ↑↓  tab фильтр  ↵ открыть  ^c копировать  ^⏎ папка  ^t пути  esc закрыть"
+        "Pinned": "Закреплено",
+        "Unpinned": "Откреплено",
+        "Only files can be pinned": "Закрепить можно только файл",
+        "alt+1…9  ↑↓ history  tab filter  ↵ open  ^c copy  ^d pin  ^t paths  esc close":
+            "alt+1…9  ↑↓ история  tab фильтр  ↵ открыть  ^c копировать  ^d закрепить  ^t пути  esc закрыть"
     })
 
     /// A UI string in the current language (the English text is the key).
@@ -184,6 +189,60 @@ PanelWindow {
         if (key === "files")
             return root.t("Files");
         return root.t("All");
+    }
+
+    /// Whether ↑/↓ should walk the history instead of the selection: Up on an
+    /// empty field opens it, Down only once inside, and Ctrl+P/N stay on the list.
+    function wantsHistory(delta) {
+        if (root.historyIndex >= 0)
+            return true;
+        return delta < 0 && field.text.length === 0 && (feagle.history || []).length > 0;
+    }
+
+    /// Walk the history: -1 is the empty input, 0 the newest query.
+    function historyStep(delta) {
+        const entries = feagle.history || [];
+        if (entries.length === 0)
+            return;
+        const next = delta < 0
+            ? Math.min(entries.length - 1, root.historyIndex + 1)
+            : Math.max(-1, root.historyIndex - 1);
+        root.historyIndex = next;
+        field.text = next < 0 ? "" : entries[next];
+        field.cursorPosition = field.text.length;
+    }
+
+    /// Activate a result and remember the query that found it.
+    function run(item) {
+        if (!item)
+            return;
+        const text = String(feagle.query || "").trim();
+        if (text.length > 0)
+            feagle.addHistory(text);
+        feagle.activateItem(item);
+    }
+
+    /// Whether a path is pinned (Ctrl+D toggles it).
+    function isFavorite(path) {
+        const list = feagle.guiConfig.favorites;
+        return !!list && list.indexOf(path) >= 0;
+    }
+
+    function toggleFavorite() {
+        const item = feagle.visibleResults[root.currentIndex];
+        if (!item || item.kind !== "file") {
+            root.showFlash(root.t("Only files can be pinned"));
+            return;
+        }
+        const list = (feagle.guiConfig.favorites || []).slice();
+        const at = list.indexOf(item.path);
+        const pinning = at < 0;
+        if (pinning)
+            list.push(item.path);
+        else
+            list.splice(at, 1);
+        feagle.setGui("favorites", list);
+        root.showFlash(root.t(pinning ? "Pinned" : "Unpinned"));
     }
 
     /// A setting's current value: gui.toml if it answered, else the schema default.
@@ -359,7 +418,7 @@ PanelWindow {
         if (!item)
             return;
         if (item.kind !== "file") {
-            feagle.activateItem(item);
+            root.run(item);
             root.closeLauncher();
             return;
         }
@@ -469,6 +528,7 @@ PanelWindow {
         root.daemonSlow = false;
         root.flash = "";
         root.settingsOpen = false;
+        root.historyIndex = -1;
         field.text = "";
         // Pick up gui.toml (and any hand edit) on every open.
         feagle.setFilter(root.setting("default_filter", "all"));
@@ -579,13 +639,29 @@ PanelWindow {
                 selectByMouse: true
                 onTextChanged: {
                     root.currentIndex = 0;
+                    // Typing leaves the history walk (an entry set by it matches).
+                    if (root.historyIndex >= 0
+                            && text !== (feagle.history[root.historyIndex] || ""))
+                        root.historyIndex = -1;
                     feagle.setQuery(text);
                 }
                 Keys.onPressed: (event) => {
                     const ctrl = (event.modifiers & Qt.ControlModifier) !== 0;
-                    if (event.key === Qt.Key_Down || (ctrl && event.key === Qt.Key_N)) {
+                    if (event.key === Qt.Key_Down) {
+                        if (!ctrl && root.wantsHistory(1))
+                            root.historyStep(1);
+                        else
+                            root.move(1);
+                        event.accepted = true;
+                    } else if (ctrl && event.key === Qt.Key_N) {
                         root.move(1); event.accepted = true;
-                    } else if (event.key === Qt.Key_Up || (ctrl && event.key === Qt.Key_P)) {
+                    } else if (event.key === Qt.Key_Up) {
+                        if (!ctrl && root.wantsHistory(-1))
+                            root.historyStep(-1);
+                        else
+                            root.move(-1);
+                        event.accepted = true;
+                    } else if (ctrl && event.key === Qt.Key_P) {
                         root.move(-1); event.accepted = true;
                     } else if (event.key === Qt.Key_PageDown) {
                         root.move(6); event.accepted = true;
@@ -625,11 +701,13 @@ PanelWindow {
                         root.showFlash(root.t(root.fullPaths
                             ? "Full paths" : "Short paths (~)"));
                         event.accepted = true;
+                    } else if (ctrl && event.key === Qt.Key_D) {
+                        root.toggleFavorite(); event.accepted = true;
                     } else if (ctrl && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
                         root.openFolder(); event.accepted = true;
                     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                         if (!root.settingsOpen) {
-                            feagle.activate(root.currentIndex);
+                            root.run(feagle.visibleResults[root.currentIndex]);
                             root.closeLauncher();
                         }
                         event.accepted = true;
@@ -744,7 +822,7 @@ PanelWindow {
                 elide: Text.ElideLeft
                 color: root.muted
                 font.pixelSize: 11
-                text: root.t("alt+1…9  ↑↓  tab filter  ↵ open  ^c copy  ^⏎ folder  ^t paths  esc close")
+                text: root.t("alt+1…9  ↑↓ history  tab filter  ↵ open  ^c copy  ^d pin  ^t paths  esc close")
             }
 
             // The settings panel (gui.toml through the daemon).
@@ -894,6 +972,17 @@ PanelWindow {
                         }
 
                         Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.right: rowPos.left
+                            anchors.rightMargin: 8
+                            visible: rowItem.modelData.kind === "file"
+                                && root.isFavorite(rowItem.modelData.path)
+                            text: "★"
+                            color: root.accent
+                            font.pixelSize: 11
+                        }
+
+                        Text {
                             id: rowPos
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.right: parent.right
@@ -915,7 +1004,7 @@ PanelWindow {
                         MouseArea {
                             anchors.fill: parent
                             onClicked: {
-                                feagle.activateItem(rowItem.modelData);
+                                root.run(rowItem.modelData);
                                 root.closeLauncher();
                             }
                         }

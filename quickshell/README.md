@@ -44,13 +44,14 @@ hotkey ("search my files") next to the plain launcher one.
 
 | Key | Does |
 |---|---|
-| `↑` `↓` (or `Ctrl+P` / `Ctrl+N`) | Move the selection |
+| `↑` `↓` (or `Ctrl+P` / `Ctrl+N`) | Move the selection; on an **empty field** `↑` walks the query history (and `↓` back down) |
 | `PgUp` / `PgDn`, `Home` / `End` | Jump |
 | `Tab` / `Shift+Tab` | Cycle the filter (all → applications → files) |
 | `Alt+1`…`Alt+9` | Select the 1st…9th result |
 | `Enter` | Run the selection (launch the app / open the file at its position) |
 | `Ctrl+Enter` | Open the **folder** that contains the file |
 | `Ctrl+C` | Copy the file's path (or the app's command) to the clipboard |
+| `Ctrl+D` | Pin/unpin the selected file (★; pinned files come first on an empty query) |
 | `Ctrl+T` | Toggle `~/…` and full paths in the list |
 | `Ctrl+U` / `Ctrl+W` / `Ctrl+A` | Clear the line / delete a word / select all |
 | `Esc` | Close the settings panel, then the window |

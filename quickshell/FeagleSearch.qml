@@ -56,6 +56,8 @@ QtObject {
     /// The schema that describes those settings: `{kind, default, min, max,
     /// choices, hint}` per key. The panel renders its controls from this.
     property var guiSchema: ({})
+    /// Recent queries, newest first (`[]` until the daemon answers).
+    property var history: []
 
     // ---- state (read-only for the launcher) --------------------------------
     /// The current query text.
@@ -105,6 +107,16 @@ QtObject {
         var change = {};
         change[String(key)] = value;
         send({ op: "set_gui", req: "gui", settings: change });
+    }
+
+    /// Ask for the query history (also sent on connect).
+    function getHistory(): void {
+        send({ op: "history", req: "history" });
+    }
+
+    /// Remember a query the user ran; the reply refreshes `history`.
+    function addHistory(text): void {
+        send({ op: "history", req: "history", add: String(text) });
     }
 
     /// Clear the query and results (call when the launcher opens).
@@ -280,6 +292,13 @@ QtObject {
             }
             return;   // settings never affect the result list or `busy`
         }
+        if (msg && msg.req === "history") {
+            if (msg.ok)
+                root.history = msg.entries || [];
+            else
+                root.error = msg.error || "history error";
+            return;   // history never affects the result list or `busy`
+        }
         root.busy = false;
         if (msg && msg.ok) {
             root.results = root.resultsFor(msg);
@@ -298,6 +317,7 @@ QtObject {
             if (connected && root.active) {
                 root.warmup();
                 root.getGui();
+                root.getHistory();
                 root.request("fts");
             }
         }

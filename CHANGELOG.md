@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Popup quality-of-life: matched query words are highlighted in the result rows
   (`Text.StyledText`, which still elides), `Alt+1`…`Alt+9` select a result by
   number, and `Ctrl+T` toggles `~/…` and full paths.
+- With an empty query the popup no longer searches (and no longer embeds `""`):
+  it lists applications, **pinned files** (`Ctrl+D`, the ★ mark) and files opened
+  recently, all checked against the index. `↑` walks a persistent **query
+  history** (`$XDG_STATE_HOME/feagle/history.json`); opening a result records the
+  query that found it.
+- `apps_limit = 0` is accepted again, so the Files filter in the popup works: it
+  was rejected by the request validation and returned an error instead of files.
 
 ## [0.4.0] - 2026-10-19
 
@@ -514,6 +521,12 @@ on Wayland.
 - QoL попапа: совпадения слов запроса подсвечиваются в строках результатов
   (`Text.StyledText`, elide при этом работает), `Alt+1`…`Alt+9` выбирают результат
   по номеру, `Ctrl+T` переключает `~/…` ↔ полные пути.
+- При пустом запросе попап больше не ищет (и не эмбеддит `""`): он показывает
+  приложения, **закреплённые файлы** (`Ctrl+D`, метка ★) и недавно открытые, причём
+  каждый путь сверяется с индексом. `↑` листает персистентную **историю запросов**
+  (`$XDG_STATE_HOME/feagle/history.json`); открытие результата запоминает запрос.
+- `apps_limit = 0` снова принимается, поэтому фильтр Files в попапе работает: его
+  отклоняла валидация запросов, и вместо файлов возвращалась ошибка.
 
 ## 0.4.0 (по-русски) — 2026-10-19
 
