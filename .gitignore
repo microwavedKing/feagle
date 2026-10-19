@@ -42,6 +42,7 @@ htmlcov/
 /AGENTS.md
 /RESEARCH.md
 /HANDOFF.md
+/plan.md
 
 # Local test corpus (public-domain books downloaded for manual testing)
 /testdata/
