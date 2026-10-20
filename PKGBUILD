@@ -1,6 +1,6 @@
 # Maintainer: microwavedKing <239034853+microwavedKing@users.noreply.github.com>
 pkgname=feagle
-pkgver=0.4.0
+pkgver=0.5.0
 pkgrel=1
 pkgdesc="Local semantic file search for Arch Linux + Wayland, fully offline"
 arch=('any')

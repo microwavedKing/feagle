@@ -12,7 +12,7 @@ from a compositor hotkey and opens the result at the right place (a PDF page, a
 source line). Everything stays on your machine: no cloud, no accounts, no
 telemetry.
 
-> **Status:** beta (`0.4.0`). Full-text and semantic search work,
+> **Status:** beta (`0.5.0`). Full-text and semantic search work,
 > Russian word forms are matched through stemming, scanned PDFs and images can be
 > OCR'd, images and videos can be found by a text description (opt-in multimodal
 > embeddings), audio can be transcribed (opt-in, whisper.cpp), results open at a
@@ -829,7 +829,7 @@ their own license — see [NOTICE](NOTICE).
 (страница PDF, строка кода). Всё остаётся на вашей машине: без облака, аккаунтов
 и телеметрии.
 
-> **Статус:** бета (`0.4.0`). Работают полнотекстовый и семантический
+> **Статус:** бета (`0.5.0`). Работают полнотекстовый и семантический
 > поиск, русские словоформы (стемминг), OCR сканированных PDF и картинок, поиск
 > картинок и видео по текстовому описанию (опциональные мультимодальные
 > эмбеддинги), транскрипция аудио (опционально, whisper.cpp), открытие на

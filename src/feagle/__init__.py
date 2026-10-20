@@ -3,4 +3,4 @@
 Everything runs locally: no cloud, no accounts, no telemetry.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
