@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Feagle Search
+Comment=Search indexed files by keyword and meaning
+Exec=feagle pick
+TryExec=feagle
+Icon=feagle
+Terminal=false
+Categories=Utility;FileTools;
+Keywords=feagle;search;find;files;semantic;
+StartupNotify=false

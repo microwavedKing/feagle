@@ -101,6 +101,22 @@ def test_completions_are_installed_by_the_package():
         assert relative in pkgbuild
 
 
+def test_packaging_installs_the_icon_and_desktop_entry():
+    pkgbuild = (ROOT / "PKGBUILD").read_text(encoding="utf-8")
+    assert "assets/feagle.svg" in pkgbuild
+    assert "assets/feagle.png" in pkgbuild
+    assert "assets/feagle.desktop" in pkgbuild
+    assert "hicolor/scalable/apps/feagle.svg" in pkgbuild
+    assert "hicolor/512x512/apps/feagle.png" in pkgbuild
+    assert "/usr/share/applications/feagle.desktop" in pkgbuild
+
+    desktop = (ROOT / "assets" / "feagle.desktop").read_text(encoding="utf-8")
+    assert "Type=Application" in desktop
+    assert "Icon=feagle" in desktop  # must match the icon file name above
+    assert "Exec=feagle pick" in desktop
+    assert "TryExec=feagle" in desktop
+
+
 #: Public docs quote the version in the places ``scripts/release.py bump`` rewrites.
 #: A hand edit that misses one of them is what these patterns catch.
 _VERSION_DOCS = {

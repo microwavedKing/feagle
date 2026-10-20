@@ -112,11 +112,13 @@
 `units.py` (шаблоны юнитов + установка, `using_packaged()`), `doctor.py` (проверки),
 `setup.py` (TOML-рендер, бэкап, план), `gui.py` (настройки попапа: `SETTINGS`,
 `load_gui`/`save_gui`/`coerce`/`schema`, решение 61), `history.py` (история запросов
-в state-каталоге, решение 62), `bench/` (тонкие CLI-обёртки над
-`feagle.bench`).
-Вне пакета: `man/feagle.1` (man-страница), `completions/` (bash, zsh, fish) — оба
-устанавливает `PKGBUILD`, а `tests/test_cli_docs.py` падает, если команда или опция
-из `build_parser()` не описана в них.
+в state-каталоге, решение 62), `bench/` (тонкие CLI-обёртки над `feagle.bench`).
+
+Пакет ставит и то, что не импортируется: `man/feagle.1`, комплишены (`completions/`)
+и `assets/` — иконки `feagle.svg`/`feagle.png` в hicolor и `feagle.desktop` в
+`/usr/share/applications` (запись «Feagle Search» запускает `feagle pick`).
+`tests/test_cli_docs.py` сверяет man/комплишены с `build_parser()` и проверяет, что
+`PKGBUILD` действительно ставит иконку и desktop-запись.
 
 ## 3. Модель данных (SQLite, схема v3)
 

@@ -77,4 +77,13 @@ package() {
     "$pkgdir/usr/lib/systemd/user/feagle-indexerd.service"
   install -Dm644 systemd/feagle-queryd.service \
     "$pkgdir/usr/lib/systemd/user/feagle-queryd.service"
+
+  # Icon (hicolor) and an application-menu entry. The entry runs `feagle pick`,
+  # so it needs one of the dmenu launchers from the optional dependencies.
+  install -Dm644 assets/feagle.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/feagle.svg"
+  install -Dm644 assets/feagle.png \
+    "$pkgdir/usr/share/icons/hicolor/512x512/apps/feagle.png"
+  install -Dm644 assets/feagle.desktop \
+    "$pkgdir/usr/share/applications/feagle.desktop"
 }

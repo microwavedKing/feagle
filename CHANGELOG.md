@@ -5,7 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-10-20
+
+The launcher popup grew up: its own settings file, a Russian interface, pinned
+files, recent files and a query history, plus the small keys that make it quick
+to use. The package now installs the icon and a desktop entry, so **Feagle
+Search** shows up in the application menu. No breaking changes.
 
 ### Added
 
@@ -28,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recently, all checked against the index. `↑` walks a persistent **query
   history** (`$XDG_STATE_HOME/feagle/history.json`); opening a result records the
   query that found it.
+- The package installs the icon (hicolor: SVG and a 512 px PNG) and a **Feagle
+  Search** desktop entry that runs `feagle pick`; the README now opens with the
+  mark.
+
+### Fixed
+
 - `apps_limit = 0` is accepted again, so the Files filter in the popup works: it
   was rejected by the request validation and returned an error instead of files.
 
@@ -503,7 +514,12 @@ on Wayland.
 
 ---
 
-## Unreleased (по-русски)
+## 0.5.0 (по-русски) — 2026-10-20
+
+Попап-лаунчер повзрослел: свой файл настроек, русский интерфейс, закреплённые файлы,
+недавние файлы и история запросов, плюс быстрые клавиши. Пакет теперь ставит иконку и
+desktop-запись, так что **Feagle Search** появляется в меню приложений. Ломающих
+изменений нет.
 
 ### Добавлено
 
@@ -525,6 +541,11 @@ on Wayland.
   приложения, **закреплённые файлы** (`Ctrl+D`, метка ★) и недавно открытые, причём
   каждый путь сверяется с индексом. `↑` листает персистентную **историю запросов**
   (`$XDG_STATE_HOME/feagle/history.json`); открытие результата запоминает запрос.
+- Пакет ставит иконку (hicolor: SVG и PNG 512 px) и desktop-запись **Feagle Search**,
+  которая запускает `feagle pick`; README теперь открывается лого.
+
+### Исправлено
+
 - `apps_limit = 0` снова принимается, поэтому фильтр Files в попапе работает: его
   отклоняла валидация запросов, и вместо файлов возвращалась ошибка.
 

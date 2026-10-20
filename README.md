@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/feagle.svg" width="120" alt="feagle">
+</p>
+
 # feagle
 
 Local semantic file search for Arch Linux + Wayland.
@@ -74,8 +78,9 @@ feagle setup
 ```
 
 Note that `python-sqlite-vec` is an AUR package too, so the helper has to build
-it as well. The package also installs the `feagle(1)` manual page and shell
-completions for bash, zsh and fish.
+it as well. The package also installs the `feagle(1)` manual page, shell
+completions for bash, zsh and fish, the icon and a **Feagle Search** entry in the
+application menu (it runs `feagle pick`, so install one of the launchers above).
 
 ### With uv or pipx
 
@@ -879,7 +884,9 @@ feagle setup
 ```
 
 Учтите: `python-sqlite-vec` — тоже AUR-пакет, хелпер соберёт и его. Пакет также
-ставит man-страницу `feagle(1)` и комплишены для bash, zsh и fish.
+ставит man-страницу `feagle(1)`, комплишены для bash, zsh и fish, иконку и запись
+**Feagle Search** в меню приложений (она запускает `feagle pick`, поэтому нужен один
+из лаунчеров выше).
 
 ### Через uv или pipx
 
