@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `↑` no longer jumps into the query history from anywhere in the browse grid:
+  with an empty field the history opens only from the first row, so on every
+  other row `↑` moves the selection and leaves the list (and the query) alone.
+
 ## [0.5.0] - 2026-10-20
 
 The launcher popup grew up: its own settings file, a Russian interface, pinned
@@ -513,6 +521,14 @@ on Wayland.
 [0.1.0]: https://github.com/microwavedKing/feagle/releases/tag/v0.1.0
 
 ---
+
+## Unreleased (по-русски)
+
+### Исправлено
+
+- `↑` больше не прыгает в историю запросов с любой строки browse-сетки: при пустом
+  поле история открывается только с первой строки, а на остальных `↑` двигает
+  выделение и не трогает ни список, ни запрос.
 
 ## 0.5.0 (по-русски) — 2026-10-20
 

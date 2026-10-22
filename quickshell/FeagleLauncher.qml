@@ -192,11 +192,13 @@ PanelWindow {
     }
 
     /// Whether ↑/↓ should walk the history instead of the selection: Up on an
-    /// empty field opens it, Down only once inside, and Ctrl+P/N stay on the list.
+    /// empty field opens it only from the first row (otherwise it moves the
+    /// selection), Down only once inside, and Ctrl+P/N stay on the list.
     function wantsHistory(delta) {
         if (root.historyIndex >= 0)
             return true;
-        return delta < 0 && field.text.length === 0 && (feagle.history || []).length > 0;
+        return delta < 0 && field.text.length === 0 && root.currentIndex === 0
+            && (feagle.history || []).length > 0;
     }
 
     /// Walk the history: -1 is the empty input, 0 the newest query.
